@@ -1,0 +1,3392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>License Manager</title>
+<link rel="icon" href="https://www.sil.org/sites/default/files/favicon.ico">
+<style>
+/* ── RESET & BASE ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Google Sans', Roboto, Arial, sans-serif; font-size: 14px;
+       background: #f8f9fa; color: #202124; min-height: 100vh; }
+a { color: #1a73e8; text-decoration: none; }
+a:hover { text-decoration: underline; }
+button { cursor: pointer; font-family: inherit; font-size: 14px; border: none; }
+input, select, textarea { font-family: inherit; font-size: 14px; }
+
+/* ── LOADING SCREEN ──────────────────────────────────────── */
+#loading {
+  position: fixed; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; background: #fff; z-index: 9999;
+}
+#loading .spinner {
+  width: 40px; height: 40px; border: 4px solid #e8eaed;
+  border-top-color: #1a73e8; border-radius: 50%; animation: spin 0.8s linear infinite;
+  margin-bottom: 16px;
+}
+#loading p { color: #5f6368; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── APP LAYOUT ───────────────────────────────────────────── */
+#app { display: none; flex-direction: row; min-height: 100vh; }
+
+/* ── SIDEBAR NAV ──────────────────────────────────────────── */
+.nav {
+  width: 190px; flex-shrink: 0; background: #CCEDF9;
+  border-right: 1px solid #a8d8f0; display: flex; flex-direction: column;
+  position: sticky; top: 0; height: 100vh; overflow-y: auto; z-index: 10;
+}
+.nav-tabs { display: flex; flex-direction: column; padding: 5px 0; flex: 1; }
+.nav-btn {
+  background: transparent; border: none; border-left: 3px solid transparent;
+  padding: 9px 13px; font-size: 13px; color: #5f6368; cursor: pointer;
+  font-family: inherit; text-align: left; display: flex; align-items: center;
+  gap: 8px; width: 100%; white-space: nowrap;
+}
+.nav-btn:hover { background: rgba(0,0,0,.05); color: #202124; }
+.nav-btn.active { color: #1a73e8; border-left-color: #1a73e8; background: rgba(26,115,232,.08); font-weight: bold; }
+.nav-label { overflow: hidden; text-overflow: ellipsis; }
+.nav-sub { overflow: hidden; }
+.nav-sub-btn {
+  background: transparent; border: none; border-left: 3px solid transparent;
+  padding: 6px 13px 6px 30px; font-size: 12px; color: #5f6368; cursor: pointer;
+  font-family: inherit; text-align: left; display: flex; align-items: center;
+  gap: 6px; width: 100%;
+}
+.nav-sub-btn:hover { background: rgba(0,0,0,.05); color: #202124; }
+.nav-sub-btn.active { color: #1a73e8; border-left-color: #1a73e8; font-weight: 500; }
+.nav-end { padding: 8px 0; border-top: 1px solid #a8d8f0; }
+.nav-footer { padding: 10px 13px; border-top: 1px solid #a8d8f0; font-size: 11px; color: #5f6368; }
+.nav-footer-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 4px; }
+.nav-footer a { color: #1a73e8; text-decoration: none; font-size: 11px; }
+.nav-footer a:hover { text-decoration: underline; }
+
+/* Collapsed (mobile) */
+.nav { transition: transform .2s; }
+#nav-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.3); z-index:9; }
+.nav-mobile-toggle {
+  display: none; position: fixed; top: 10px; left: 10px; z-index: 11;
+  background: #CCEDF9; border: 1px solid #a8d8f0; border-radius: 4px;
+  padding: 6px 8px; cursor: pointer; color: #5f6368;
+}
+@media (max-width: 700px) {
+  .nav { position: fixed; top: 0; left: 0; height: 100vh; transform: translateX(-100%); z-index: 10; }
+  .nav.open { transform: translateX(0); }
+  .nav.open ~ #nav-overlay { display: block; }
+  .nav-mobile-toggle { display: flex; align-items: center; }
+  #app { padding-left: 0; }
+  #main { padding-top: 44px; }
+}
+
+/* ── MAIN CONTENT ─────────────────────────────────────────── */
+#main { flex: 1; overflow-y: auto; min-width: 0; }
+.tab-panel { display: none; padding: 24px; max-width: 1100px; margin: 0 auto; }
+.tab-panel.active { display: block; }
+
+/* ── RENEWAL BANNER ───────────────────────────────────────── */
+#renewal-banner {
+  background: #e8f0fe; border-left: 4px solid #1a73e8; border-radius: 4px;
+  padding: 14px 18px; margin-bottom: 20px; display: none;
+}
+#renewal-banner strong { color: #1a73e8; }
+
+/* ── SECTION HEADERS ──────────────────────────────────────── */
+.section-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px;
+}
+.section-header h2 { font-size: 22px; font-weight: 600; color: #202124; letter-spacing: -.3px; }
+
+/* ── SEARCH INPUT ─────────────────────────────────────────── */
+.search-wrap { position: relative; margin-bottom: 20px; }
+.search-wrap input {
+  width: 100%; padding: 10px 16px 10px 42px; border: 1px solid #dadce0;
+  border-radius: 24px; outline: none; font-size: 14px; background: #fff;
+  transition: border-color .15s, box-shadow .15s;
+}
+.search-wrap input:focus { border-color: #1a73e8; box-shadow: 0 0 0 2px #c2d7f8; }
+.search-wrap .search-icon {
+  position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+  color: #9aa0a6; pointer-events: none; font-size: 16px;
+}
+
+/* ── CATALOG CARDS ────────────────────────────────────────── */
+.catalog-section { margin-bottom: 32px; }
+.catalog-section-title {
+  font-size: 12px; font-weight: 700; color: #5f6368; text-transform: uppercase;
+  letter-spacing: .6px; margin-bottom: 12px; padding-bottom: 8px;
+  border-bottom: 2px solid #e0e0e0;
+}
+.catalog-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px;
+}
+.lic-card {
+  background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px;
+  cursor: pointer; transition: box-shadow .15s, border-color .15s;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.lic-card:hover { box-shadow: 0 3px 10px rgba(0,0,0,.12); border-color: #1a73e8; }
+.lic-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; }
+.lic-card-logo { width: 24px; height: 24px; object-fit: contain; flex-shrink: 0; border-radius: 3px; }
+.lic-card-name { font-size: 13px; font-weight: 600; color: #202124; line-height: 1.3; }
+.lic-card-footer { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.lic-card-price { font-size: 12px; font-weight: 500; color: #202124; }
+
+/* ── CATALOG EMPTY ────────────────────────────────────────── */
+#catalog-empty { text-align:center; padding: 64px 24px; color: #9aa0a6; font-size:15px; }
+
+/* ── DETAIL MODAL (browse) ────────────────────────────────── */
+#detail-logo-img { max-height: 64px; max-width: 180px; object-fit: contain; margin-bottom: 12px; display: block; }
+
+/* ── OLD BROWSE LIST (keep for reference, unused) ─────────── */
+#browse-list th {
+  background: #f8f9fa; padding: 10px 14px; text-align: left;
+  font-size: 12px; font-weight: 600; color: #5f6368; text-transform: uppercase;
+  letter-spacing: .5px; border-bottom: 1px solid #e0e0e0;
+  position: sticky; top: 0; z-index: 1;
+}
+#browse-list td { padding: 11px 14px; border-bottom: 1px solid #f1f3f4; font-size: 14px; }
+#browse-list tbody tr { cursor: pointer; transition: background .1s; }
+#browse-list tbody tr:hover td { background: #f8f9fa; }
+#browse-list tbody tr.selected td { background: #e8f0fe; }
+#browse-list tbody tr:last-child td { border-bottom: none; }
+#browse-detail { flex: 1; padding: 28px; overflow-y: auto; }
+.detail-empty { text-align: center; padding: 64px 24px; color: #9aa0a6; }
+.detail-empty .detail-icon { font-size: 40px; margin-bottom: 12px; opacity: .5; }
+.detail-name { font-size: 22px; font-weight: 500; margin-bottom: 8px; }
+.detail-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 20px; }
+.detail-price-block { margin-bottom: 20px; }
+.detail-price { font-size: 20px; font-weight: 500; color: #202124; }
+.detail-unit  { font-size: 13px; color: #5f6368; margin-left: 4px; }
+.detail-notes { font-size: 14px; color: #3c4043; line-height: 1.7; margin-bottom: 28px; white-space: pre-wrap; }
+.detail-no-notes { font-size: 13px; color: #9aa0a6; font-style: italic; margin-bottom: 28px; }
+.detail-gtis-notice {
+  background: #e8f0fe; border-left: 3px solid #1a73e8; border-radius: 4px;
+  padding: 12px 16px; font-size: 13px; color: #1a73e8; margin-bottom: 24px;
+}
+
+/* ── SUBSCRIPTION LIST ────────────────────────────────────── */
+.sub-list { display: flex; flex-direction: column; gap: 12px; }
+.sub-card {
+  background: #fff; border-radius: 8px; padding: 16px 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.1);
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.sub-card .sub-info { flex: 1; min-width: 200px; }
+.sub-card .sub-name { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
+.sub-card .sub-meta { font-size: 13px; color: #5f6368; }
+.sub-card .sub-actions { display: flex; gap: 8px; align-items: center; }
+.badge {
+  display: inline-block; padding: 3px 10px; border-radius: 12px;
+  font-size: 12px; font-weight: 500;
+}
+.badge-active   { background: #e6f4ea; color: #137333; }
+.badge-opted-in { background: #e8f0fe; color: #1a73e8; }
+.badge-expired  { background: #fce8e6; color: #c5221f; }
+.badge-pending  { background: #fef3e2; color: #e37400; }
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { background: #e8eaed; }
+.sort-icon { font-size: 11px; color: #9aa0a6; margin-left: 3px; }
+
+/* ── BUTTONS ─────────────────────────────────────────────── */
+.btn {
+  padding: 8px 16px; border-radius: 4px; font-weight: 500;
+  transition: background .15s, opacity .15s;
+}
+.btn-primary   { background: #1a73e8; color: #fff; }
+.btn-primary:hover { background: #1557b0; }
+.btn-outline   { background: #fff; color: #1a73e8; border: 1px solid #dadce0; }
+.btn-outline:hover { background: #f1f3f4; }
+.btn-danger    { background: #fff; color: #d93025; border: 1px solid #dadce0; }
+.btn-danger:hover { background: #fce8e6; }
+.btn-sm        { padding: 5px 12px; font-size: 13px; }
+.btn:disabled  { opacity: .5; cursor: not-allowed; }
+
+/* ── DATA TABLE ───────────────────────────────────────────── */
+.table-wrap { background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+table { width: 100%; border-collapse: collapse; }
+th {
+  background: #f8f9fa; padding: 12px 16px; text-align: left;
+  font-size: 12px; font-weight: 600; color: #5f6368; text-transform: uppercase;
+  letter-spacing: .5px; border-bottom: 1px solid #e0e0e0;
+}
+td {
+  padding: 12px 16px; border-bottom: 1px solid #f1f3f4;
+  font-size: 14px; color: #202124;
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #f8f9fa; }
+.table-empty { text-align: center; color: #9aa0a6; padding: 48px 24px !important; }
+
+/* ── MODAL ────────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,.4);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 200; padding: 16px;
+}
+.modal {
+  background: #fff; border-radius: 8px; width: 100%; max-width: 480px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.2);
+  display: flex; flex-direction: column; max-height: 90vh;
+}
+.modal-header {
+  padding: 20px 24px 16px; border-bottom: 1px solid #e0e0e0;
+  display: flex; justify-content: space-between; align-items: flex-start;
+}
+.modal-header h3 { font-size: 16px; font-weight: 500; margin-bottom: 4px; }
+.modal-header .modal-subtitle { font-size: 13px; color: #5f6368; }
+.modal-close { background: none; color: #5f6368; font-size: 20px; line-height: 1; padding: 2px; }
+.modal-close:hover { color: #202124; }
+.modal-body { padding: 20px 24px; overflow-y: auto; flex: 1; }
+.modal-footer { padding: 12px 24px 20px; display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ── FORM ELEMENTS ────────────────────────────────────────── */
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; color: #3c4043; }
+.form-control {
+  width: 100%; padding: 9px 12px; border: 1px solid #dadce0; border-radius: 4px;
+  outline: none; transition: border-color .15s, box-shadow .15s;
+}
+.form-control:focus { border-color: #1a73e8; box-shadow: 0 0 0 2px #c2d7f8; }
+.form-hint { font-size: 12px; color: #5f6368; margin-top: 4px; }
+
+/* ── TYPEAHEAD ────────────────────────────────────────────── */
+.typeahead-wrap { position: relative; }
+.typeahead-list {
+  position: absolute; top: 100%; left: 0; right: 0;
+  background: #fff; border: 1px solid #dadce0; border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.15); z-index: 50;
+  max-height: 220px; overflow-y: auto; display: none;
+}
+.typeahead-list.open { display: block; }
+.typeahead-item {
+  padding: 10px 14px; cursor: pointer; font-size: 14px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.typeahead-item:hover { background: #f1f3f4; }
+.typeahead-item .ta-badge { font-size: 11px; color: #1a73e8; font-weight: 500; }
+.typeahead-item-new { color: #f9ab00; font-size: 13px; }
+.typeahead-item-new:hover { background: #fff8e1; }
+.typeahead-msg { padding: 12px 14px; font-size: 13px; color: #9aa0a6; }
+
+/* ── ADMIN PANEL ──────────────────────────────────────────── */
+.admin-tabs { display: flex; gap: 0; border-bottom: 1px solid #e0e0e0; margin-bottom: 24px; }
+.admin-tab-btn {
+  background: none; padding: 10px 18px; color: #5f6368;
+  font-weight: 500; border-bottom: 2px solid transparent;
+}
+.admin-tab-btn:hover { color: #202124; }
+.admin-tab-btn.active { color: #1a73e8; border-bottom-color: #1a73e8; }
+.admin-section { display: none; }
+.admin-section.active { display: block; }
+
+/* ── INLINE EDITABLE TABLE ROW ────────────────────────────── */
+.edit-input {
+  width: 100%; border: 1px solid #1a73e8; border-radius: 3px;
+  padding: 4px 8px; font-size: 13px;
+}
+
+/* ── TOAST NOTIFICATION ───────────────────────────────────── */
+#toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: #323232; color: #fff; padding: 12px 20px; border-radius: 4px;
+  font-size: 14px; z-index: 9999; opacity: 0;
+  transition: opacity .25s; pointer-events: none; max-width: 400px; text-align: center;
+}
+#toast.show { opacity: 1; }
+#toast.error { background: #b71c1c; }
+
+/* ── FILTERS BAR ──────────────────────────────────────────── */
+.filter-bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.filter-bar input, .filter-bar select {
+  padding: 8px 12px; border: 1px solid #dadce0; border-radius: 4px;
+  font-size: 13px; outline: none; background: #fff;
+}
+.filter-bar input:focus, .filter-bar select:focus { border-color: #1a73e8; }
+
+/* ── EMPTY STATE ──────────────────────────────────────────── */
+.empty-state {
+  text-align: center; padding: 64px 24px; color: #9aa0a6;
+}
+.empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; }
+.empty-state p { font-size: 15px; }
+
+/* ── SK SELECTOR ──────────────────────────────────────────── */
+.sk-selector { margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
+.sk-selector label { font-weight: 500; white-space: nowrap; }
+.sk-selector select { padding: 8px 12px; border: 1px solid #dadce0; border-radius: 4px; }
+
+/* ── SETTINGS FORM ────────────────────────────────────────── */
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 640px) { .settings-grid { grid-template-columns: 1fr; } }
+.settings-actions { margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* ── FEEDBACK BUTTON ──────────────────────────────────────── */
+#feedback-btn {
+  position: fixed; bottom: 24px; right: 24px; z-index: 200;
+  background: #1a73e8; color: #fff; border: none; border-radius: 24px;
+  padding: 10px 18px; font-size: 13px; font-weight: 500;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25); cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
+  transition: background .15s, box-shadow .15s;
+}
+#feedback-btn:hover { background: #1557b0; box-shadow: 0 4px 12px rgba(0,0,0,.3); }
+
+/* ── FAQ ──────────────────────────────────────────────────── */
+#tab-faq details[open] summary span { transform: rotate(45deg); }
+#tab-faq details summary span { display: inline-block; transition: transform .2s; }
+#tab-faq details summary::-webkit-details-marker { display: none; }
+
+/* ── RESPONSIVE ───────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .tab-panel { padding: 16px; }
+  #browse-split { flex-direction: column; }
+  #browse-list  { flex: none; border-right: none; border-bottom: 1px solid #e0e0e0; max-height: 260px; }
+  .sub-card { flex-direction: column; align-items: flex-start; }
+}
+</style>
+</head>
+<body>
+
+<!-- LOADING SCREEN -->
+<div id="loading">
+  <div class="spinner"></div>
+  <p>Loading License Manager…</p>
+</div>
+
+<!-- FIRST-RUN SETUP SCREEN -->
+<div id="setup-screen" style="display:none;max-width:480px;margin:80px auto;padding:0 16px">
+  <div style="background:#fff;border-radius:8px;padding:32px;box-shadow:0 2px 8px rgba(0,0,0,.12)">
+    <h2 style="font-size:20px;font-weight:500;margin-bottom:8px">Welcome to License Manager</h2>
+    <p style="color:#5f6368;margin-bottom:24px">First-time setup: click the button below to create the data
+       spreadsheet. You'll be set as the initial administrator.</p>
+    <p style="font-size:13px;color:#5f6368;margin-bottom:20px">Signed in as: <strong id="setup-email"></strong></p>
+    <button class="btn btn-primary" id="btn-init" style="width:100%;padding:12px">
+      Initialize License Manager
+    </button>
+    <p id="setup-msg" style="margin-top:14px;font-size:13px;text-align:center"></p>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<button class="nav-mobile-toggle" id="nav-mobile-toggle" onclick="toggleNav()" aria-label="Menu">
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="2.5" width="14" height="2" rx="1"/><rect x="1" y="7" width="14" height="2" rx="1"/><rect x="1" y="11.5" width="14" height="2" rx="1"/></svg>
+</button>
+<div id="app">
+  <nav class="nav" id="app-nav">
+    <div class="nav-tabs">
+      <button class="nav-btn active" data-tab="my-subs">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M5 1a1 1 0 0 0-1 1H3a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1h-1a1 1 0 0 0-1-1H5zm0 1h6v1H5V2zM4 5h8v1H4zm0 3h8v1H4zm0 3h5v1H4z"/></svg>
+        <span class="nav-label">My Subscriptions</span>
+      </button>
+      <button class="nav-btn" data-tab="browse" id="nav-catalog-btn">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>
+        <span class="nav-label">Catalog</span>
+      </button>
+      <div class="nav-sub" id="nav-catalog-sub"></div>
+      <button class="nav-btn tab-owner" data-tab="sk-charges" style="display:none">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M1.5 1.5h6l6.7 6.7a1 1 0 0 1 0 1.4L10 13.9a1 1 0 0 1-1.4 0L1.5 7.2V1.5zm3 2a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/></svg>
+        <span class="nav-label">SuiteKey Charges <span id="sk-tab-badge" style="display:none;background:#1a73e8;color:#fff;border-radius:10px;padding:1px 6px;font-size:11px;font-weight:600;margin-left:2px"></span></span>
+      </button>
+      <button class="nav-btn tab-service" data-tab="service-requests" style="display:none">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M14 1H2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h4l2 2 2-2h4a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zM5 9H3V7h2v2zm0-3H3V4h2v2zm4 3H7V7h2v2zm0-3H7V4h2v2zm4 3h-2V7h2v2zm0-3h-2V4h2v2z"/></svg>
+        <span class="nav-label">Service Requests</span>
+      </button>
+      <button class="nav-btn tab-manager" data-tab="my-team" style="display:none">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M6 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0-5a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM1 11v-.5C1 8.6 3.2 7 6 7s5 1.6 5 3.5V11H9.8v-.5C9.8 9.3 8.1 8 6 8S2.2 9.3 2.2 10.5V11H1zm10.5-4a3 3 0 0 0 0-5v1.1a2 2 0 0 1 0 2.9V7zm2.5 4h-1.8v-1h.8C13 8.7 12 7.6 11 7.1V6c1.9.5 3 2 3 3.5V11c0 .3-.2.5-.5.5h-.5z"/></svg>
+        <span class="nav-label">My Team</span>
+      </button>
+      <button class="nav-btn" data-tab="faq">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm.3 10.5H7.7v-1.2h.6v1.2zm.5-3.2c-.5.3-.8.6-.8 1.1H7c0-.9.4-1.4 1.1-1.8.6-.3.9-.7.9-1.2 0-.6-.5-1-1.2-1-.8 0-1.2.5-1.2 1.3H5.5C5.5 5.5 6.3 4 8 4c1.5 0 2.5.9 2.5 2.2 0 1-.6 1.7-1.7 2.1z"/></svg>
+        <span class="nav-label">FAQ</span>
+      </button>
+      <div class="nav-end">
+        <button class="nav-btn tab-admin" data-tab="admin" style="display:none">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M6.5 1l-.4 1.4a5.5 5.5 0 0 0-1.2.6L3.5 2.6 2 5.2l1.2 1.1A5.5 5.5 0 0 0 3 8a5.5 5.5 0 0 0 .2 1.7L2 10.8l1.5 2.6 1.4-.4a5.5 5.5 0 0 0 1.2.6L6.5 15h3l.4-1.4a5.5 5.5 0 0 0 1.2-.6l1.4.4L14 10.8l-1.2-1.1A5.5 5.5 0 0 0 13 8a5.5 5.5 0 0 0-.2-1.7L14 5.2 12.5 2.6l-1.4.4a5.5 5.5 0 0 0-1.2-.6L9.5 1h-3zm1.5 5a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/></svg>
+          <span class="nav-label">Admin</span>
+        </button>
+      </div>
+    </div>
+    <div class="nav-footer">
+      <div class="nav-footer-email" id="nav-user-email"></div>
+    </div>
+  </nav>
+  <div id="main">
+
+  <!-- ── BROWSE & SUBSCRIBE ─────────────────────────────── -->
+  <div id="tab-browse" class="tab-panel">
+    <div class="section-header">
+      <h2>Available Software Licenses</h2>
+      <p style="color:#5f6368;font-size:13px;margin:2px 0 0">Only available to SIL Staff unless otherwise noted</p>
+    </div>
+    <div class="search-wrap">
+      <span class="search-icon">⌕</span>
+      <input id="browse-search" type="text" placeholder="Search by name, vendor, or category…"
+             autocomplete="off">
+    </div>
+    <div id="catalog-container"></div>
+    <div id="catalog-empty" style="display:none">No licenses match your search.</div>
+  </div>
+
+  <!-- ── LICENSE DETAIL MODAL ──────────────────────────────── -->
+  <div id="detail-modal-backdrop" class="modal-backdrop" style="display:none" role="dialog" aria-modal="true">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-header">
+        <div>
+          <h3 id="detail-modal-title"></h3>
+          <p class="modal-subtitle" id="detail-modal-vendor"></p>
+        </div>
+        <button class="modal-close" id="detail-modal-close">&#10005;</button>
+      </div>
+      <div class="modal-body">
+        <img id="detail-logo-img" src="" alt="" style="display:none">
+        <div id="detail-modal-meta" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px"></div>
+        <div id="detail-modal-price" style="font-size:20px;font-weight:600;color:#202124;margin-bottom:4px"></div>
+        <div id="detail-modal-billing" style="font-size:13px;color:#5f6368;margin-bottom:14px"></div>
+        <div id="detail-modal-gtis" style="display:none;background:#e8f0fe;border-left:3px solid #1a73e8;border-radius:4px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#1a73e8">
+          This license is <strong>covered by GTIS</strong> — no SuiteKey or Ministry ID required.
+        </div>
+        <div id="detail-modal-notes" style="font-size:14px;color:#3c4043;line-height:1.6;margin-bottom:12px;display:none"></div>
+        <a id="detail-modal-link" href="#" target="_blank" rel="noopener"
+           style="display:none;font-size:13px;color:#1a73e8">More information &#8594;</a>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="detail-modal-cancel">Close</button>
+        <button class="btn btn-primary" id="detail-modal-subscribe">Subscribe</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MY SUBSCRIPTIONS ───────────────────────────────── -->
+  <div id="tab-my-subs" class="tab-panel active">
+    <div id="renewal-banner">
+      <strong>Renewal time!</strong> Review your subscriptions below and click <strong>Renew</strong>
+      to keep them active for the next fiscal year.
+    </div>
+    <div class="section-header">
+      <h2>My Subscriptions</h2>
+      <button class="btn btn-primary" onclick="showTab('browse')">+ Add Subscription</button>
+    </div>
+    <div id="my-subs-list" class="sub-list">
+      <p style="color:#9aa0a6">Loading…</p>
+    </div>
+  </div>
+
+  <!-- ── MY TEAM ────────────────────────────────────────── -->
+  <div id="tab-my-team" class="tab-panel">
+    <div class="section-header">
+      <h2>My Team's Subscriptions</h2>
+    </div>
+    <div class="filter-bar">
+      <input id="team-filter" type="text" placeholder="Filter by name or tool…" style="flex:1;min-width:180px">
+      <select id="team-fy-filter"><option value="">All Fiscal Years</option></select>
+    </div>
+    <div class="table-wrap">
+      <table id="team-table">
+        <thead>
+          <tr>
+            <th class="sortable" data-col="userEmail">User <span class="sort-icon">⇅</span></th>
+            <th class="sortable" data-col="licenseName">Tool <span class="sort-icon">⇅</span></th>
+            <th class="sortable" data-col="suiteKey">SuiteKey <span class="sort-icon">⇅</span></th>
+            <th class="sortable" data-col="startDate">Start Date <span class="sort-icon">⇅</span></th>
+            <th class="sortable" data-col="fy">FY <span class="sort-icon">⇅</span></th>
+            <th class="sortable" data-col="status">Status <span class="sort-icon">⇅</span></th>
+          </tr>
+        </thead>
+        <tbody id="team-tbody">
+          <tr><td class="table-empty" colspan="6">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── MY SUITEKEY CHARGES ────────────────────────────── -->
+  <div id="tab-sk-charges" class="tab-panel">
+    <div class="section-header">
+      <h2>SuiteKey Charges</h2>
+      <button class="btn btn-outline btn-sm" id="btn-refresh-sk">↻ Refresh</button>
+    </div>
+
+    <!-- Pending Approvals (all owned SuiteKeys) -->
+    <div id="sk-pending-wrap" style="display:none;margin-bottom:28px">
+      <h3 style="font-size:15px;font-weight:500;color:#e37400;margin-bottom:12px;
+                 display:flex;align-items:center;gap:8px">
+        Pending Approvals
+        <span id="sk-pending-count" style="background:#e37400;color:#fff;border-radius:12px;
+               padding:1px 9px;font-size:12px;font-weight:600"></span>
+      </h3>
+      <div id="sk-pending-list" class="sub-list"></div>
+    </div>
+
+    <!-- All subscriptions across owned SuiteKeys -->
+    <div class="section-header" style="margin-bottom:10px">
+      <h3 style="font-size:15px;font-weight:500;color:#202124">All Subscriptions</h3>
+    </div>
+    <div class="filter-bar" style="margin-bottom:12px">
+      <input id="sk-filter-user"   type="text" placeholder="Filter by user…"    style="flex:1;min-width:120px">
+      <input id="sk-filter-tool"   type="text" placeholder="Filter by license…" style="flex:1;min-width:120px">
+      <select id="sk-filter-sk"    style="min-width:110px"><option value="">All SuiteKeys</option></select>
+      <select id="sk-filter-status" style="min-width:110px">
+        <option value="">All statuses</option>
+        <option value="pending">Pending</option>
+        <option value="active" selected>Active</option>
+        <option value="declined">Declined</option>
+        <option value="revoked">Revoked</option>
+      </select>
+      <select id="sk-filter-fy" style="min-width:80px"><option value="">All FY</option></select>
+    </div>
+    <div class="table-wrap">
+      <table id="sk-table">
+        <thead>
+          <tr>
+            <th class="sortable" data-col="userEmail">User <span class="sort-icon">⇅</span></th>
+            <th class="sortable" data-col="licenseName">License <span class="sort-icon">⇅</span></th>
+            <th class="sortable" data-col="suiteKey">SuiteKey <span class="sort-icon">⇅</span></th>
+            <th class="sortable" data-col="startDate">Start Date <span class="sort-icon">⇅</span></th>
+            <th class="sortable" data-col="fy">FY <span class="sort-icon">⇅</span></th>
+            <th class="sortable" data-col="status">Status <span class="sort-icon">⇅</span></th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="sk-tbody">
+          <tr><td class="table-empty" colspan="7">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Audit log across all owned SuiteKeys -->
+    <div style="margin-top:28px">
+      <h3 style="font-size:15px;font-weight:500;color:#202124;margin-bottom:12px">Audit Log</h3>
+      <div class="filter-bar" style="margin-bottom:12px">
+        <input id="sk-audit-filter-user" type="text" placeholder="Filter by subscriber…" style="flex:1;min-width:140px">
+        <select id="sk-audit-filter-action">
+          <option value="">All actions</option>
+          <option value="requested">Requested</option>
+          <option value="approved">Approved</option>
+          <option value="declined">Declined</option>
+          <option value="revoked">Revoked</option>
+          <option value="cancelled">Cancelled</option>
+          <option value="sk_verified">SK Verified</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table id="sk-audit-table">
+          <thead>
+            <tr>
+              <th class="sortable" data-col="timestamp">When <span class="sort-icon">↓</span></th>
+              <th class="sortable" data-col="action">Action <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="userEmail">Subscriber <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="licenseName">License <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="suiteKey">SuiteKey <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="performedBy">Performed By <span class="sort-icon">⇅</span></th>
+            </tr>
+          </thead>
+          <tbody id="sk-audit-tbody">
+            <tr><td class="table-empty" colspan="6">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ADMIN PANEL ────────────────────────────────────── -->
+  <div id="tab-admin" class="tab-panel">
+    <div class="admin-tabs">
+      <button class="admin-tab-btn active" data-section="catalog">Catalog</button>
+      <button class="admin-tab-btn" data-section="all-subs">All Subscriptions</button>
+      <button class="admin-tab-btn" data-section="audit">Audit Log</button>
+      <button class="admin-tab-btn" data-section="finance">Finance Export</button>
+      <button class="admin-tab-btn" data-section="suitekeys">SuiteKeys</button>
+      <button class="admin-tab-btn" data-section="ministry">Ministry IDs</button>
+      <button class="admin-tab-btn" data-section="import">Import</button>
+      <button class="admin-tab-btn" data-section="settings">Settings</button>
+    </div>
+
+    <!-- Catalog section -->
+    <div id="admin-catalog" class="admin-section active">
+      <div class="section-header">
+        <h2>License Catalog</h2>
+        <button class="btn btn-primary btn-sm" id="btn-add-license">+ Add License</button>
+      </div>
+      <div class="filter-bar" style="margin-bottom:12px">
+        <input id="cat-filter" type="text" placeholder="Filter by name, vendor, category…" style="flex:1;min-width:180px">
+        <select id="cat-filter-active">
+          <option value="">All licenses</option>
+          <option value="true">Active only</option>
+          <option value="false">Inactive only</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table id="catalog-table">
+          <thead>
+            <tr>
+              <th class="sortable" data-col="name">Name <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="vendor">Vendor <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="category">Category <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="price">Price <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="billingCycle">Billing <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="gtisSponsored">Paid By <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="active">Active <span class="sort-icon">⇅</span></th>
+            </tr>
+          </thead>
+          <tbody id="catalog-tbody">
+            <tr><td class="table-empty" colspan="8">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- All subscriptions section -->
+    <div id="admin-all-subs" class="admin-section">
+      <div class="section-header">
+        <h2>All Subscriptions</h2>
+        <button class="btn btn-outline btn-sm" id="btn-refresh-subs">↻ Refresh</button>
+      </div>
+      <div class="filter-bar">
+        <input id="subs-filter-user" type="text" placeholder="Filter by user…" style="flex:1;min-width:140px">
+        <input id="subs-filter-tool" type="text" placeholder="Filter by tool…" style="flex:1;min-width:140px">
+        <input id="subs-filter-sk"   type="text" placeholder="Filter by SuiteKey…" style="flex:1;min-width:140px">
+        <select id="subs-filter-status">
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="approved">Approved (pending activation)</option>
+          <option value="active">Active</option>
+          <option value="declined">Declined</option>
+          <option value="revoked">Revoked</option>
+          <option value="cancelled">Cancelled</option>
+          <option value="expired">Expired</option>
+        </select>
+        <select id="subs-filter-fy"><option value="">All FY</option></select>
+      </div>
+      <div class="table-wrap">
+        <table id="all-subs-table">
+          <thead>
+            <tr>
+              <th class="sortable" data-col="userEmail">User <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="licenseName">Tool <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="suiteKey">SuiteKey <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="startDate">Start Date <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="fy">FY <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="status">Status <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="renewalStatus">Renewal <span class="sort-icon">⇅</span></th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="all-subs-tbody">
+            <tr><td class="table-empty" colspan="8">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Audit Log section -->
+    <div id="admin-audit" class="admin-section">
+      <div class="section-header">
+        <h2>Audit Log</h2>
+        <button class="btn btn-outline btn-sm" id="btn-refresh-audit">↻ Refresh</button>
+      </div>
+      <div class="filter-bar">
+        <input id="audit-filter-user" type="text" placeholder="Filter by subscriber…" style="flex:1;min-width:140px">
+        <input id="audit-filter-sk"   type="text" placeholder="Filter by SuiteKey…"  style="flex:1;min-width:140px">
+        <select id="audit-filter-action">
+          <option value="">All actions</option>
+          <option value="requested">Requested</option>
+          <option value="auto_approved">Auto Approved</option>
+          <option value="approved">Approved</option>
+          <option value="declined">Declined</option>
+          <option value="revoked">Revoked</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table id="admin-audit-table">
+          <thead>
+            <tr>
+              <th class="sortable" data-col="timestamp">When <span class="sort-icon">↓</span></th>
+              <th class="sortable" data-col="action">Action <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="userEmail">Subscriber <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="licenseName">License <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="suiteKey">SuiteKey <span class="sort-icon">⇅</span></th>
+              <th class="sortable" data-col="performedBy">Performed By <span class="sort-icon">⇅</span></th>
+            </tr>
+          </thead>
+          <tbody id="audit-tbody">
+            <tr><td class="table-empty" colspan="6">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Finance Export section -->
+    <div id="admin-finance" class="admin-section">
+      <div class="section-header"><h2>Finance Export</h2></div>
+      <p style="color:#5f6368;font-size:13px;margin-bottom:20px">
+        Exports active and approved subscriptions with pro-rated costs for the selected date range (filtered by subscription start date).
+        Licenses marked "Pro-rated" calculate cost as a fraction of the annual price based on months remaining until renewal.
+      </p>
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:20px">
+        <div class="form-group" style="margin:0">
+          <label style="font-size:13px;color:#5f6368">From</label>
+          <input type="date" id="finance-start" class="form-control" style="width:160px">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label style="font-size:13px;color:#5f6368">To</label>
+          <input type="date" id="finance-end" class="form-control" style="width:160px">
+        </div>
+        <button class="btn btn-primary" id="btn-finance-export">Export CSV</button>
+        <button class="btn btn-outline" id="btn-finance-preview">Preview</button>
+      </div>
+      <div id="finance-preview-wrap" style="display:none">
+        <div class="table-wrap">
+          <table id="finance-table">
+            <thead>
+              <tr>
+                <th>User Email</th>
+                <th>License</th>
+                <th>SuiteKey</th>
+                <th style="text-align:right">Pro-Rated Cost</th>
+                <th>Date Requested</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="finance-tbody">
+            </tbody>
+          </table>
+        </div>
+        <p id="finance-total" style="font-weight:500;margin-top:12px;text-align:right"></p>
+      </div>
+    </div>
+
+    <!-- Settings section -->
+    <div id="admin-settings" class="admin-section">
+      <div class="section-header"><h2>Settings</h2></div>
+      <div class="settings-grid">
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:6px">Permissions Sheet ID or URL
+            <a id="link-perm-sheet" href="#" target="_blank" rel="noopener" style="display:none;color:#1a73e8" title="Open in Google Sheets"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M10 1h5v5h-1.5V3.56L7.28 9.78 6.22 8.72l6.22-6.22H10V1zm-8 2h5v1.5H3.5v8h8V8H13v5H2V3z"/></svg></a>
+          </label>
+          <input id="set-perm-id" class="form-control" placeholder="Sheet ID or full URL">
+          <p class="form-hint">Same permissions sheet used by Budget Tracker</p>
+        </div>
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:6px">Staff Hierarchy Sheet ID or URL
+            <a id="link-hier-sheet" href="#" target="_blank" rel="noopener" style="display:none;color:#1a73e8" title="Open in Google Sheets"><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M10 1h5v5h-1.5V3.56L7.28 9.78 6.22 8.72l6.22-6.22H10V1zm-8 2h5v1.5H3.5v8h8V8H13v5H2V3z"/></svg></a>
+          </label>
+          <input id="set-hier-id" class="form-control" placeholder="Sheet ID or full URL">
+          <p class="form-hint">Accessible only to the script owner — not exposed to users</p>
+        </div>
+        <div class="form-group" style="grid-column:1/-1">
+          <label>License Manager Emails</label>
+          <input id="set-admin-emails" class="form-control" placeholder="email1@org.com, email2@org.com">
+          <p class="form-hint">Comma-separated list of admins who can manage the catalog</p>
+        </div>
+      </div>
+      <div class="settings-actions">
+        <button class="btn btn-primary" id="btn-save-settings">Save Settings</button>
+        <button class="btn btn-outline" id="btn-sync-cache">Sync Permissions Cache</button>
+        <button class="btn btn-outline" id="btn-send-renewal">Send Test Renewal Email</button>
+      </div>
+      <p id="settings-msg" style="margin-top:12px;font-size:13px"></p>
+    </div>
+
+    <!-- Ministry IDs section -->
+    <div id="admin-ministry" class="admin-section">
+      <div class="section-header"><h2>Ministry IDs</h2></div>
+      <p style="color:#5f6368;font-size:13px;margin-bottom:16px">
+        Each staff member has at most one 6-digit Ministry ID. IDs are pre-filled when staff subscribe using Ministry Account billing. Use this table to add or correct entries.
+      </p>
+      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:flex-end">
+        <div>
+          <label style="font-size:12px;color:#5f6368;display:block;margin-bottom:4px">Email</label>
+          <input type="email" id="min-new-email" class="form-control" placeholder="staff@sil.org" style="width:240px">
+        </div>
+        <div>
+          <label style="font-size:12px;color:#5f6368;display:block;margin-bottom:4px">Ministry ID</label>
+          <input type="text" id="min-new-id" class="form-control" placeholder="6 digits" maxlength="6" style="width:100px;letter-spacing:2px">
+        </div>
+        <button class="btn btn-primary" id="btn-min-save" style="flex-shrink:0">Save</button>
+      </div>
+      <p id="min-msg" style="font-size:13px;margin-bottom:12px"></p>
+      <div class="search-wrap" style="max-width:360px;margin-bottom:16px">
+        <span class="search-icon">&#9906;</span>
+        <input type="text" id="min-search" placeholder="Filter by email or Ministry ID…">
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Ministry ID</th>
+              <th style="width:80px"></th>
+            </tr>
+          </thead>
+          <tbody id="min-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- SuiteKeys section -->
+    <div id="admin-suitekeys" class="admin-section">
+      <div class="section-header">
+        <h2>SuiteKey Owners</h2>
+      </div>
+      <div class="search-wrap" style="max-width:360px;margin-bottom:16px">
+        <span class="search-icon">&#9906;</span>
+        <input type="text" id="sk-search" placeholder="Filter by SuiteKey, owner, or description…">
+      </div>
+      <div class="table-wrap">
+        <table id="admin-sk-table">
+          <thead>
+            <tr>
+              <th>SuiteKey</th>
+              <th>Ownership</th>
+              <th>Description</th>
+              <th>Owner</th>
+              <th style="width:80px"></th>
+            </tr>
+          </thead>
+          <tbody id="admin-sk-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Import section -->
+    <div id="admin-import" class="admin-section">
+      <div class="section-header"><h2>Import Subscriptions</h2></div>
+      <p style="color:#5f6368;font-size:13px;margin-bottom:16px">
+        Paste a CSV with existing subscriptions to import them directly as active — no approval emails, no SuiteKey manager notifications.<br>
+        Required columns: <strong>userEmail</strong>, <strong>licenseName</strong>, <strong>suiteKey</strong>.
+        Optional: <strong>startDate</strong> (YYYY-MM-DD), <strong>fy</strong> (fiscal year number).
+        The first row must be a header row. Column order doesn't matter.<br>
+        For Ministry Account billing, enter the 6-digit Ministry ID (or <code style="font-size:11px;background:#f1f3f4;padding:1px 4px;border-radius:3px">MIN:123456</code>) in the <strong>suiteKey</strong> column.
+      </p>
+      <div class="form-group" style="margin-bottom:12px">
+        <textarea id="import-csv" class="form-control" rows="10"
+          style="font-family:monospace;font-size:12px;resize:vertical"
+          placeholder="userEmail,licenseName,suiteKey,startDate,fy&#10;alice@sil.org,Zoom,ABC123,2025-10-01,2026&#10;bob@sil.org,Zoom,DEF456,,&#10;carol@sil.org,Adobe Acrobat,123456,2025-10-01,2026"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn btn-outline" id="btn-import-preview">Preview</button>
+        <button class="btn btn-primary" id="btn-import-confirm" disabled>Import</button>
+      </div>
+      <div id="import-preview-wrap" style="display:none">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>User Email</th><th>License</th><th>SuiteKey</th>
+                <th>Start Date</th><th>FY</th><th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="import-tbody"></tbody>
+          </table>
+        </div>
+        <p id="import-preview-msg" style="font-size:13px;margin-top:10px"></p>
+      </div>
+      <p id="import-result-msg" style="font-size:13px;margin-top:12px"></p>
+    </div>
+  </div>
+
+  <!-- ── SERVICE REQUESTS ─────────────────────────────── -->
+  <div id="tab-service-requests" class="tab-panel">
+    <div class="section-header"><h2>Service Requests</h2></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+      <select id="svc-filter-status" class="form-control" style="width:auto">
+        <option value="approved">Approved — Pending Activation</option>
+        <option value="">All Active Statuses</option>
+        <option value="active">Active</option>
+      </select>
+      <input type="text" id="svc-filter-user" class="form-control" style="width:200px" placeholder="Filter by user…">
+      <input type="text" id="svc-filter-license" class="form-control" style="width:180px" placeholder="Filter by license…">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>User</th><th>License</th><th>SuiteKey</th>
+            <th>Start Date</th><th>FY</th><th>Status</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="svc-tbody"></tbody>
+      </table>
+    </div>
+    <div class="section-header" style="margin-top:32px"><h2>Audit Log</h2></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+      <input type="text" id="svc-audit-filter-user" class="form-control" style="width:200px" placeholder="Filter by user…">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>When</th><th>Action</th><th>User</th>
+            <th>License</th><th>SuiteKey</th><th>Performed By</th>
+          </tr>
+        </thead>
+        <tbody id="svc-audit-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── FAQ ───────────────────────────────────────── -->
+  <div id="tab-faq" class="tab-panel">
+    <div class="section-header"><h2>Frequently Asked Questions</h2></div>
+    <div style="max-width:720px">
+
+      <h3 style="font-size:12px;font-weight:700;color:#5f6368;text-transform:uppercase;letter-spacing:.6px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #e0e0e0">Getting Started</h3>
+
+      <details style="margin-bottom:10px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <summary style="padding:14px 18px;font-weight:500;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+          What is License Manager?
+          <span style="color:#1a73e8;font-size:18px;flex-shrink:0">+</span>
+        </summary>
+        <div style="padding:0 18px 14px;color:#3c4043;font-size:14px;line-height:1.7">
+          License Manager is the central place to browse, subscribe to, and manage software licenses available at SIL. It tracks who is using which tools, which budget is being charged, and handles the full approval and provisioning workflow between users, budget managers, and the GTIS team.
+        </div>
+      </details>
+
+      <details style="margin-bottom:10px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <summary style="padding:14px 18px;font-weight:500;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+          How do I subscribe to a license?
+          <span style="color:#1a73e8;font-size:18px;flex-shrink:0">+</span>
+        </summary>
+        <div style="padding:0 18px 14px;color:#3c4043;font-size:14px;line-height:1.7">
+          Open the <strong>Catalog</strong>, click a license card to see its details, then click <em>Subscribe</em>. You will confirm the email the license is for (defaults to your own) and choose how to pay &mdash; SuiteKey or Ministry Account (for non-GTIS licenses).<br><br>
+          What happens next depends on the license:
+          <ul style="margin:8px 0 0 16px">
+            <li>If you are the SuiteKey owner, or it is GTIS-funded with no manual setup required, the subscription becomes <strong>Active</strong> immediately.</li>
+            <li>If approval is needed, the budget manager is emailed and your subscription shows as <strong>Pending Approval</strong>.</li>
+            <li>If the vendor side requires a seat to be provisioned first, it shows as <strong>Approved &mdash; Pending Activation</strong> until GTIS sets it up.</li>
+          </ul>
+        </div>
+      </details>
+
+      <details style="margin-bottom:10px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <summary style="padding:14px 18px;font-weight:500;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+          Can I subscribe on behalf of someone else?
+          <span style="color:#1a73e8;font-size:18px;flex-shrink:0">+</span>
+        </summary>
+        <div style="padding:0 18px 14px;color:#3c4043;font-size:14px;line-height:1.7">
+          Yes. When the subscription form opens, the <em>License for</em> field is pre-filled with your own email &mdash; just change it to the recipient&rsquo;s address. The subscription will be recorded under their account and they will be notified at each stage.
+        </div>
+      </details>
+
+      <details style="margin-bottom:28px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <summary style="padding:14px 18px;font-weight:500;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+          What do the different subscription statuses mean?
+          <span style="color:#1a73e8;font-size:18px;flex-shrink:0">+</span>
+        </summary>
+        <div style="padding:0 18px 14px;color:#3c4043;font-size:14px;line-height:1.7">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <tr style="background:#f8f9fa"><td style="padding:7px 10px;font-weight:500;width:220px">Pending SK Verification</td><td style="padding:7px 10px">Waiting for a suggested SuiteKey manager to confirm they own that budget.</td></tr>
+            <tr><td style="padding:7px 10px;font-weight:500">Pending Approval</td><td style="padding:7px 10px">The budget manager has been notified and needs to approve or decline.</td></tr>
+            <tr style="background:#f8f9fa"><td style="padding:7px 10px;font-weight:500">Approved &mdash; Pending Activation</td><td style="padding:7px 10px">Approved; GTIS is setting up your account on the vendor side. You will receive an email when it is ready.</td></tr>
+            <tr><td style="padding:7px 10px;font-weight:500">Active</td><td style="padding:7px 10px">Your license is live and ready to use.</td></tr>
+            <tr style="background:#f8f9fa"><td style="padding:7px 10px;font-weight:500">Declined / Revoked</td><td style="padding:7px 10px">Declined by the budget manager, or revoked by an admin.</td></tr>
+          </table>
+          <p style="margin-top:10px">You can withdraw any pending or not-yet-activated subscription at any time from <strong>My Subscriptions</strong>.</p>
+        </div>
+      </details>
+
+      <h3 style="font-size:12px;font-weight:700;color:#5f6368;text-transform:uppercase;letter-spacing:.6px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #e0e0e0">Billing</h3>
+
+      <details style="margin-bottom:10px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <summary style="padding:14px 18px;font-weight:500;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+          What is a SuiteKey?
+          <span style="color:#1a73e8;font-size:18px;flex-shrink:0">+</span>
+        </summary>
+        <div style="padding:0 18px 14px;color:#3c4043;font-size:14px;line-height:1.7">
+          A SuiteKey is a budget cost center code. When you subscribe to a non-GTIS license, you select the SuiteKey that should be charged &mdash; the SuiteKey&rsquo;s budget manager then approves or declines the request. Just enter the code; you do not need the <code style="font-size:12px;background:#f1f3f4;padding:1px 4px;border-radius:3px">~XXXX</code> suffix.
+        </div>
+      </details>
+
+      <details style="margin-bottom:10px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <summary style="padding:14px 18px;font-weight:500;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+          What if my SuiteKey is not listed, or has no manager?
+          <span style="color:#1a73e8;font-size:18px;flex-shrink:0">+</span>
+        </summary>
+        <div style="padding:0 18px 14px;color:#3c4043;font-size:14px;line-height:1.7">
+          If your SuiteKey is not found, or has no manager assigned, you will be asked for the email of the person who manages that budget. They will receive a verification email to confirm or deny ownership. If they confirm, they are registered as the manager and your request moves into the normal approval queue. If they deny it, you will be notified to resubmit with the correct contact.
+        </div>
+      </details>
+
+      <details style="margin-bottom:10px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <summary style="padding:14px 18px;font-weight:500;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+          What is a Ministry Account?
+          <span style="color:#1a73e8;font-size:18px;flex-shrink:0">+</span>
+        </summary>
+        <div style="padding:0 18px 14px;color:#3c4043;font-size:14px;line-height:1.7">
+          A Ministry Account is a personal 6-digit billing identifier for staff whose costs are covered by a ministry rather than a SuiteKey. If you have a Ministry Account on file it will be pre-filled automatically when you subscribe &mdash; no approval is required. Licenses purchased with a Ministry Account are for use by SIL staff only. Contact the License Manager team if your Ministry ID is missing or needs to be corrected.
+        </div>
+      </details>
+
+      <details style="margin-bottom:10px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <summary style="padding:14px 18px;font-weight:500;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+          What does &ldquo;GTIS-funded&rdquo; mean?
+          <span style="color:#1a73e8;font-size:18px;flex-shrink:0">+</span>
+        </summary>
+        <div style="padding:0 18px 14px;color:#3c4043;font-size:14px;line-height:1.7">
+          GTIS centrally covers the cost of certain enterprise licenses. If a license shows the GTIS badge, no SuiteKey or Ministry Account is required &mdash; just subscribe and the cost is handled centrally. Some GTIS licenses activate immediately; others require a seat to be provisioned first.
+        </div>
+      </details>
+
+      <details style="margin-bottom:28px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <summary style="padding:14px 18px;font-weight:500;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+          Are subscriptions refundable?
+          <span style="color:#1a73e8;font-size:18px;flex-shrink:0">+</span>
+        </summary>
+        <div style="padding:0 18px 14px;color:#3c4043;font-size:14px;line-height:1.7">
+          Subscriptions are non-refundable once activated. Cancelling stops future renewals but does not issue a credit for the current billing period. If you are unsure whether you need a license, you can withdraw a pending or not-yet-activated subscription before it goes active.
+        </div>
+      </details>
+
+      <h3 style="font-size:12px;font-weight:700;color:#5f6368;text-transform:uppercase;letter-spacing:.6px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #e0e0e0">Managing Subscriptions</h3>
+
+      <details style="margin-bottom:10px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <summary style="padding:14px 18px;font-weight:500;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+          How do I cancel a subscription?
+          <span style="color:#1a73e8;font-size:18px;flex-shrink:0">+</span>
+        </summary>
+        <div style="padding:0 18px 14px;color:#3c4043;font-size:14px;line-height:1.7">
+          Go to <strong>My Subscriptions</strong> and click <em>Cancel</em> (active) or <em>Withdraw</em> (pending or approved-not-yet-activated). If the license uses a Google Group, you will be removed automatically. Cancellations are non-refundable once the subscription is active.
+        </div>
+      </details>
+
+      <details style="margin-bottom:28px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <summary style="padding:14px 18px;font-weight:500;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+          How does renewal work?
+          <span style="color:#1a73e8;font-size:18px;flex-shrink:0">+</span>
+        </summary>
+        <div style="padding:0 18px 14px;color:#3c4043;font-size:14px;line-height:1.7">
+          All annual licenses get reminders starting <strong>two months before</strong> their renewal date, with weekly follow-ups until you respond.
+          Each reminder includes direct <em>Yes, Renew</em> and <em>No, Don&rsquo;t Renew</em> links &mdash; no need to open the app. You can also respond anytime from <strong>My Subscriptions</strong>.
+        </div>
+      </details>
+
+      <h3 style="font-size:12px;font-weight:700;color:#5f6368;text-transform:uppercase;letter-spacing:.6px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #e0e0e0">For Budget Managers &amp; People Managers</h3>
+
+      <details style="margin-bottom:10px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <summary style="padding:14px 18px;font-weight:500;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+          I own a SuiteKey &mdash; how do I manage approval requests?
+          <span style="color:#1a73e8;font-size:18px;flex-shrink:0">+</span>
+        </summary>
+        <div style="padding:0 18px 14px;color:#3c4043;font-size:14px;line-height:1.7">
+          The <strong>SuiteKey Charges</strong> tab appears automatically if you are registered as a SuiteKey owner. A badge appears when you have pending requests. From there you can approve or decline requests, view all active subscriptions charged to your SuiteKey(s), and review the audit log. You will also receive a reminder email every Monday morning for any requests that are still unanswered.
+        </div>
+      </details>
+
+      <details style="margin-bottom:28px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <summary style="padding:14px 18px;font-weight:500;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+          I am a people manager &mdash; where can I see my team&rsquo;s subscriptions?
+          <span style="color:#1a73e8;font-size:18px;flex-shrink:0">+</span>
+        </summary>
+        <div style="padding:0 18px 14px;color:#3c4043;font-size:14px;line-height:1.7">
+          If you have direct reports in the staff directory, <strong>My Team</strong> appears automatically. It lists all subscriptions for your direct and indirect reports so you can see at a glance who is using which tools.
+        </div>
+      </details>
+
+      <h3 style="font-size:12px;font-weight:700;color:#5f6368;text-transform:uppercase;letter-spacing:.6px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #e0e0e0">Support</h3>
+
+      <details style="margin-bottom:10px;background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden">
+        <summary style="padding:14px 18px;font-weight:500;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center">
+          How do I get help or send feedback?
+          <span style="color:#1a73e8;font-size:18px;flex-shrink:0">+</span>
+        </summary>
+        <div style="padding:0 18px 14px;color:#3c4043;font-size:14px;line-height:1.7">
+          Use the <strong>Send Feedback</strong> button at the bottom of the page to reach the License Manager team directly. For questions about a specific subscription or charge, include the subscription ID shown in <strong>My Subscriptions</strong> &mdash; it makes it much faster to look up.
+        </div>
+      </details>
+
+    </div>
+  </div>
+  </div><!-- /#main -->
+</div><!-- /#app -->
+<div id="nav-overlay" onclick="toggleNav()"></div>
+
+<!-- ── LICENSE EDITOR MODAL ──────────────────────────────── -->
+<div id="lic-modal-backdrop" class="modal-backdrop" style="display:none" role="dialog" aria-modal="true">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="lic-modal-title">Add License</h3>
+      <button class="modal-close" id="lic-modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <datalist id="vendor-suggestions"></datalist>
+      <datalist id="category-suggestions"></datalist>
+      <div class="form-group"><label>Name <span style="color:#d93025">*</span></label>
+        <input class="form-control" id="lic-name" autocomplete="off"></div>
+      <div class="form-group"><label>Vendor</label>
+        <input class="form-control" id="lic-vendor" list="vendor-suggestions" autocomplete="off"></div>
+      <div class="form-group"><label>Category</label>
+        <input class="form-control" id="lic-category" list="category-suggestions" autocomplete="off"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-group"><label>Price</label>
+          <input class="form-control" id="lic-price" type="number" min="0" step="0.01"></div>
+        <div class="form-group"><label>Billing Cycle</label>
+          <select class="form-control" id="lic-billing-select">
+            <option value="annual">Annual</option>
+            <option value="monthly">Monthly</option>
+          </select></div>
+      </div>
+      <div class="form-group"><label>Notes for buyers</label>
+        <textarea class="form-control" id="lic-notes" rows="3"></textarea></div>
+      <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:8px 0">
+        <input type="checkbox" id="lic-gtis" style="width:16px;height:16px;cursor:pointer">
+        <label for="lic-gtis" style="margin:0;cursor:pointer;font-weight:500">
+          GTIS pays — user sees cost but is not charged a SuiteKey
+        </label>
+      </div>
+      <div class="form-group" id="lic-renewal-month-group">
+        <label>Renewal Month</label>
+        <select class="form-control" id="lic-renewal-month">
+          <option value="">-- Select month --</option>
+          <option value="1">January</option><option value="2">February</option>
+          <option value="3">March</option><option value="4">April</option>
+          <option value="5">May</option><option value="6">June</option>
+          <option value="7">July</option><option value="8">August</option>
+          <option value="9">September</option><option value="10">October</option>
+          <option value="11">November</option><option value="12">December</option>
+        </select>
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:4px 0">
+        <input type="checkbox" id="lic-reminder" style="width:16px;height:16px;cursor:pointer">
+        <label for="lic-reminder" style="margin:0;cursor:pointer;font-weight:500">
+          Send subscribers a renewal reminder 2 months before renewal
+        </label>
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:10px;padding:4px 0">
+        <input type="checkbox" id="lic-pro-rated" style="width:16px;height:16px;cursor:pointer">
+        <label for="lic-pro-rated" style="margin:0;cursor:pointer;font-weight:500">
+          Pro-rate cost based on subscription start date (for finance CSV export)
+        </label>
+      </div>
+      <div class="form-group">
+        <label for="lic-more-info-url">More Info URL <span style="font-weight:400;color:#5f6368">(shown to users)</span></label>
+        <input class="form-control" id="lic-more-info-url" type="url" placeholder="https://example.com/product-page">
+        <p class="form-hint">Link shown in the catalog so users can learn more before subscribing.</p>
+      </div>
+      <div class="form-group">
+        <label for="lic-logo-url">Logo URL <span style="font-weight:400;color:#5f6368">(optional)</span></label>
+        <input class="form-control" id="lic-logo-url" type="url" placeholder="https://example.com/logo.png">
+        <div id="lic-logo-preview" style="margin-top:8px;display:none">
+          <img id="lic-logo-img" src="" alt="Logo preview"
+               style="max-height:48px;max-width:160px;object-fit:contain;border:1px solid #e0e0e0;border-radius:4px;padding:4px">
+        </div>
+      </div>
+      <div style="border-top:1px solid #e0e0e0;margin:16px 0 12px"></div>
+      <div class="form-group">
+        <label for="lic-activation-url">Activation URL <span style="font-weight:400;color:#5f6368">(admin only)</span></label>
+        <input class="form-control" id="lic-activation-url" type="url" placeholder="Vendor portal link to provision seats">
+        <p class="form-hint">Link sent to admins when a subscription is approved, to provision the seat on the vendor side.</p>
+      </div>
+      <div class="form-group">
+        <label for="lic-group-email">Google Group <span style="font-weight:400;color:#5f6368">(admin only)</span></label>
+        <input class="form-control" id="lic-group-email" type="email" placeholder="group@yourdomain.com">
+        <p class="form-hint">If set, subscribers are automatically added/removed from this Google Group when activated or revoked.</p>
+      </div>
+      <div class="form-group">
+        <label for="lic-service-manager">Service Manager <span style="font-weight:400;color:#5f6368">(admin only)</span></label>
+        <input class="form-control" id="lic-service-manager" type="email" placeholder="manager@sil.org">
+        <p class="form-hint">Person responsible for provisioning seats and marking approved subscriptions as active.</p>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="lic-modal-deactivate" style="display:none;margin-right:auto">Deactivate</button>
+      <button class="btn btn-outline" id="lic-modal-cancel">Cancel</button>
+      <button class="btn btn-primary" id="lic-modal-save">Save License</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── SUBSCRIBE MODAL ────────────────────────────────────── -->
+<div id="modal-backdrop" class="modal-backdrop" style="display:none" role="dialog" aria-modal="true">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <h3 id="modal-title">Subscribe</h3>
+        <p class="modal-subtitle" id="modal-subtitle"></p>
+      </div>
+      <button class="modal-close" id="modal-close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="modal-price-info" style="background:#f8f9fa;border-radius:4px;padding:12px;margin-bottom:8px;font-size:13px"></div>
+      <div id="modal-billing-info" style="display:none;font-size:13px;color:#5f6368;margin-bottom:16px;padding:0 2px"></div>
+      <div id="modal-gtis-notice" style="display:none;background:#e8f0fe;border-left:3px solid #1a73e8;border-radius:4px;padding:12px;margin-bottom:16px;font-size:13px;color:#1a73e8">
+        This license is <strong>covered by GTIS</strong> — no SuiteKey required. You will not be charged.
+      </div>
+      <div style="margin-bottom:16px">
+        <label for="modal-recipient-email">License for <span style="color:#d93025">*</span></label>
+        <input id="modal-recipient-email" class="form-control" type="email" placeholder="email@sil.org">
+        <p class="form-hint">Pre-filled with your email. Change this to request on behalf of someone else.</p>
+      </div>
+      <div id="sk-group">
+        <!-- Billing type toggle -->
+        <div id="billing-type-row" style="margin-bottom:14px">
+          <label style="display:block;margin-bottom:6px;font-size:13px;font-weight:500">Bill to <span style="color:#d93025">*</span></label>
+          <div style="display:inline-flex;border:1px solid #dadce0;border-radius:4px;overflow:hidden">
+            <button type="button" id="btn-billing-sk"
+              style="padding:6px 16px;font-size:13px;font-weight:500;background:#1a73e8;color:#fff;border:none;cursor:pointer"
+              onclick="setBillingType('suitekey')">SuiteKey</button>
+            <button type="button" id="btn-billing-ministry"
+              style="padding:6px 16px;font-size:13px;font-weight:500;background:#fff;color:#5f6368;border:none;cursor:pointer"
+              onclick="setBillingType('ministry')">Ministry Account</button>
+          </div>
+        </div>
+        <!-- SuiteKey input -->
+        <div id="billing-sk-section">
+          <label for="sk-input">SuiteKey <span style="color:#d93025">*</span></label>
+          <div class="typeahead-wrap">
+            <input id="sk-input" class="form-control" type="text"
+                   placeholder="Type at least 2 characters…" autocomplete="off">
+            <div id="sk-dropdown" class="typeahead-list"></div>
+          </div>
+          <p class="form-hint">Type to search all available SuiteKeys. The <code style="font-size:11px;background:#f1f3f4;padding:1px 4px;border-radius:3px">~1234</code> suffix is not needed — just enter the code before the ~.</p>
+        </div>
+        <!-- Ministry Account input -->
+        <div id="billing-ministry-section" style="display:none">
+          <div style="background:#e8f0fe;border-left:3px solid #1a73e8;border-radius:4px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#1a73e8">
+            Licenses purchased by Ministry Account are purchased for use by SIL staff.
+          </div>
+          <label for="ministry-id-input">Ministry ID <span style="color:#d93025">*</span></label>
+          <input id="ministry-id-input" class="form-control" type="text" maxlength="6"
+                 placeholder="6-digit Ministry ID" autocomplete="off"
+                 style="max-width:160px;letter-spacing:2px;font-size:16px">
+          <p id="ministry-id-hint" class="form-hint">Enter your 6-digit Ministry Account ID.</p>
+        </div>
+      </div><!-- /#sk-group -->
+      <div id="modal-approver-row" style="display:none;margin-top:4px">
+        <div id="modal-sk-notice" style="background:#fff3e0;border-left:3px solid #f9ab00;border-radius:4px;padding:10px 14px;margin-bottom:14px;font-size:13px">
+          <strong>SuiteKey not in system.</strong> Enter the email of the person who manages this SuiteKey budget.
+          They'll receive a confirmation email before your request is processed.
+        </div>
+        <label for="modal-approver-email">Suggested approver's email <span style="color:#d93025">*</span></label>
+        <input id="modal-approver-email" class="form-control" type="email" placeholder="approver@sil.org">
+        <p class="form-hint">This person will be asked to confirm they own this SuiteKey.</p>
+      </div><!-- /#modal-approver-row -->
+      <div id="modal-notes" style="font-size:13px;color:#5f6368;border-top:1px solid #f1f3f4;padding-top:12px;display:none"></div>
+      <p style="font-size:12px;color:#9aa0a6;margin-top:12px">Subscriptions are non-refundable once activated.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="modal-cancel-btn">Cancel</button>
+      <button class="btn btn-primary" id="modal-confirm-btn" disabled>Confirm Subscription</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── DECLINE REASON MODAL ──────────────────────────────── -->
+<div id="decline-modal-backdrop" class="modal-backdrop" style="display:none" role="dialog" aria-modal="true">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <h3>Decline Request</h3>
+      <button class="modal-close" id="decline-modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="margin-bottom:14px;color:#5f6368;font-size:13px">
+        Optionally provide a reason for declining. It will be included in the
+        notification email sent to the requestor.
+      </p>
+      <div class="form-group">
+        <label for="decline-reason">Reason <span style="font-weight:400;color:#9aa0a6">(optional)</span></label>
+        <textarea id="decline-reason" class="form-control" rows="3"
+          placeholder="e.g. Budget not available this fiscal year — please resubmit next quarter."
+          style="resize:vertical"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="decline-modal-cancel">Cancel</button>
+      <button class="btn btn-danger"  id="decline-modal-confirm">Decline Request</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── PROVISION MODAL ───────────────────────────────────── -->
+<div id="provision-modal-backdrop" class="modal-backdrop" style="display:none" role="dialog" aria-modal="true">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <h3>Mark as Provisioned</h3>
+      <button class="modal-close" id="provision-modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="provision-modal-desc" style="margin-bottom:14px;color:#5f6368;font-size:13px"></p>
+      <div class="form-group">
+        <label for="provision-price">Cost at time of purchase</label>
+        <input id="provision-price" type="number" min="0" step="0.01" class="form-control"
+          placeholder="e.g. 1200" style="max-width:180px">
+        <p style="font-size:12px;color:#9aa0a6;margin-top:4px">Leave blank to keep the price already on file.</p>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="provision-modal-cancel">Cancel</button>
+      <button class="btn btn-primary"  id="provision-modal-confirm">Confirm Provisioned</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<!-- ── FEEDBACK BUTTON ────────────────────────────────────── -->
+<button id="feedback-btn">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+  Feedback
+</button>
+
+<!-- ── FEEDBACK MODAL ─────────────────────────────────────── -->
+<div id="feedback-backdrop" class="modal-backdrop" style="display:none" role="dialog" aria-modal="true">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <h3>Send Feedback</h3>
+      <button class="modal-close" id="feedback-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="color:#5f6368;font-size:13px;margin-bottom:12px">
+        Have a suggestion, noticed something wrong, or want to request a new license? Let us know.
+      </p>
+      <textarea id="feedback-message" class="form-control" rows="6"
+        placeholder="Your feedback…" style="resize:vertical"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="feedback-cancel">Cancel</button>
+      <button class="btn btn-primary" id="feedback-send">Send Feedback</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ──────────────────────────────────────────────────────────
+//  STATE
+// ──────────────────────────────────────────────────────────
+const State = {
+  userEmail        : '',
+  isAdmin          : false,
+  isSuiteKeyOwner  : false,
+  ownedSuiteKeys   : [],
+  isManager        : false,
+  isServiceManager : false,
+  currentFY       : 0,
+  renewMode       : <?= renewMode ?> === 'true',
+
+  // Loaded data
+  licenses         : [],
+  mySubs           : [],
+  teamSubs         : [],
+  skCharges        : [],   // all owned SK subscriptions flat
+  skAuditLog       : [],   // all owned SK audit entries
+  skSort           : { col: 'userEmail', dir: 1 },
+  teamSort         : { col: 'userEmail', dir: 1 },
+  catalogSort      : { col: 'name',      dir: 1 },
+  allSubsSort      : { col: 'startDate', dir: -1 },
+  adminAuditSort   : { col: 'timestamp', dir: -1 },
+  skAuditSort      : { col: 'timestamp', dir: -1 },
+  pendingApprovals : [],
+  adminSubs        : [],
+  adminCatalog     : [],
+  adminAuditLog    : [],
+
+  // Ministry Account
+  myMinistryId : null,
+
+  // Modals
+  detailLicenseId    : null,
+  pendingLicenseId   : null,
+  pendingLicenseName : '',
+  selectedSuiteKey   : null,
+  skUnverified       : false,
+  billingType        : 'suitekey',
+};
+
+// ──────────────────────────────────────────────────────────
+//  INIT
+// ──────────────────────────────────────────────────────────
+(function init() {
+  google.script.run
+    .withSuccessHandler(onInitialData)
+    .withFailureHandler(err => {
+      document.getElementById('loading').innerHTML =
+        '<p style="color:#d93025;padding:24px">Failed to load: ' + err.message + '</p>';
+    })
+    .getInitialData();
+})();
+
+function onInitialData(data) {
+  try { _onInitialData(data); } catch(e) {
+    document.getElementById('loading').innerHTML =
+      '<p style="color:#d93025;padding:24px">Load error: ' + e.message + '<br><small>' + (e.stack||'') + '</small></p>';
+  }
+}
+function _onInitialData(data) {
+  State.userEmail    = data.userEmail    || '';
+  State.currentFY    = data.currentFY    || 0;
+  State.myMinistryId = data.ministryId   || null;
+
+  const navEmailEl = document.getElementById('nav-user-email');
+  if (navEmailEl) { navEmailEl.textContent = State.userEmail; navEmailEl.title = State.userEmail; }
+
+  if (data.needsSetup) {
+    document.getElementById('loading').style.display     = 'none';
+    document.getElementById('setup-email').textContent   = State.userEmail;
+    document.getElementById('setup-screen').style.display = 'block';
+
+    document.getElementById('btn-init').addEventListener('click', () => {
+      const btn = document.getElementById('btn-init');
+      btn.disabled     = true;
+      btn.textContent  = 'Setting up…';
+      document.getElementById('setup-msg').textContent = '';
+      google.script.run
+        .withSuccessHandler(res => {
+          if (res.ok) {
+            document.getElementById('setup-msg').textContent =
+              '✓ Done! Reloading…';
+            setTimeout(() => location.reload(), 1200);
+          } else {
+            document.getElementById('setup-msg').textContent = 'Error: ' + res.error;
+            btn.disabled    = false;
+            btn.textContent = 'Initialize License Manager';
+          }
+        })
+        .withFailureHandler(err => {
+          document.getElementById('setup-msg').textContent = 'Error: ' + err.message;
+          btn.disabled    = false;
+          btn.textContent = 'Initialize License Manager';
+        })
+        .initializeAppSheet();
+    });
+    return;
+  }
+
+  State.isAdmin          = data.isAdmin          || false;
+  State.isSuiteKeyOwner  = data.isSuiteKeyOwner  || false;
+  State.ownedSuiteKeys   = data.ownedSuiteKeys   || [];
+  State.isManager        = data.isManager        || false;
+  State.isServiceManager = data.isServiceManager || false;
+
+  // Show conditional nav items
+  if (State.isManager)       document.querySelectorAll('.tab-manager').forEach(el => el.style.display = 'flex');
+  if (State.isSuiteKeyOwner) document.querySelectorAll('.tab-owner').forEach(el   => el.style.display = 'flex');
+  if (State.isAdmin)         document.querySelectorAll('.tab-admin').forEach(el   => el.style.display = 'flex');
+  if (State.isServiceManager) document.querySelectorAll('.tab-service').forEach(el => el.style.display = 'flex');
+
+  if (State.renewMode) {
+    showTab('my-subs');
+    document.getElementById('renewal-banner').style.display = 'block';
+  }
+
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('app').style.display     = 'flex';
+
+  // Use data bundled into getInitialData — no extra round trips on load.
+  const licenses = (data.licenses || []);
+  licenses.sort((a, b) => a.name.localeCompare(b.name));
+  State.licenses = licenses;
+  renderLicenseTable(licenses);
+  buildCategorySubmenu(licenses);
+
+  State.mySubs = data.mySubs || [];
+  renderMySubsList(State.mySubs);
+}
+
+// ──────────────────────────────────────────────────────────
+//  NAV SIDEBAR
+// ──────────────────────────────────────────────────────────
+document.getElementById('app-nav').addEventListener('click', e => {
+  const btn = e.target.closest('.nav-btn');
+  if (!btn || !btn.dataset.tab) return;
+  showTab(btn.dataset.tab);
+  // Close mobile nav on selection
+  if (window.innerWidth <= 700) toggleNav(false);
+});
+
+function showTab(tabId) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tabId));
+  // Show/hide category submenu
+  document.getElementById('nav-catalog-sub').style.display = tabId === 'browse' ? 'block' : 'none';
+
+  if (tabId === 'my-team'         && !State.teamSubs.length)    loadTeamSubs();
+  if (tabId === 'admin'           && !State.adminCatalog.length) loadAdminCatalog();
+  if (tabId === 'service-requests') loadServiceQueue();
+  if (tabId === 'sk-charges') {
+    loadPendingApprovals();
+    if (!State.skCharges.length) loadAllSkCharges();
+  }
+}
+
+function buildCategorySubmenu(licenses) {
+  const categories = [...new Set((licenses || []).map(l => l.category).filter(Boolean))].sort();
+  const sub = document.getElementById('nav-catalog-sub');
+  sub.innerHTML = [
+    `<button class="nav-sub-btn active" data-cat="">
+      <svg width="5" height="5" viewBox="0 0 5 5" fill="currentColor" style="flex-shrink:0;margin-left:2px"><circle cx="2.5" cy="2.5" r="2.5"/></svg>All
+    </button>`,
+    ...categories.map(c => `<button class="nav-sub-btn" data-cat="${esc(c)}">
+      <svg width="5" height="5" viewBox="0 0 5 5" fill="currentColor" style="flex-shrink:0;margin-left:2px"><circle cx="2.5" cy="2.5" r="2.5"/></svg>${esc(c)}
+    </button>`)
+  ].join('');
+  sub.querySelectorAll('.nav-sub-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      sub.querySelectorAll('.nav-sub-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      // Clear search when filtering by category
+      document.getElementById('browse-search').value = '';
+      const list = btn.dataset.cat ? State.licenses.filter(l => l.category === btn.dataset.cat) : State.licenses;
+      renderLicenseTable(list);
+      if (!document.getElementById('tab-browse').classList.contains('active')) showTab('browse');
+    });
+  });
+}
+
+function toggleNav(forceOpen) {
+  const nav     = document.getElementById('app-nav');
+  const overlay = document.getElementById('nav-overlay');
+  const isOpen  = nav.classList.contains('open');
+  const open    = forceOpen !== undefined ? forceOpen : !isOpen;
+  nav.classList.toggle('open', open);
+  overlay.style.display = open ? 'block' : 'none';
+}
+
+// ──────────────────────────────────────────────────────────
+//  BROWSE & SUBSCRIBE
+// ──────────────────────────────────────────────────────────
+function loadBrowseTab() {
+  google.script.run
+    .withSuccessHandler(licenses => {
+      licenses.sort((a, b) => a.name.localeCompare(b.name));
+      State.licenses = licenses;
+      renderLicenseTable(licenses);
+    })
+    .withFailureHandler(err => toast(err.message, true))
+    .getActiveLicenses();
+}
+
+document.getElementById('browse-search').addEventListener('input', e => {
+  const q = e.target.value.toLowerCase().trim();
+  // clear category filter when searching
+  document.querySelectorAll('.nav-sub-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === ''));
+  const filtered = q
+    ? State.licenses.filter(l =>
+        l.name.toLowerCase().includes(q) ||
+        (l.vendor || '').toLowerCase().includes(q) ||
+        (l.category || '').toLowerCase().includes(q))
+    : State.licenses;
+  renderLicenseTable(filtered);
+});
+
+function renderLicenseTable(licenses) {
+  const container = document.getElementById('catalog-container');
+  const emptyEl   = document.getElementById('catalog-empty');
+  if (!licenses.length) {
+    container.innerHTML = '';
+    emptyEl.style.display = 'block';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  // Group by category
+  const groups = {};
+  const order  = [];
+  licenses.forEach(l => {
+    const cat = l.category || 'Uncategorized';
+    if (!groups[cat]) { groups[cat] = []; order.push(cat); }
+    groups[cat].push(l);
+  });
+  order.sort((a, b) => a.localeCompare(b));
+
+  container.innerHTML = order.map(cat => `
+    <div class="catalog-section" id="cat-section-${esc(cat.replace(/\s+/g,'-'))}">
+      <div class="catalog-section-title">${esc(cat)}</div>
+      <div class="catalog-grid">
+        ${groups[cat].map(l => `
+          <div class="lic-card" onclick="openLicenseDetail('${esc(l.id)}')">
+            <div class="lic-card-top">
+              <div class="lic-card-name">${esc(l.name)}</div>
+              ${l.logoUrl ? `<img class="lic-card-logo" src="${esc(l.logoUrl)}" alt="" onerror="this.style.display='none'">` : ''}
+            </div>
+            <div class="lic-card-footer">
+              <span class="lic-card-price">${l.gtisSponsored ? 'GTIS-funded' : l.price ? fmtUSD(l.price) + '/' + (l.billingCycle === 'monthly' ? 'mo' : 'yr') : 'Free'}</span>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+function openLicenseDetail(id) {
+  const l = State.licenses.find(l => l.id === id);
+  if (!l) return;
+  State.detailLicenseId = id;
+
+  document.getElementById('detail-modal-title').textContent  = l.name;
+  document.getElementById('detail-modal-vendor').textContent = l.vendor || '';
+
+  const logo = document.getElementById('detail-logo-img');
+  if (l.logoUrl) { logo.src = l.logoUrl; logo.style.display = 'block'; }
+  else           { logo.style.display = 'none'; }
+
+  const meta = document.getElementById('detail-modal-meta');
+  meta.innerHTML = [
+    l.category   ? `<span class="badge" style="background:#f1f3f4;color:#3c4043">${esc(l.category)}</span>` : '',
+    l.gtisSponsored ? '<span class="badge badge-opted-in">GTIS-funded</span>' : '',
+    `<span class="badge" style="background:#f1f3f4;color:#5f6368">${l.billingCycle === 'monthly' ? 'Monthly' : 'Annual'}</span>`,
+  ].join('');
+
+  document.getElementById('detail-modal-price').textContent   = l.price ? fmtUSD(l.price) + '/' + (l.billingCycle === 'monthly' ? 'mo' : 'yr') : 'Contact for pricing';
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('detail-modal-billing').textContent = l.renewalMonth
+    ? 'Renews ' + MONTHS[l.renewalMonth - 1] : '';
+
+  document.getElementById('detail-modal-gtis').style.display  = l.gtisSponsored ? 'block' : 'none';
+
+  const notesEl = document.getElementById('detail-modal-notes');
+  if (l.notes) { notesEl.textContent = l.notes; notesEl.style.display = 'block'; }
+  else         { notesEl.style.display = 'none'; }
+
+  const linkEl = document.getElementById('detail-modal-link');
+  if (l.moreInfoUrl) { linkEl.href = l.moreInfoUrl; linkEl.style.display = 'inline'; }
+  else               { linkEl.style.display = 'none'; }
+
+  document.getElementById('detail-modal-backdrop').style.display = 'flex';
+}
+
+document.getElementById('detail-modal-close').addEventListener('click',  () => document.getElementById('detail-modal-backdrop').style.display = 'none');
+document.getElementById('detail-modal-cancel').addEventListener('click', () => document.getElementById('detail-modal-backdrop').style.display = 'none');
+document.getElementById('detail-modal-backdrop').addEventListener('click', e => {
+  if (e.target === document.getElementById('detail-modal-backdrop'))
+    document.getElementById('detail-modal-backdrop').style.display = 'none';
+});
+document.getElementById('detail-modal-subscribe').addEventListener('click', () => {
+  document.getElementById('detail-modal-backdrop').style.display = 'none';
+  openSubscribeModal(State.detailLicenseId);
+});
+
+// ──────────────────────────────────────────────────────────
+//  SUBSCRIBE MODAL
+// ──────────────────────────────────────────────────────────
+function openSubscribeModal(licId) {
+  const l = State.licenses.find(l => l.id === licId);
+  if (!l) return;
+
+  State.pendingLicenseId   = l.id;
+  State.pendingLicenseName = l.name;
+  State.selectedSuiteKey   = l.gtisSponsored ? '__GTIS__' : null;
+
+  document.getElementById('modal-title').textContent    = 'Subscribe to ' + l.name;
+  document.getElementById('modal-subtitle').textContent = '';
+  document.getElementById('modal-price-info').textContent =
+    l.price ? fmtUSD(l.price) : 'Contact for pricing';
+
+  // Billing cycle info
+  const billingEl = document.getElementById('modal-billing-info');
+  if (l.billingCycle) {
+    const MONTHS = ['January','February','March','April','May','June',
+                    'July','August','September','October','November','December'];
+    let txt = 'Billing: ' + (l.billingCycle === 'monthly' ? 'Monthly' : 'Annual');
+    if (l.billingCycle === 'annual' && l.renewalMonth) {
+      txt += ' · Renewal: ' + MONTHS[l.renewalMonth - 1];
+      if (l.renewalReminder) {
+        const rm = l.renewalMonth - 2 < 1 ? l.renewalMonth + 10 : l.renewalMonth - 2;
+        txt += ' · Reminder sent in ' + MONTHS[rm - 1];
+      }
+    }
+    billingEl.textContent = txt;
+    billingEl.style.display = 'block';
+  } else {
+    billingEl.style.display = 'none';
+  }
+
+  const notesEl = document.getElementById('modal-notes');
+  if (l.notes) { notesEl.textContent = l.notes; notesEl.style.display = 'block'; }
+  else          { notesEl.style.display = 'none'; }
+
+  const skGroup    = document.getElementById('sk-group');
+  const gtisNotice = document.getElementById('modal-gtis-notice');
+  const confirmBtn = document.getElementById('modal-confirm-btn');
+
+  document.getElementById('modal-recipient-email').value = State.userEmail || '';
+
+  if (l.gtisSponsored) {
+    skGroup.style.display    = 'none';
+    gtisNotice.style.display = 'block';
+    confirmBtn.disabled      = false;
+  } else {
+    skGroup.style.display    = 'block';
+    gtisNotice.style.display = 'none';
+    confirmBtn.disabled      = true;
+    setBillingType('suitekey');
+  }
+
+  document.getElementById('modal-backdrop').style.display = 'flex';
+}
+
+document.getElementById('modal-close-btn').addEventListener('click',  closeModal);
+document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
+document.getElementById('modal-backdrop').addEventListener('click', e => {
+  if (e.target === document.getElementById('modal-backdrop')) closeModal();
+});
+
+function closeModal() {
+  document.getElementById('modal-backdrop').style.display = 'none';
+  document.getElementById('modal-approver-row').style.display = 'none';
+  State.skUnverified = false;
+}
+
+function setBillingType(type) {
+  State.billingType = type;
+  const isSK = type === 'suitekey';
+  document.getElementById('billing-sk-section').style.display       = isSK ? 'block' : 'none';
+  document.getElementById('billing-ministry-section').style.display = isSK ? 'none'  : 'block';
+  document.getElementById('btn-billing-sk').style.background        = isSK ? '#1a73e8' : '#fff';
+  document.getElementById('btn-billing-sk').style.color             = isSK ? '#fff'    : '#5f6368';
+  document.getElementById('btn-billing-ministry').style.background  = isSK ? '#fff'    : '#1a73e8';
+  document.getElementById('btn-billing-ministry').style.color       = isSK ? '#5f6368' : '#fff';
+
+  if (isSK) {
+    State.selectedSuiteKey = null;
+    document.getElementById('sk-input').value        = '';
+    document.getElementById('sk-dropdown').className = 'typeahead-list';
+    document.getElementById('sk-dropdown').innerHTML = '';
+    document.getElementById('modal-confirm-btn').disabled = true;
+    setTimeout(() => document.getElementById('sk-input').focus(), 50);
+  } else {
+    const idInput = document.getElementById('ministry-id-input');
+    if (State.myMinistryId) {
+      idInput.value    = State.myMinistryId;
+      idInput.readOnly = true;
+      document.getElementById('ministry-id-hint').textContent =
+        'Your Ministry ID is on file. Contact an admin to update it.';
+      document.getElementById('modal-confirm-btn').disabled = false;
+    } else {
+      idInput.value    = '';
+      idInput.readOnly = false;
+      document.getElementById('ministry-id-hint').textContent =
+        'Enter your 6-digit Ministry Account ID.';
+      document.getElementById('modal-confirm-btn').disabled = true;
+      setTimeout(() => idInput.focus(), 50);
+    }
+  }
+}
+
+// SuiteKey typeahead
+let _skSearchTimer = null;
+document.getElementById('sk-input').addEventListener('input', e => {
+  const tildeIdx = e.target.value.indexOf('~');
+  if (tildeIdx !== -1) e.target.value = e.target.value.substring(0, tildeIdx).trim();
+  const q = e.target.value.trim();
+  clearTimeout(_skSearchTimer);
+  State.selectedSuiteKey = null;
+  State.skUnverified     = false;
+  document.getElementById('modal-approver-row').style.display = 'none';
+  document.getElementById('modal-confirm-btn').disabled = true;
+
+  if (q.length < 2) {
+    document.getElementById('sk-dropdown').className = 'typeahead-list';
+    return;
+  }
+  _skSearchTimer = setTimeout(() => {
+    const dd = document.getElementById('sk-dropdown');
+    dd.innerHTML = '<div class="typeahead-msg">Searching…</div>';
+    dd.classList.add('open');
+    google.script.run
+      .withSuccessHandler(results => renderSkDropdown(results, q))
+      .withFailureHandler(() => {
+        dd.innerHTML = '<div class="typeahead-msg">Error loading results.</div>';
+      })
+      .searchSuiteKeys(q);
+  }, 280);
+});
+
+function renderSkDropdown(results, q) {
+  const dd = document.getElementById('sk-dropdown');
+  const useAnyway = `<div class="typeahead-item typeahead-item-new" onclick="selectUnknownSuiteKey('${esc(q)}')">
+    <span>Use "<strong>${esc(q)}</strong>" — not in system</span>
+  </div>`;
+  if (!results.length) {
+    dd.innerHTML = '<div class="typeahead-msg">No matching SuiteKeys found.</div>' + useAnyway;
+    return;
+  }
+  dd.innerHTML = results.map(r => {
+    const label = r.description ? `${esc(r.suiteKey)} <span style="color:#5f6368">— ${esc(r.description)}</span>` : esc(r.suiteKey);
+    if (!r.hasOwner) {
+      return `<div class="typeahead-item typeahead-item-new" onclick="selectUnknownSuiteKey('${esc(r.suiteKey)}', true)">
+        <span>${label}</span>
+        <span style="font-size:11px;color:#f9ab00;font-weight:500;margin-left:6px">No manager</span>
+      </div>`;
+    }
+    return `<div class="typeahead-item" onclick="selectSuiteKey('${esc(r.suiteKey)}')">
+      <span>${label}</span>
+      ${r.isOwner ? '<span class="ta-badge">Owner</span>' : ''}
+    </div>`;
+  }).join('') + '<div style="height:1px;background:#f1f3f4;margin:4px 0"></div>' + useAnyway;
+}
+
+function selectSuiteKey(sk) {
+  State.selectedSuiteKey = sk;
+  State.skUnverified     = false;
+  document.getElementById('sk-input').value             = sk;
+  document.getElementById('sk-dropdown').className      = 'typeahead-list';
+  document.getElementById('modal-approver-row').style.display = 'none';
+  document.getElementById('modal-confirm-btn').disabled = false;
+}
+
+function selectUnknownSuiteKey(sk, noManager) {
+  State.selectedSuiteKey = sk;
+  State.skUnverified     = noManager ? 'no_manager' : 'new';
+  document.getElementById('sk-input').value             = sk;
+  document.getElementById('sk-dropdown').className      = 'typeahead-list';
+  document.getElementById('modal-approver-row').style.display = 'block';
+  document.getElementById('modal-approver-email').value = '';
+  document.getElementById('modal-confirm-btn').disabled = true;
+  document.getElementById('modal-sk-notice').innerHTML  = noManager
+    ? '<strong>No manager assigned to this SuiteKey.</strong> Enter the email of the person who manages this SuiteKey budget. They\'ll receive a confirmation email before your request is processed.'
+    : '<strong>SuiteKey not in system.</strong> Enter the email of the person who manages this SuiteKey budget. They\'ll receive a confirmation email before your request is processed.';
+  setTimeout(() => document.getElementById('modal-approver-email').focus(), 50);
+}
+
+// Close typeahead on outside click
+document.addEventListener('click', e => {
+  if (!document.getElementById('sk-input').contains(e.target)) {
+    document.getElementById('sk-dropdown').className = 'typeahead-list';
+  }
+});
+
+// Enable confirm only when approver email is valid
+document.getElementById('modal-approver-email').addEventListener('input', e => {
+  if (!State.skUnverified) return;
+  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.target.value.trim());
+  document.getElementById('modal-confirm-btn').disabled = !valid;
+});
+
+// Enable confirm when ministry ID is 6 digits
+document.getElementById('ministry-id-input').addEventListener('input', e => {
+  if (State.billingType !== 'ministry') return;
+  e.target.value = e.target.value.replace(/\D/g, '').substring(0, 6);
+  document.getElementById('modal-confirm-btn').disabled = e.target.value.length !== 6;
+});
+
+document.getElementById('modal-confirm-btn').addEventListener('click', () => {
+  const recipientEmail = document.getElementById('modal-recipient-email').value.trim();
+  if (!recipientEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
+    toast('Please enter a valid email address for "License for".', true);
+    return;
+  }
+
+  let suiteKeyArg   = null;
+  let suggestedApprover = null;
+
+  if (State.selectedSuiteKey === '__GTIS__') {
+    suiteKeyArg = null;
+  } else if (State.billingType === 'ministry') {
+    const ministryId = document.getElementById('ministry-id-input').value.trim();
+    if (!/^\d{6}$/.test(ministryId)) {
+      toast('Ministry ID must be exactly 6 digits.', true);
+      return;
+    }
+    suiteKeyArg = 'MIN:' + ministryId;
+  } else {
+    if (!State.selectedSuiteKey) return;
+    suiteKeyArg = State.selectedSuiteKey;
+    if (State.skUnverified) {
+      suggestedApprover = document.getElementById('modal-approver-email').value.trim();
+      if (!suggestedApprover || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(suggestedApprover)) {
+        toast('Please enter a valid approver email.', true);
+        return;
+      }
+    }
+  }
+
+  const btn = document.getElementById('modal-confirm-btn');
+  btn.disabled    = true;
+  btn.textContent = 'Submitting…';
+  google.script.run
+    .withSuccessHandler(sub => {
+      closeModal();
+      const forSuffix = recipientEmail !== State.userEmail ? ' for ' + recipientEmail : '';
+      const msg = sub.status === 'pending_sk_verification'
+        ? 'Request submitted for ' + sub.licenseName + forSuffix + '. A verification email has been sent to the suggested SuiteKey owner.'
+        : sub.status === 'pending'
+        ? 'Request submitted for ' + sub.licenseName + forSuffix + '. Awaiting SuiteKey owner approval.'
+        : 'Subscribed to ' + sub.licenseName + forSuffix + '!';
+      if (State.billingType === 'ministry' && sub.status === 'active') {
+        State.myMinistryId = State.myMinistryId || document.getElementById('ministry-id-input').value.trim() || null;
+      }
+      toast(msg);
+      if (recipientEmail === State.userEmail || !State.userEmail) State.mySubs.push(sub);
+      renderMySubsList(State.mySubs);
+      btn.textContent = 'Confirm Subscription';
+    })
+    .withFailureHandler(err => {
+      toast(err.message, true);
+      btn.disabled    = false;
+      btn.textContent = 'Confirm Subscription';
+    })
+    .createSubscription(State.pendingLicenseId, suiteKeyArg, recipientEmail, suggestedApprover);
+});
+
+// ──────────────────────────────────────────────────────────
+//  MY SUBSCRIPTIONS
+// ──────────────────────────────────────────────────────────
+function loadMySubscriptions() {
+  google.script.run
+    .withSuccessHandler(subs => {
+      State.mySubs = subs;
+      renderMySubsList(subs);
+    })
+    .withFailureHandler(err => toast(err.message, true))
+    .getMySubscriptions();
+}
+
+function renderMySubsList(subs) {
+  const container = document.getElementById('my-subs-list');
+  const active = subs.filter(s => s.status !== 'cancelled');
+  if (!active.length) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div>' +
+      '<p>No active subscriptions. Browse the catalog to get started.</p></div>';
+    return;
+  }
+  const renewalOpen = isRenewalWindowOpen();
+  container.innerHTML = active.map(s => {
+    const badge =
+      s.status === 'active' && s.renewalStatus === 'opted_in'
+        ? '<span class="badge badge-opted-in">Renewal Confirmed</span>'  :
+      s.status === 'active' && s.renewalStatus === 'opted_out'
+        ? '<span class="badge" style="background:#f1f3f4;color:#3c4043">Will Not Renew</span>' :
+      s.status === 'active'                    ? '<span class="badge badge-active">Active</span>'                             :
+      s.status === 'approved'                  ? '<span class="badge" style="background:#e8f0fe;color:#1a73e8">Approved — Pending Activation</span>' :
+      s.status === 'pending'                   ? '<span class="badge badge-pending">Pending Approval</span>'                :
+      s.status === 'pending_sk_verification'   ? '<span class="badge badge-pending">Pending SK Verification</span>'        :
+      s.status === 'declined'                  ? '<span class="badge badge-expired">Declined</span>'                       :
+      s.status === 'revoked'                   ? '<span class="badge badge-expired">Revoked</span>'                        :
+                                                 '<span class="badge badge-expired">Expired</span>';
+    const canRenew = (renewalOpen || State.renewMode) && s.status === 'active'
+                     && s.renewalStatus !== 'opted_in' && s.renewalStatus !== 'opted_out';
+    const renewBtn = canRenew
+      ? `<button class="btn btn-outline btn-sm" onclick="renewSub('${s.id}')">Renew</button>
+         <button class="btn btn-danger btn-sm" onclick="optOutSub('${s.id}','${esc(s.licenseName)}')">Won't Renew</button>`
+      : '';
+    const cancelBtn = ['active', 'approved', 'pending', 'pending_sk_verification'].includes(s.status)
+      ? `<button class="btn btn-danger btn-sm" onclick="cancelSub('${s.id}', '${esc(s.licenseName)}')">${s.status === 'active' ? 'Cancel' : 'Withdraw'}</button>`
+      : '';
+    const dateLabel = s.status === 'pending' ? 'Requested' : 'Started';
+    return `
+      <div class="sub-card" id="sub-${s.id}">
+        <div class="sub-info">
+          <div class="sub-name">${esc(s.licenseName)}</div>
+          <div class="sub-meta">${s.suiteKey === 'GTIS' ? 'GTIS-funded' : /^MIN:/i.test(s.suiteKey) ? 'Ministry: ' + s.suiteKey.replace(/^MIN:/i,'') : 'SuiteKey: ' + esc(s.suiteKey)} &bull; FY${s.fy} &bull; ${dateLabel} ${esc(s.startDate)}</div>
+        </div>
+        <div class="sub-actions">
+          ${badge}
+          ${renewBtn}
+          ${cancelBtn}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function isRenewalWindowOpen() {
+  const m = new Date().getMonth() + 1;
+  return m === 9 || m === 10; // September or October
+}
+
+function renewSub(id) {
+  google.script.run
+    .withSuccessHandler(res => {
+      if (res.alreadyOptedIn) { toast('Already renewed!'); return; }
+      toast('Renewal confirmed for FY' + (State.currentFY + 1) + '!');
+      const sub = State.mySubs.find(s => s.id === id);
+      if (sub) sub.renewalStatus = 'opted_in';
+      renderMySubsList(State.mySubs);
+    })
+    .withFailureHandler(err => toast(err.message, true))
+    .optInRenewal(id, State.currentFY + 1);
+}
+
+function cancelSub(id, name) {
+  if (!confirm('Cancel your subscription to ' + name + '? This cannot be undone.')) return;
+  google.script.run
+    .withSuccessHandler(() => {
+      toast(name + ' subscription cancelled.');
+      State.mySubs = State.mySubs.filter(s => s.id !== id);
+      renderMySubsList(State.mySubs);
+    })
+    .withFailureHandler(err => toast(err.message, true))
+    .cancelSubscription(id);
+}
+
+function optOutSub(id, name) {
+  if (!confirm('Mark "' + name + '" as will not renew? You can change this anytime.')) return;
+  google.script.run
+    .withSuccessHandler(() => {
+      toast('Marked as will not renew: ' + name);
+      const sub = State.mySubs.find(s => s.id === id);
+      if (sub) sub.renewalStatus = 'opted_out';
+      renderMySubsList(State.mySubs);
+    })
+    .withFailureHandler(err => toast(err.message, true))
+    .optOutRenewal(id);
+}
+
+// ──────────────────────────────────────────────────────────
+//  MY TEAM
+// ──────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────
+//  SERVICE MANAGER — SERVICE REQUESTS TAB
+// ──────────────────────────────────────────────────────────
+let _svcSubs = [], _svcAudit = [];
+
+function loadServiceQueue() {
+  document.getElementById('svc-tbody').innerHTML =
+    '<tr><td class="table-empty" colspan="7">Loading…</td></tr>';
+  document.getElementById('svc-audit-tbody').innerHTML =
+    '<tr><td class="table-empty" colspan="6">Loading…</td></tr>';
+
+  google.script.run
+    .withSuccessHandler(result => {
+      _svcSubs = result.subs || [];
+      renderServiceQueue();
+    })
+    .withFailureHandler(err => {
+      document.getElementById('svc-tbody').innerHTML =
+        '<tr><td class="table-empty" colspan="7" style="color:#d93025">' + esc(err.message) + '</td></tr>';
+    })
+    .getServiceManagerQueue();
+
+  google.script.run
+    .withSuccessHandler(log => {
+      _svcAudit = log || [];
+      renderServiceAudit();
+    })
+    .withFailureHandler(() => {})
+    .getServiceManagerAuditLog();
+}
+
+function renderServiceQueue() {
+  const statusF  = document.getElementById('svc-filter-status').value;
+  const userF    = document.getElementById('svc-filter-user').value.toLowerCase();
+  const licF     = document.getElementById('svc-filter-license').value.toLowerCase();
+  const filtered = _svcSubs.filter(s => {
+    if (statusF && s.status !== statusF) return false;
+    if (userF   && !s.userEmail.toLowerCase().includes(userF))     return false;
+    if (licF    && !s.licenseName.toLowerCase().includes(licF))    return false;
+    return true;
+  });
+  const tbody = document.getElementById('svc-tbody');
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td class="table-empty" colspan="7">No requests found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(s => {
+    const licPrice = (State.licenses.find(l => l.id === s.licenseId) || {}).price || 0;
+    const provBtn = s.status === 'approved'
+      ? `<button class="btn btn-primary btn-sm" onclick="openProvisionModal('${esc(s.id)}','${esc(s.licenseName)}','${esc(s.userEmail)}',${licPrice})">Mark as Provisioned</button>`
+      : '';
+    const statusBadge =
+      s.status === 'active'   ? '<span class="badge badge-active">Active</span>' :
+      s.status === 'approved' ? '<span class="badge" style="background:#e8f0fe;color:#1a73e8">Approved — Pending Activation</span>' :
+      s.status === 'pending'  ? '<span class="badge badge-pending">Pending Approval</span>' :
+                                '<span class="badge badge-expired">' + esc(s.status) + '</span>';
+    return `<tr>
+      <td>${esc(s.userEmail)}</td>
+      <td>${esc(s.licenseName)}</td>
+      <td>${esc(s.suiteKey)}</td>
+      <td>${esc(s.startDate)}</td>
+      <td>${s.fy}</td>
+      <td>${statusBadge}</td>
+      <td>${provBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderServiceAudit() {
+  const userF    = document.getElementById('svc-audit-filter-user').value.toLowerCase();
+  const filtered = _svcAudit.filter(e =>
+    !userF || e.userEmail.toLowerCase().includes(userF)
+  );
+  const tbody = document.getElementById('svc-audit-tbody');
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td class="table-empty" colspan="6">No audit entries found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(e => `<tr>
+    <td style="white-space:nowrap">${fmtDateTime(e.timestamp)}</td>
+    <td>${auditBadge(e.action)}</td>
+    <td>${esc(e.userEmail)}</td>
+    <td>${esc(e.licenseName)}</td>
+    <td>${esc(e.suiteKey)}</td>
+    <td>${esc(e.performedBy)}</td>
+  </tr>`).join('');
+}
+
+let _provisionPending = null;
+
+function openProvisionModal(id, name, email, defaultPrice) {
+  _provisionPending = { id, name, email };
+  document.getElementById('provision-modal-desc').textContent =
+    'Mark "' + name + '" for ' + email + ' as provisioned and active?';
+  const priceInput = document.getElementById('provision-price');
+  priceInput.value = defaultPrice || '';
+  document.getElementById('provision-modal-backdrop').style.display = 'flex';
+  priceInput.focus();
+}
+
+function _closeProvisionModal() {
+  document.getElementById('provision-modal-backdrop').style.display = 'none';
+  _provisionPending = null;
+}
+
+document.getElementById('provision-modal-close').addEventListener('click', _closeProvisionModal);
+document.getElementById('provision-modal-cancel').addEventListener('click', _closeProvisionModal);
+document.getElementById('provision-modal-backdrop').addEventListener('click', e => {
+  if (e.target === document.getElementById('provision-modal-backdrop')) _closeProvisionModal();
+});
+
+document.getElementById('provision-modal-confirm').addEventListener('click', () => {
+  if (!_provisionPending) return;
+  const { id, name, email } = _provisionPending;
+  const raw   = document.getElementById('provision-price').value.trim();
+  const price = raw ? parseFloat(raw) : 0;
+  _closeProvisionModal();
+  google.script.run
+    .withSuccessHandler(() => {
+      toast('Provisioned: ' + name + ' for ' + email);
+      loadServiceQueue();
+    })
+    .withFailureHandler(err => toast('Error: ' + err.message, true))
+    .markProvisioned(id, price);
+});
+
+['svc-filter-status','svc-filter-user','svc-filter-license'].forEach(id =>
+  document.getElementById(id).addEventListener('input', renderServiceQueue));
+document.getElementById('svc-audit-filter-user').addEventListener('input', renderServiceAudit);
+
+function loadTeamSubs() {
+  document.getElementById('team-tbody').innerHTML =
+    '<tr><td class="table-empty" colspan="6">Loading…</td></tr>';
+  google.script.run
+    .withSuccessHandler(subs => {
+      State.teamSubs = subs;
+      populateTeamFyFilter(subs);
+      renderTeamTable(subs);
+    })
+    .withFailureHandler(err => {
+      document.getElementById('team-tbody').innerHTML =
+        '<tr><td class="table-empty" colspan="6">Error: ' + esc(err.message) + '</td></tr>';
+    })
+    .getTeamSubscriptions();
+}
+
+function populateTeamFyFilter(subs) {
+  const sel  = document.getElementById('team-fy-filter');
+  const fys  = [...new Set(subs.map(s => s.fy))].sort().reverse();
+  const opts = fys.map(fy => `<option value="${fy}">FY${fy}</option>`).join('');
+  sel.innerHTML = '<option value="">All Fiscal Years</option>' + opts;
+}
+
+function renderTeamTable(subs) {
+  const tbody  = document.getElementById('team-tbody');
+  const teamQ  = document.getElementById('team-filter').value.toLowerCase();
+  const teamFy = document.getElementById('team-fy-filter').value;
+  let filtered = subs.filter(s => {
+    if (teamQ  && !s.userEmail.toLowerCase().includes(teamQ) && !s.licenseName.toLowerCase().includes(teamQ)) return false;
+    if (teamFy && String(s.fy) !== teamFy) return false;
+    return true;
+  });
+  filtered = _sortRows(filtered, State.teamSort.col, State.teamSort.dir);
+  _syncSortIcons('team-table', State.teamSort.col, State.teamSort.dir);
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td class="table-empty" colspan="6">No subscriptions found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(s => `
+    <tr>
+      <td>${esc(s.userEmail)}</td>
+      <td>${esc(s.licenseName)}</td>
+      <td>${esc(s.suiteKey)}</td>
+      <td>${esc(s.startDate)}</td>
+      <td>FY${s.fy}</td>
+      <td><span class="badge ${s.status === 'active' ? 'badge-active' : 'badge-expired'}">${esc(s.status)}</span></td>
+    </tr>`).join('');
+}
+
+document.getElementById('team-filter').addEventListener('input',   () => renderTeamTable(State.teamSubs));
+document.getElementById('team-fy-filter').addEventListener('change', () => renderTeamTable(State.teamSubs));
+document.getElementById('team-table').addEventListener('click', e => {
+  const th = e.target.closest('th.sortable');
+  if (!th) return;
+  if (State.teamSort.col === th.dataset.col) State.teamSort.dir *= -1;
+  else { State.teamSort.col = th.dataset.col; State.teamSort.dir = 1; }
+  renderTeamTable(State.teamSubs);
+});
+
+// ──────────────────────────────────────────────────────────
+//  MY SUITEKEY CHARGES
+// ──────────────────────────────────────────────────────────
+function loadAllSkCharges() {
+  document.getElementById('sk-tbody').innerHTML =
+    '<tr><td class="table-empty" colspan="7">Loading…</td></tr>';
+  document.getElementById('sk-audit-tbody').innerHTML =
+    '<tr><td class="table-empty" colspan="6">Loading…</td></tr>';
+  google.script.run
+    .withSuccessHandler(subs => {
+      State.skCharges = subs;
+      _populateSkFilters(subs);
+      renderSkTable();
+    })
+    .withFailureHandler(err => {
+      document.getElementById('sk-tbody').innerHTML =
+        '<tr><td class="table-empty" colspan="7">Error: ' + esc(err.message) + '</td></tr>';
+    })
+    .getAllSuiteKeyCharges();
+  google.script.run
+    .withSuccessHandler(log => {
+      State.skAuditLog = log;
+      renderSkAuditLog(log);
+    })
+    .withFailureHandler(err => {
+      document.getElementById('sk-audit-tbody').innerHTML =
+        '<tr><td class="table-empty" colspan="6">Error: ' + esc(err.message) + '</td></tr>';
+    })
+    .getMySkAuditLog();
+}
+
+function _populateSkFilters(subs) {
+  const skSel = document.getElementById('sk-filter-sk');
+  const fySel = document.getElementById('sk-filter-fy');
+  const sks = [...new Set(subs.map(s => s.suiteKey))].sort();
+  const fys = [...new Set(subs.map(s => s.fy))].sort().reverse();
+  skSel.innerHTML = '<option value="">All SuiteKeys</option>' +
+    sks.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
+  fySel.innerHTML = '<option value="">All FY</option>' +
+    fys.map(f => `<option value="${f}">FY${f}</option>`).join('');
+}
+
+function renderSkTable() {
+  const filterUser   = document.getElementById('sk-filter-user').value.toLowerCase();
+  const filterTool   = document.getElementById('sk-filter-tool').value.toLowerCase();
+  const filterSk     = document.getElementById('sk-filter-sk').value;
+  const filterStatus = document.getElementById('sk-filter-status').value;
+  const filterFy     = document.getElementById('sk-filter-fy').value;
+
+  let filtered = State.skCharges.filter(s => {
+    if (filterUser   && !s.userEmail.toLowerCase().includes(filterUser))     return false;
+    if (filterTool   && !s.licenseName.toLowerCase().includes(filterTool))   return false;
+    if (filterSk     && s.suiteKey !== filterSk)                             return false;
+    if (filterStatus && s.status !== filterStatus)                           return false;
+    if (filterFy     && String(s.fy) !== filterFy)                           return false;
+    return true;
+  });
+
+  const { col, dir } = State.skSort;
+  filtered.sort((a, b) => {
+    const av = col === 'fy' ? a[col] : String(a[col] || '').toLowerCase();
+    const bv = col === 'fy' ? b[col] : String(b[col] || '').toLowerCase();
+    return dir * (av < bv ? -1 : av > bv ? 1 : 0);
+  });
+
+  // Update sort icons
+  document.querySelectorAll('#sk-table th.sortable').forEach(th => {
+    th.querySelector('.sort-icon').textContent =
+      th.dataset.col === col ? (dir === 1 ? '↑' : '↓') : '⇅';
+  });
+
+  const tbody = document.getElementById('sk-tbody');
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td class="table-empty" colspan="7">No subscriptions found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(s => `
+    <tr>
+      <td>${esc(s.userEmail)}</td>
+      <td>${esc(s.licenseName)}</td>
+      <td>${esc(s.suiteKey)}</td>
+      <td>${esc(s.startDate)}</td>
+      <td>FY${s.fy}</td>
+      <td><span class="badge ${
+        s.status === 'active'  ? 'badge-active'  :
+        s.status === 'pending' ? 'badge-pending'  : 'badge-expired'}">${esc(s.status)}</span></td>
+      <td>${s.status === 'active'
+        ? `<button class="btn btn-danger btn-sm" onclick="revokeSub('${esc(s.id)}','${esc(s.licenseName)}','${esc(s.userEmail)}')">Revoke</button>`
+        : ''}</td>
+    </tr>`).join('');
+}
+
+function loadPendingApprovals() {
+  document.getElementById('sk-pending-list').innerHTML =
+    '<div style="color:#5f6368;font-size:13px;padding:8px">Loading…</div>';
+  google.script.run
+    .withSuccessHandler(approvals => {
+      State.pendingApprovals = approvals;
+      renderPendingApprovals(approvals);
+    })
+    .withFailureHandler(err => {
+      document.getElementById('sk-pending-wrap').style.display = 'none';
+      console.error(err.message);
+    })
+    .getPendingApprovals();
+}
+
+function renderPendingApprovals(approvals) {
+  const wrap  = document.getElementById('sk-pending-wrap');
+  const list  = document.getElementById('sk-pending-list');
+  const cnt   = document.getElementById('sk-pending-count');
+  const badge = document.getElementById('sk-tab-badge');
+  if (badge) {
+    if (approvals.length) { badge.textContent = approvals.length; badge.style.display = ''; }
+    else                  { badge.style.display = 'none'; }
+  }
+  if (!approvals.length) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'block';
+  cnt.textContent    = approvals.length;
+  list.innerHTML = approvals.map(a => `
+    <div class="sub-card" id="pending-${esc(a.id)}">
+      <div class="sub-info">
+        <div class="sub-name">${esc(a.licenseName)}</div>
+        <div class="sub-meta">
+          Requested by: <strong>${esc(a.userEmail)}</strong> &bull;
+          SuiteKey: ${esc(a.suiteKey)} &bull; FY${a.fy}
+        </div>
+      </div>
+      <div class="sub-actions">
+        <span class="badge badge-pending">Pending</span>
+        <button class="btn btn-primary btn-sm"
+          onclick="approveSub('${esc(a.id)}','${esc(a.licenseName)}','${esc(a.userEmail)}')">Approve</button>
+        <button class="btn btn-danger btn-sm"
+          onclick="declineSub('${esc(a.id)}','${esc(a.licenseName)}','${esc(a.userEmail)}')">Decline</button>
+      </div>
+    </div>`).join('');
+}
+
+function approveSub(id, name, userEmail) {
+  google.script.run
+    .withSuccessHandler(() => {
+      toast('Approved: ' + name + ' for ' + userEmail);
+      State.pendingApprovals = State.pendingApprovals.filter(a => a.id !== id);
+      renderPendingApprovals(State.pendingApprovals);
+      loadAllSkCharges();
+    })
+    .withFailureHandler(err => toast(err.message, true))
+    .approveSubscription(id);
+}
+
+let _declinePending = null;
+
+function declineSub(id, name, userEmail) {
+  _declinePending = { id, name, userEmail };
+  document.getElementById('decline-reason').value = '';
+  document.getElementById('decline-modal-backdrop').style.display = 'flex';
+  setTimeout(() => document.getElementById('decline-reason').focus(), 50);
+}
+
+function _closeDeclineModal() {
+  document.getElementById('decline-modal-backdrop').style.display = 'none';
+  _declinePending = null;
+}
+
+document.getElementById('decline-modal-close').addEventListener('click',  _closeDeclineModal);
+document.getElementById('decline-modal-cancel').addEventListener('click', _closeDeclineModal);
+document.getElementById('decline-modal-backdrop').addEventListener('click', e => {
+  if (e.target === document.getElementById('decline-modal-backdrop')) _closeDeclineModal();
+});
+
+document.getElementById('decline-modal-confirm').addEventListener('click', () => {
+  if (!_declinePending) return;
+  const { id, name, userEmail } = _declinePending;
+  const reason = document.getElementById('decline-reason').value.trim();
+  _closeDeclineModal();
+  google.script.run
+    .withSuccessHandler(() => {
+      toast('Declined: ' + name + ' for ' + userEmail);
+      State.pendingApprovals = State.pendingApprovals.filter(a => a.id !== id);
+      renderPendingApprovals(State.pendingApprovals);
+    })
+    .withFailureHandler(err => toast(err.message, true))
+    .declineSubscription(id, reason);
+});
+
+function revokeSub(id, name, userEmail) {
+  if (!confirm('Revoke ' + name + ' for ' + userEmail + '? This will remove their active subscription.')) return;
+  google.script.run
+    .withSuccessHandler(() => {
+      toast('Revoked: ' + name + ' for ' + userEmail);
+      loadAllSkCharges();
+    })
+    .withFailureHandler(err => toast(err.message, true))
+    .revokeSubscription(id);
+}
+
+function renderSkAuditLog(log) {
+  const tbody   = document.getElementById('sk-audit-tbody');
+  const fUser   = (document.getElementById('sk-audit-filter-user')   || {}).value || '';
+  const fAction = (document.getElementById('sk-audit-filter-action') || {}).value || '';
+  let filtered = (log || []).filter(e =>
+    (!fUser   || e.userEmail.toLowerCase().includes(fUser.toLowerCase())) &&
+    (!fAction || e.action === fAction)
+  );
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td class="table-empty" colspan="6">No audit history yet.</td></tr>';
+    return;
+  }
+  const sorted = _sortRows(filtered, State.skAuditSort.col, State.skAuditSort.dir);
+  _syncSortIcons('sk-audit-table', State.skAuditSort.col, State.skAuditSort.dir);
+  tbody.innerHTML = sorted.map(e => `
+    <tr>
+      <td style="white-space:nowrap">${fmtDateTime(e.timestamp)}</td>
+      <td>${auditBadge(e.action)}</td>
+      <td>${esc(e.userEmail)}</td>
+      <td>${esc(e.licenseName)}</td>
+      <td>${esc(e.suiteKey)}</td>
+      <td>${esc(e.performedBy)}</td>
+    </tr>`).join('');
+}
+
+document.getElementById('sk-audit-table').addEventListener('click', e => {
+  const th = e.target.closest('th.sortable');
+  if (!th) return;
+  if (State.skAuditSort.col === th.dataset.col) State.skAuditSort.dir *= -1;
+  else { State.skAuditSort.col = th.dataset.col; State.skAuditSort.dir = 1; }
+  renderSkAuditLog(State.skAuditLog);
+});
+['sk-audit-filter-user','sk-audit-filter-action'].forEach(id =>
+  document.getElementById(id).addEventListener('input', () => renderSkAuditLog(State.skAuditLog))
+);
+
+function loadAdminAuditLog() {
+  document.getElementById('audit-tbody').innerHTML =
+    '<tr><td class="table-empty" colspan="6">Loading…</td></tr>';
+  google.script.run
+    .withSuccessHandler(log => {
+      State.adminAuditLog = log;
+      renderAdminAuditLog(log);
+    })
+    .withFailureHandler(err => {
+      document.getElementById('audit-tbody').innerHTML =
+        '<tr><td class="table-empty" colspan="6">Error: ' + esc(err.message) + '</td></tr>';
+    })
+    .getAuditLog();
+}
+
+function renderAdminAuditLog(log) {
+  const filterUser   = (document.getElementById('audit-filter-user')   || {}).value || '';
+  const filterSk     = (document.getElementById('audit-filter-sk')     || {}).value || '';
+  const filterAction = (document.getElementById('audit-filter-action') || {}).value || '';
+  const filtered = log.filter(e => {
+    if (filterUser   && !e.userEmail.toLowerCase().includes(filterUser.toLowerCase()))   return false;
+    if (filterSk     && !e.suiteKey.toLowerCase().includes(filterSk.toLowerCase()))      return false;
+    if (filterAction && e.action !== filterAction)                                        return false;
+    return true;
+  });
+  const tbody = document.getElementById('audit-tbody');
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td class="table-empty" colspan="6">No entries found.</td></tr>';
+    return;
+  }
+  const sorted = _sortRows(filtered, State.adminAuditSort.col, State.adminAuditSort.dir);
+  _syncSortIcons('admin-audit-table', State.adminAuditSort.col, State.adminAuditSort.dir);
+  tbody.innerHTML = sorted.map(e => `
+    <tr>
+      <td style="white-space:nowrap">${fmtDateTime(e.timestamp)}</td>
+      <td>${auditBadge(e.action)}</td>
+      <td>${esc(e.userEmail)}</td>
+      <td>${esc(e.licenseName)}</td>
+      <td>${esc(e.suiteKey)}</td>
+      <td>${esc(e.performedBy)}</td>
+    </tr>`).join('');
+}
+
+document.getElementById('admin-audit-table').addEventListener('click', e => {
+  const th = e.target.closest('th.sortable');
+  if (!th) return;
+  if (State.adminAuditSort.col === th.dataset.col) State.adminAuditSort.dir *= -1;
+  else { State.adminAuditSort.col = th.dataset.col; State.adminAuditSort.dir = 1; }
+  renderAdminAuditLog(State.adminAuditLog);
+});
+
+function auditBadge(action) {
+  const cfg = {
+    requested    : ['background:#f1f3f4;color:#3c4043',  'requested'],
+    auto_approved: ['background:#e6f4ea;color:#137333',  'auto approved'],
+    approved     : ['background:#e6f4ea;color:#137333',  'approved'],
+    activated    : ['background:#1a73e8;color:#fff',     'activated'],
+    declined     : ['background:#fce8e6;color:#c5221f',  'declined'],
+    revoked      : ['background:#fef3e2;color:#e37400',  'revoked'],
+    cancelled    : ['background:#f1f3f4;color:#3c4043',  'cancelled'],
+    sk_verified  : ['background:#e8f0fe;color:#1a73e8',  'SK verified'],
+  };
+  const [style, label] = cfg[action] || ['background:#f1f3f4;color:#3c4043', action.replace(/_/g,' ')];
+  return `<span class="badge" style="${style}">${esc(label)}</span>`;
+}
+
+function _sortRows(data, col, dir) {
+  return [...data].sort((a, b) => {
+    const av = typeof a[col] === 'number' ? a[col] : String(a[col] || '').toLowerCase();
+    const bv = typeof b[col] === 'number' ? b[col] : String(b[col] || '').toLowerCase();
+    return dir * (av < bv ? -1 : av > bv ? 1 : 0);
+  });
+}
+function _syncSortIcons(tableId, col, dir) {
+  document.querySelectorAll('#' + tableId + ' th.sortable').forEach(th => {
+    th.querySelector('.sort-icon').textContent =
+      th.dataset.col === col ? (dir === 1 ? '↑' : '↓') : '⇅';
+  });
+}
+
+function fmtDateTime(isoStr) {
+  if (!isoStr) return '—';
+  try {
+    return new Date(isoStr).toLocaleString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: 'numeric', minute: '2-digit',
+    });
+  } catch (e) { return isoStr; }
+}
+
+// ──────────────────────────────────────────────────────────
+//  ADMIN — CATALOG
+// ──────────────────────────────────────────────────────────
+function loadAdminCatalog() {
+  google.script.run
+    .withSuccessHandler(licenses => {
+      State.adminCatalog = licenses;
+      renderCatalogTable(licenses);
+    })
+    .withFailureHandler(err => toast(err.message, true))
+    .getLicenses(true);
+}
+
+function renderCatalogTable(licenses) {
+  const tbody   = document.getElementById('catalog-tbody');
+  const fText   = (document.getElementById('cat-filter')        || {}).value || '';
+  const fActive = (document.getElementById('cat-filter-active') || {}).value || '';
+  const q = fText.toLowerCase();
+  let filtered = licenses.filter(l => {
+    if (q && !l.name.toLowerCase().includes(q) && !l.vendor.toLowerCase().includes(q) && !l.category.toLowerCase().includes(q)) return false;
+    if (fActive === 'true'  && !l.active) return false;
+    if (fActive === 'false' &&  l.active) return false;
+    return true;
+  });
+  filtered = _sortRows(filtered, State.catalogSort.col, State.catalogSort.dir);
+  _syncSortIcons('catalog-table', State.catalogSort.col, State.catalogSort.dir);
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td class="table-empty" colspan="7">No licenses found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(l => `
+    <tr id="lic-row-${l.id}" onclick="editLicense('${l.id}')" style="cursor:pointer">
+      <td>${esc(l.name)}</td>
+      <td>${esc(l.vendor)}</td>
+      <td>${esc(l.category)}</td>
+      <td>${fmtUSD(l.price)}</td>
+      <td>${fmtBilling(l.billingCycle, l.renewalMonth)}</td>
+      <td>${l.gtisSponsored ? '<span class="badge badge-opted-in">GTIS</span>' : 'User'}</td>
+      <td><span class="badge ${l.active ? 'badge-active' : 'badge-expired'}">${l.active ? 'Active' : 'Inactive'}</span></td>
+    </tr>`).join('');
+}
+
+document.getElementById('btn-add-license').addEventListener('click', () => openLicenseEditor(null));
+['cat-filter','cat-filter-active'].forEach(id =>
+  document.getElementById(id).addEventListener('input', () => renderCatalogTable(State.adminCatalog))
+);
+document.getElementById('catalog-table').addEventListener('click', e => {
+  const th = e.target.closest('th.sortable');
+  if (!th) return;
+  if (State.catalogSort.col === th.dataset.col) State.catalogSort.dir *= -1;
+  else { State.catalogSort.col = th.dataset.col; State.catalogSort.dir = 1; }
+  renderCatalogTable(State.adminCatalog);
+});
+
+function editLicense(id) {
+  const lic = State.adminCatalog.find(l => l.id === id);
+  if (lic) openLicenseEditor(lic);
+}
+
+function openLicenseEditor(lic) {
+  document.getElementById('lic-modal-title').textContent = lic ? 'Edit License' : 'Add License';
+
+  const vendors    = [...new Set(State.adminCatalog.map(l => l.vendor).filter(Boolean))].sort();
+  const categories = [...new Set(State.adminCatalog.map(l => l.category).filter(Boolean))].sort();
+  document.getElementById('vendor-suggestions').innerHTML   = vendors.map(v => `<option value="${esc(v)}">`).join('');
+  document.getElementById('category-suggestions').innerHTML = categories.map(c => `<option value="${esc(c)}">`).join('');
+
+  document.getElementById('lic-name').value     = lic ? lic.name          : '';
+  document.getElementById('lic-vendor').value   = lic ? lic.vendor        : '';
+  document.getElementById('lic-category').value = lic ? lic.category      : '';
+  document.getElementById('lic-price').value    = lic ? lic.price         : '';
+  document.getElementById('lic-notes').value    = lic ? lic.notes         : '';
+  document.getElementById('lic-gtis').checked   = lic ? !!lic.gtisSponsored : false;
+
+  const logoUrl = lic ? (lic.logoUrl || '') : '';
+  document.getElementById('lic-logo-url').value = logoUrl;
+  const preview = document.getElementById('lic-logo-preview');
+  const img     = document.getElementById('lic-logo-img');
+  if (logoUrl) { img.src = logoUrl; preview.style.display = 'block'; }
+  else         { img.src = '';       preview.style.display = 'none'; }
+
+  document.getElementById('lic-more-info-url').value   = lic ? (lic.moreInfoUrl    || '') : '';
+  document.getElementById('lic-activation-url').value = lic ? (lic.activationUrl  || '') : '';
+  document.getElementById('lic-group-email').value      = lic ? (lic.googleGroupEmail || '') : '';
+  document.getElementById('lic-service-manager').value  = lic ? (lic.serviceManager   || '') : '';
+
+  document.getElementById('lic-billing-select').value = lic ? (lic.billingCycle || 'annual') : 'annual';
+  document.getElementById('lic-renewal-month').value  = lic && lic.renewalMonth ? String(lic.renewalMonth) : '';
+  document.getElementById('lic-reminder').checked     = lic ? !!lic.renewalReminder : false;
+  document.getElementById('lic-pro-rated').checked    = lic ? !!lic.proRated        : false;
+  toggleRenewalMonthGroup();
+
+  document.getElementById('lic-modal-save')._editingId  = lic ? lic.id        : null;
+  document.getElementById('lic-modal-save')._createdBy  = lic ? lic.createdBy : '';
+
+  const deactivateBtn = document.getElementById('lic-modal-deactivate');
+  const canDeactivate = lic && lic.active && (!lic.createdBy || lic.createdBy === State.userEmail);
+  deactivateBtn.style.display = canDeactivate ? '' : 'none';
+  deactivateBtn.dataset.licId = canDeactivate ? lic.id : '';
+
+  document.getElementById('lic-modal-backdrop').style.display = 'flex';
+  setTimeout(() => document.getElementById('lic-name').focus(), 50);
+}
+
+function closeLicenseEditor() {
+  document.getElementById('lic-modal-backdrop').style.display = 'none';
+}
+
+function toggleRenewalMonthGroup() {
+  const isAnnual = document.getElementById('lic-billing-select').value === 'annual';
+  document.getElementById('lic-renewal-month-group').style.display = isAnnual ? 'block' : 'none';
+}
+
+document.getElementById('lic-billing-select').addEventListener('change', toggleRenewalMonthGroup);
+
+document.getElementById('lic-logo-url').addEventListener('input', () => {
+  const url     = document.getElementById('lic-logo-url').value.trim();
+  const preview = document.getElementById('lic-logo-preview');
+  const img     = document.getElementById('lic-logo-img');
+  if (url) { img.src = url; preview.style.display = 'block'; }
+  else     { img.src = '';  preview.style.display = 'none'; }
+});
+
+document.getElementById('lic-modal-close').addEventListener('click',  closeLicenseEditor);
+document.getElementById('lic-modal-cancel').addEventListener('click', closeLicenseEditor);
+document.getElementById('lic-modal-deactivate').addEventListener('click', () => {
+  const id = document.getElementById('lic-modal-deactivate').dataset.licId;
+  if (!id) return;
+  closeLicenseEditor();
+  deactivateLic(id);
+});
+document.getElementById('lic-modal-backdrop').addEventListener('click', e => {
+  if (e.target === document.getElementById('lic-modal-backdrop')) closeLicenseEditor();
+});
+
+document.getElementById('lic-modal-save').addEventListener('click', () => {
+  const btn = document.getElementById('lic-modal-save');
+  const license = {
+    id       : btn._editingId || null,
+    name     : document.getElementById('lic-name').value.trim(),
+    vendor   : document.getElementById('lic-vendor').value.trim(),
+    category : document.getElementById('lic-category').value.trim(),
+    price    : parseFloat(document.getElementById('lic-price').value) || 0,
+    notes          : document.getElementById('lic-notes').value.trim(),
+    active         : true,
+    gtisSponsored  : document.getElementById('lic-gtis').checked,
+    billingCycle   : document.getElementById('lic-billing-select').value || 'annual',
+    renewalMonth   : parseInt(document.getElementById('lic-renewal-month').value) || 0,
+    renewalReminder: document.getElementById('lic-reminder').checked,
+    proRated       : document.getElementById('lic-pro-rated').checked,
+    createdBy      : btn._createdBy || '',
+    logoUrl        : document.getElementById('lic-logo-url').value.trim(),
+    moreInfoUrl      : document.getElementById('lic-more-info-url').value.trim(),
+    activationUrl    : document.getElementById('lic-activation-url').value.trim(),
+    googleGroupEmail : document.getElementById('lic-group-email').value.trim(),
+    serviceManager   : document.getElementById('lic-service-manager').value.trim(),
+  };
+  if (!license.name) { toast('Name is required.', true); return; }
+  btn.disabled    = true;
+  btn.textContent = 'Saving…';
+  google.script.run
+    .withSuccessHandler(res => {
+      if (res.action === 'created') {
+        State.adminCatalog.push(res.license);
+      } else {
+        const idx = State.adminCatalog.findIndex(l => l.id === res.id);
+        if (idx >= 0) State.adminCatalog[idx] = res.license;
+      }
+      renderCatalogTable(State.adminCatalog);
+      toast(res.action === 'created' ? 'License added.' : 'License updated.');
+      closeLicenseEditor();
+      btn.disabled    = false;
+      btn.textContent = 'Save License';
+    })
+    .withFailureHandler(err => {
+      toast(err.message, true);
+      btn.disabled    = false;
+      btn.textContent = 'Save License';
+    })
+    .saveLicense(license);
+});
+
+function deactivateLic(id) {
+  const lic = State.adminCatalog.find(l => l.id === id);
+  if (!confirm('Deactivate ' + (lic ? lic.name : id) + '? It will no longer appear in the catalog.')) return;
+  google.script.run
+    .withSuccessHandler(() => {
+      const idx = State.adminCatalog.findIndex(l => l.id === id);
+      if (idx >= 0) State.adminCatalog[idx] = { ...State.adminCatalog[idx], active: false };
+      renderCatalogTable(State.adminCatalog);
+      toast('License deactivated.');
+    })
+    .withFailureHandler(err => toast(err.message, true))
+    .deactivateLicense(id);
+}
+
+// ──────────────────────────────────────────────────────────
+//  ADMIN — ALL SUBSCRIPTIONS
+// ──────────────────────────────────────────────────────────
+function loadAdminSubs() {
+  document.getElementById('all-subs-tbody').innerHTML =
+    '<tr><td class="table-empty" colspan="8">Loading…</td></tr>';
+  google.script.run
+    .withSuccessHandler(subs => {
+      State.adminSubs = subs;
+      const fys = [...new Set(subs.map(s => s.fy))].sort().reverse();
+      const fySel = document.getElementById('subs-filter-fy');
+      fySel.innerHTML = '<option value="">All FY</option>' +
+        fys.map(f => `<option value="${f}">FY${f}</option>`).join('');
+      renderAdminSubsTable(subs);
+    })
+    .withFailureHandler(err => toast(err.message, true))
+    .getAllSubscriptions();
+}
+
+function renderAdminSubsTable(subs) {
+  const tbody   = document.getElementById('all-subs-tbody');
+  const fUser   = document.getElementById('subs-filter-user').value.toLowerCase();
+  const fTool   = document.getElementById('subs-filter-tool').value.toLowerCase();
+  const fSk     = document.getElementById('subs-filter-sk').value.toLowerCase();
+  const fStatus = document.getElementById('subs-filter-status').value;
+  const fFy     = document.getElementById('subs-filter-fy').value;
+  let filtered = subs.filter(s =>
+    (!fUser   || s.userEmail.toLowerCase().includes(fUser)) &&
+    (!fTool   || s.licenseName.toLowerCase().includes(fTool)) &&
+    (!fSk     || s.suiteKey.toLowerCase().includes(fSk)) &&
+    (!fStatus || s.status === fStatus) &&
+    (!fFy     || String(s.fy) === fFy)
+  );
+  filtered = _sortRows(filtered, State.allSubsSort.col, State.allSubsSort.dir);
+  _syncSortIcons('all-subs-table', State.allSubsSort.col, State.allSubsSort.dir);
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td class="table-empty" colspan="8">No subscriptions match.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(s => {
+    const statusCfg = {
+      active    : 'badge-active',
+      approved  : 'background:#e8f0fe;color:#1a73e8',
+      pending   : 'background:#f1f3f4;color:#3c4043',
+      declined  : 'background:#fce8e6;color:#c5221f',
+      revoked   : 'background:#fef3e2;color:#e37400',
+      cancelled : 'background:#f1f3f4;color:#3c4043',
+    };
+    const badgeCls = statusCfg[s.status];
+    const badge = badgeCls && badgeCls.startsWith('badge-')
+      ? `<span class="badge ${badgeCls}">${esc(s.status)}</span>`
+      : `<span class="badge" style="${badgeCls || ''}">${esc(s.status.replace(/_/g,' '))}</span>`;
+    const activateBtn = s.status === 'approved'
+      ? `<button class="btn btn-sm" style="font-size:12px;padding:4px 10px;margin-right:4px"
+             onclick="activateSub('${esc(s.id)}','${esc(s.licenseName)}','${esc(s.userEmail)}')">
+           Activate
+         </button>`
+      : '';
+    const cancelBtn = !['cancelled','declined','revoked','expired'].includes(s.status)
+      ? `<button class="btn btn-danger btn-sm" style="font-size:12px;padding:4px 10px"
+             onclick="adminCancelSub('${esc(s.id)}','${esc(s.licenseName)}','${esc(s.userEmail)}')">
+           Cancel
+         </button>`
+      : '';
+    return `
+    <tr>
+      <td>${esc(s.userEmail)}</td>
+      <td>${esc(s.licenseName)}</td>
+      <td>${esc(s.suiteKey)}</td>
+      <td>${esc(s.startDate)}</td>
+      <td>FY${s.fy}</td>
+      <td>${badge}</td>
+      <td>${s.renewalStatus || '—'}</td>
+      <td style="white-space:nowrap">${activateBtn}${cancelBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+function activateSub(id, name, email) {
+  if (!confirm('Mark seat provisioned for ' + email + ' — ' + name + '?\nThis will notify them that their account is ready.')) return;
+  google.script.run
+    .withSuccessHandler(() => {
+      toast('Activated: ' + name + ' for ' + email);
+      State.adminSubs = [];
+      loadAdminSubs();
+    })
+    .withFailureHandler(err => toast(err.message, true))
+    .activateSubscription(id);
+}
+
+function adminCancelSub(id, name, email) {
+  if (!confirm('Cancel subscription to ' + name + ' for ' + email + '?\nThis cannot be undone.')) return;
+  google.script.run
+    .withSuccessHandler(() => {
+      toast('Cancelled: ' + name + ' for ' + email);
+      State.adminSubs = [];
+      loadAdminSubs();
+    })
+    .withFailureHandler(err => toast(err.message, true))
+    .adminCancelSubscription(id);
+}
+
+document.getElementById('btn-refresh-subs').addEventListener('click', () => { State.adminSubs = []; loadAdminSubs(); });
+['subs-filter-user','subs-filter-tool','subs-filter-sk','subs-filter-status','subs-filter-fy'].forEach(id =>
+  document.getElementById(id).addEventListener('input', () => renderAdminSubsTable(State.adminSubs))
+);
+document.getElementById('all-subs-table').addEventListener('click', e => {
+  const th = e.target.closest('th.sortable');
+  if (!th) return;
+  if (State.allSubsSort.col === th.dataset.col) State.allSubsSort.dir *= -1;
+  else { State.allSubsSort.col = th.dataset.col; State.allSubsSort.dir = 1; }
+  renderAdminSubsTable(State.adminSubs);
+});
+
+// ──────────────────────────────────────────────────────────
+//  ADMIN — FINANCE EXPORT
+// ──────────────────────────────────────────────────────────
+let _financeInitialized = false;
+function initFinanceExport() {
+  if (_financeInitialized) return;
+  _financeInitialized = true;
+  // Default: first and last day of previous month
+  const now   = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const last  = new Date(now.getFullYear(), now.getMonth(), 0);
+  const fmt   = d => d.toISOString().split('T')[0];
+  document.getElementById('finance-start').value = fmt(first);
+  document.getElementById('finance-end').value   = fmt(last);
+}
+
+function _runFinanceExport(callback) {
+  const start = document.getElementById('finance-start').value;
+  const end   = document.getElementById('finance-end').value;
+  if (!start || !end) { toast('Please set a date range.', true); return; }
+  google.script.run
+    .withSuccessHandler(callback)
+    .withFailureHandler(err => toast(err.message, true))
+    .getFinanceExport(start, end);
+}
+
+document.getElementById('btn-finance-preview').addEventListener('click', () => {
+  _runFinanceExport(rows => {
+    const tbody = document.getElementById('finance-tbody');
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td class="table-empty" colspan="6">No results for this date range.</td></tr>';
+    } else {
+      tbody.innerHTML = rows.map(r => `
+        <tr>
+          <td>${esc(r.userEmail)}</td>
+          <td>${esc(r.licenseName)}</td>
+          <td>${esc(r.suiteKey)}</td>
+          <td style="text-align:right">${r.cost > 0 ? fmtUSD(r.cost) : '—'}</td>
+          <td>${esc(r.dateRequested)}</td>
+          <td>${esc(r.status)}</td>
+        </tr>`).join('');
+    }
+    const total = rows.reduce((s, r) => s + (r.cost || 0), 0);
+    document.getElementById('finance-total').textContent =
+      rows.length + ' row' + (rows.length === 1 ? '' : 's') +
+      (total > 0 ? ' — Total: ' + fmtUSD(total) : '');
+    document.getElementById('finance-preview-wrap').style.display = 'block';
+  });
+});
+
+document.getElementById('btn-finance-export').addEventListener('click', () => {
+  _runFinanceExport(rows => {
+    const headers = ['User Email', 'License', 'SuiteKey', 'Pro-Rated Cost', 'Date Requested', 'Status'];
+    const lines   = [headers.join(',')];
+    rows.forEach(r => {
+      lines.push([
+        _csvCell(r.userEmail),
+        _csvCell(r.licenseName),
+        _csvCell(r.suiteKey),
+        r.cost.toFixed(2),
+        _csvCell(r.dateRequested),
+        _csvCell(r.status),
+      ].join(','));
+    });
+    const start = document.getElementById('finance-start').value;
+    const end   = document.getElementById('finance-end').value;
+    const blob  = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const url   = URL.createObjectURL(blob);
+    const a     = document.createElement('a');
+    a.href      = url;
+    a.download  = 'license-export-' + start + '-to-' + end + '.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+});
+
+function _csvCell(val) {
+  val = String(val || '');
+  return (val.includes(',') || val.includes('"') || val.includes('\n'))
+    ? '"' + val.replace(/"/g, '""') + '"'
+    : val;
+}
+
+// ──────────────────────────────────────────────────────────
+//  ADMIN — SETTINGS
+// ──────────────────────────────────────────────────────────
+function loadAdminSettings() {
+  google.script.run
+    .withSuccessHandler(s => {
+      document.getElementById('set-perm-id').value       = s.permissionsSheetId  || '';
+      document.getElementById('set-hier-id').value       = s.hierarchySheetId    || '';
+      document.getElementById('set-admin-emails').value  = s.licenseManagerEmails || '';
+      _setSheetLink('link-perm-sheet', s.permissionsSheetId);
+      _setSheetLink('link-hier-sheet', s.hierarchySheetId);
+    })
+    .withFailureHandler(err => toast(err.message, true))
+    .getAdminSettings();
+}
+
+document.getElementById('btn-save-settings').addEventListener('click', () => {
+  const settings = {
+    permissionsSheetId   : document.getElementById('set-perm-id').value.trim(),
+    hierarchySheetId     : document.getElementById('set-hier-id').value.trim(),
+    licenseManagerEmails : document.getElementById('set-admin-emails').value.trim(),
+  };
+  setSettingsMsg('Saving…');
+  google.script.run
+    .withSuccessHandler(() => setSettingsMsg('Settings saved.', false))
+    .withFailureHandler(err => setSettingsMsg('Error: ' + err.message, true))
+    .saveAdminSettings(settings);
+});
+
+document.getElementById('btn-sync-cache').addEventListener('click', () => {
+  setSettingsMsg('Syncing permissions cache…');
+  google.script.run
+    .withSuccessHandler(r => setSettingsMsg(r.ok ? 'Cache synced (' + r.rows + ' SuiteKeys).' : 'Error: ' + r.error, !r.ok))
+    .withFailureHandler(err => setSettingsMsg('Error: ' + err.message, true))
+    .syncPermissionsCache();
+});
+
+
+document.getElementById('btn-send-renewal').addEventListener('click', () => {
+  if (!confirm('Send a sample renewal email to yourself? This only goes to you — no subscribers are contacted.')) return;
+  setSettingsMsg('Sending test email…');
+  google.script.run
+    .withSuccessHandler(r => {
+      setSettingsMsg('Test email sent to ' + r.sentTo + '. Check your inbox.');
+    })
+    .withFailureHandler(err => setSettingsMsg('Error: ' + err.message, true))
+    .sendTestRenewalEmail();
+});
+
+function _setSheetLink(linkId, idOrUrl) {
+  const el = document.getElementById(linkId);
+  if (!el) return;
+  if (!idOrUrl) { el.style.display = 'none'; return; }
+  const id = idOrUrl.includes('/') ? (idOrUrl.match(/\/d\/([a-zA-Z0-9_-]+)/) || [])[1] : idOrUrl;
+  if (!id) { el.style.display = 'none'; return; }
+  el.href = 'https://docs.google.com/spreadsheets/d/' + id + '/edit';
+  el.style.display = 'inline';
+}
+
+function setSettingsMsg(msg, isError) {
+  const el = document.getElementById('settings-msg');
+  el.textContent = msg;
+  el.style.color = isError ? '#d93025' : '#137333';
+}
+
+// ──────────────────────────────────────────────────────────
+//  ADMIN — MINISTRY IDS
+// ──────────────────────────────────────────────────────────
+let _minList = [];
+
+function loadMinistryIdList() {
+  document.getElementById('min-tbody').innerHTML = '<tr><td colspan="3" class="table-empty">Loading…</td></tr>';
+  google.script.run
+    .withSuccessHandler(rows => {
+      _minList = rows || [];
+      renderMinistryIdList(_minList);
+    })
+    .withFailureHandler(err => {
+      document.getElementById('min-tbody').innerHTML =
+        '<tr><td colspan="3" class="table-empty" style="color:#d93025">' + esc(err.message) + '</td></tr>';
+    })
+    .getMinistryIdList();
+}
+
+function renderMinistryIdList(rows) {
+  const tbody = document.getElementById('min-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="3" class="table-empty">No Ministry IDs on file.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => `
+    <tr>
+      <td>${esc(r.email)}</td>
+      <td style="font-family:monospace;letter-spacing:2px">${esc(r.ministryId)}</td>
+      <td style="text-align:right">
+        <button class="btn btn-outline" style="padding:4px 12px;font-size:12px"
+          onclick="editMinistryId('${esc(r.email)}','${esc(r.ministryId)}')">Edit</button>
+      </td>
+    </tr>`).join('');
+}
+
+function editMinistryId(email, currentId) {
+  document.getElementById('min-new-email').value = email;
+  document.getElementById('min-new-id').value    = currentId;
+  document.getElementById('min-new-email').focus();
+}
+
+function setMinMsg(msg, isError) {
+  const el = document.getElementById('min-msg');
+  el.textContent = msg;
+  el.style.color = isError ? '#d93025' : '#137333';
+}
+
+document.getElementById('btn-min-save').addEventListener('click', () => {
+  const email = document.getElementById('min-new-email').value.trim();
+  const id    = document.getElementById('min-new-id').value.trim();
+  if (!email) { setMinMsg('Email is required.', true); return; }
+  if (id && !/^\d{6}$/.test(id)) { setMinMsg('Ministry ID must be exactly 6 digits.', true); return; }
+  setMinMsg('Saving…');
+  google.script.run
+    .withSuccessHandler(() => {
+      setMinMsg(id ? 'Saved.' : 'Entry removed.');
+      document.getElementById('min-new-email').value = '';
+      document.getElementById('min-new-id').value    = '';
+      loadMinistryIdList();
+    })
+    .withFailureHandler(err => setMinMsg('Error: ' + err.message, true))
+    .updateMinistryId(email, id);
+});
+
+document.getElementById('min-new-id').addEventListener('input', e => {
+  e.target.value = e.target.value.replace(/\D/g, '').substring(0, 6);
+});
+
+document.getElementById('min-search').addEventListener('input', function() {
+  const q = this.value.trim().toLowerCase();
+  if (!q) { renderMinistryIdList(_minList); return; }
+  renderMinistryIdList(_minList.filter(r =>
+    r.email.toLowerCase().includes(q) || r.ministryId.includes(q)
+  ));
+});
+
+// ──────────────────────────────────────────────────────────
+//  ADMIN — SUITEKEYS
+// ──────────────────────────────────────────────────────────
+let _skList = [];
+
+function loadSuiteKeyList() {
+  document.getElementById('admin-sk-tbody').innerHTML = '<tr><td colspan="5" class="table-empty">Loading…</td></tr>';
+  google.script.run
+    .withSuccessHandler(rows => {
+      _skList = rows || [];
+      renderSuiteKeyList(_skList);
+    })
+    .withFailureHandler(err => {
+      document.getElementById('admin-sk-tbody').innerHTML =
+        '<tr><td colspan="5" class="table-empty" style="color:#d93025">' + esc(err.message) + '</td></tr>';
+    })
+    .getSuiteKeyList();
+}
+
+function renderSuiteKeyList(rows) {
+  const tbody = document.getElementById('admin-sk-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="table-empty">No SuiteKeys found.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const statusBadge = r.ownerStatus === 'pending'
+      ? '<span class="badge badge-pending" style="font-size:11px">Pending confirmation</span>'
+      : r.ownerStatus === 'unassigned'
+      ? '<span class="badge" style="font-size:11px;background:#f1f3f4;color:#5f6368">No owner</span>'
+      : '<span class="badge badge-active"  style="font-size:11px">Confirmed</span>';
+    return `
+    <tr data-sk="${esc(r.suiteKey)}">
+      <td style="font-weight:500">${esc(r.suiteKey)}</td>
+      <td>${statusBadge}</td>
+      <td style="color:#5f6368">${esc(r.description) || '—'}</td>
+      <td class="sk-owner-cell">${esc(r.owner) || '<span style="color:#9aa0a6">none</span>'}</td>
+      <td style="text-align:right">
+        <button class="btn btn-outline" style="padding:4px 12px;font-size:12px"
+          onclick="editSkOwner('${esc(r.suiteKey)}', this)">Edit</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function editSkOwner(suiteKey, btn) {
+  const tr       = btn.closest('tr');
+  const ownerCell = tr.querySelector('.sk-owner-cell');
+  const current  = _skList.find(r => r.suiteKey === suiteKey);
+  const currentOwner = current ? current.owner : '';
+
+  ownerCell.innerHTML =
+    `<input type="email" value="${esc(currentOwner)}" style="width:220px;padding:4px 8px;border:1px solid #1a73e8;border-radius:4px;font-size:13px" id="sk-input-${esc(suiteKey)}">`;
+  btn.textContent = 'Save';
+  btn.onclick = () => saveSkOwner(suiteKey, btn);
+}
+
+function saveSkOwner(suiteKey, btn) {
+  const input    = document.getElementById('sk-input-' + suiteKey);
+  const newOwner = input ? input.value.trim() : '';
+  btn.textContent = 'Saving…';
+  btn.disabled    = true;
+  google.script.run
+    .withSuccessHandler(() => {
+      toast('Owner updated for ' + suiteKey);
+      const entry = _skList.find(r => r.suiteKey === suiteKey);
+      if (entry) entry.owner = newOwner;
+      loadSuiteKeyList();
+    })
+    .withFailureHandler(err => {
+      toast('Error: ' + err.message, true);
+      btn.textContent = 'Save';
+      btn.disabled    = false;
+    })
+    .updateSuiteKeyOwner(suiteKey, newOwner);
+}
+
+document.getElementById('sk-search').addEventListener('input', function() {
+  const q = this.value.trim().toLowerCase();
+  const filtered = _skList.filter(r =>
+    r.suiteKey.toLowerCase().includes(q) ||
+    r.owner.toLowerCase().includes(q) ||
+    r.description.toLowerCase().includes(q)
+  );
+  renderSuiteKeyList(filtered);
+});
+
+// ──────────────────────────────────────────────────────────
+//  ADMIN — IMPORT
+// ──────────────────────────────────────────────────────────
+let _importParsed = [];
+
+function _parseImportCSV(raw) {
+  const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+  if (lines.length < 2) return { error: 'Need at least a header row and one data row.' };
+
+  const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z]/g, ''));
+  const col = name => headers.indexOf(name);
+  const iEmail = col('useremail') === -1 ? col('email') : col('useremail');
+  const iLic   = col('licensename') === -1 ? col('license') : col('licensename');
+  const iSK    = col('suitekey') === -1 ? col('sk') : col('suitekey');
+  const iDate  = col('startdate') === -1 ? col('date') : col('startdate');
+  const iFY    = col('fy');
+
+  if (iEmail < 0) return { error: 'Missing required column: userEmail' };
+  if (iLic   < 0) return { error: 'Missing required column: licenseName' };
+  if (iSK    < 0) return { error: 'Missing required column: suiteKey' };
+
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+    let sk = cells[iSK] || '';
+    // Normalize bare 6-digit ministry IDs to MIN: prefix
+    if (/^\d{6}$/.test(sk)) sk = 'MIN:' + sk;
+    else if (/^MIN:\d{6}$/i.test(sk)) sk = 'MIN:' + sk.slice(4);
+    rows.push({
+      userEmail  : cells[iEmail] || '',
+      licenseName: cells[iLic]   || '',
+      suiteKey   : sk,
+      startDate  : iDate >= 0 ? (cells[iDate] || '') : '',
+      fy         : iFY  >= 0 ? (cells[iFY]   || '') : '',
+    });
+  }
+  return { rows };
+}
+
+document.getElementById('btn-import-preview').addEventListener('click', () => {
+  const raw = document.getElementById('import-csv').value.trim();
+  if (!raw) { toast('Paste a CSV first.', true); return; }
+
+  const parsed = _parseImportCSV(raw);
+  if (parsed.error) { toast(parsed.error, true); return; }
+
+  _importParsed = parsed.rows;
+  const licNameSet = new Set((State.licenses || []).map(l => l.name.toLowerCase()));
+  const tbody = document.getElementById('import-tbody');
+  tbody.innerHTML = '';
+  let hasError = false;
+  parsed.rows.forEach(r => {
+    const errors = [];
+    if (!r.userEmail)   errors.push('missing email');
+    if (!r.licenseName) errors.push('missing license');
+    else if (licNameSet.size > 0 && !licNameSet.has(r.licenseName.toLowerCase())) errors.push('license not in catalog');
+    if (!r.suiteKey)    errors.push('missing suiteKey');
+    const valid = errors.length === 0;
+    if (!valid) hasError = true;
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + esc(r.userEmail)   + '</td>' +
+      '<td>' + esc(r.licenseName) + '</td>' +
+      '<td>' + esc(r.suiteKey)    + '</td>' +
+      '<td>' + esc(r.startDate)   + '</td>' +
+      '<td>' + esc(r.fy)          + '</td>' +
+      '<td>' + (valid
+        ? '<span style="color:#137333">OK</span>'
+        : '<span style="color:#d93025">' + errors.join(', ') + '</span>') + '</td>';
+    tbody.appendChild(tr);
+  });
+  document.getElementById('import-preview-msg').textContent =
+    parsed.rows.length + ' row' + (parsed.rows.length === 1 ? '' : 's') + ' parsed' +
+    (hasError ? ' — fix errors before importing' : ' — ready to import');
+  document.getElementById('import-preview-msg').style.color = hasError ? '#d93025' : '#137333';
+  document.getElementById('import-preview-wrap').style.display = 'block';
+  document.getElementById('btn-import-confirm').disabled = hasError;
+  document.getElementById('import-result-msg').textContent = '';
+});
+
+document.getElementById('btn-import-confirm').addEventListener('click', () => {
+  if (!_importParsed.length) return;
+  if (!confirm('Import ' + _importParsed.length + ' subscription' + (_importParsed.length === 1 ? '' : 's') + ' as active? This cannot be undone.')) return;
+  document.getElementById('btn-import-confirm').disabled = true;
+  document.getElementById('import-result-msg').style.color = '#5f6368';
+  document.getElementById('import-result-msg').textContent = 'Importing…';
+  google.script.run
+    .withSuccessHandler(results => {
+      const ok    = results.filter(r => r.ok).length;
+      const fail  = results.filter(r => !r.ok);
+      const tbody = document.getElementById('import-tbody');
+      const trs   = tbody.querySelectorAll('tr');
+      results.forEach((r, i) => {
+        if (!trs[i]) return;
+        const statusCell = trs[i].querySelectorAll('td')[5];
+        if (r.ok) {
+          statusCell.innerHTML = '<span style="color:#137333">Imported (' + esc(r.id) + ')</span>';
+        } else {
+          statusCell.innerHTML = '<span style="color:#d93025">' + esc(r.error) + '</span>';
+        }
+      });
+      const msg = document.getElementById('import-result-msg');
+      msg.textContent = ok + ' imported' + (fail.length ? ', ' + fail.length + ' skipped (see table)' : ' successfully.');
+      msg.style.color = fail.length ? '#b06000' : '#137333';
+      if (ok > 0) State.adminSubs = [];
+    })
+    .withFailureHandler(err => {
+      document.getElementById('import-result-msg').textContent = 'Error: ' + err.message;
+      document.getElementById('import-result-msg').style.color = '#d93025';
+      document.getElementById('btn-import-confirm').disabled = false;
+    })
+    .importSubscriptions(_importParsed);
+});
+
+// ──────────────────────────────────────────────────────────
+//  ADMIN TAB SUB-NAVIGATION
+// ──────────────────────────────────────────────────────────
+document.querySelectorAll('.admin-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const sec = btn.dataset.section;
+    document.querySelectorAll('.admin-tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.admin-section').forEach(s => s.classList.toggle('active', s.id === 'admin-' + sec));
+    if (sec === 'all-subs'  && !State.adminSubs.length) loadAdminSubs();
+    if (sec === 'audit'     && !State.adminAuditLog.length) loadAdminAuditLog();
+    if (sec === 'settings') loadAdminSettings();
+    if (sec === 'finance')  initFinanceExport();
+    if (sec === 'suitekeys') loadSuiteKeyList();
+    if (sec === 'ministry')  loadMinistryIdList();
+  });
+});
+
+document.getElementById('btn-refresh-audit').addEventListener('click', loadAdminAuditLog);
+document.getElementById('audit-filter-user').addEventListener('input',   () => renderAdminAuditLog(State.adminAuditLog));
+document.getElementById('audit-filter-sk').addEventListener('input',     () => renderAdminAuditLog(State.adminAuditLog));
+document.getElementById('audit-filter-action').addEventListener('change',() => renderAdminAuditLog(State.adminAuditLog));
+
+document.getElementById('btn-refresh-sk').addEventListener('click', loadAllSkCharges);
+['sk-filter-user','sk-filter-tool','sk-filter-sk','sk-filter-status','sk-filter-fy'].forEach(id =>
+  document.getElementById(id).addEventListener('change', renderSkTable));
+document.getElementById('sk-filter-user').addEventListener('input', renderSkTable);
+document.getElementById('sk-filter-tool').addEventListener('input', renderSkTable);
+
+document.querySelectorAll('#sk-table th.sortable').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.col;
+    if (State.skSort.col === col) {
+      State.skSort.dir *= -1;
+    } else {
+      State.skSort.col = col;
+      State.skSort.dir = 1;
+    }
+    renderSkTable();
+  });
+});
+
+// ──────────────────────────────────────────────────────────
+//  TOAST
+// ──────────────────────────────────────────────────────────
+let _toastTimer = null;
+function toast(msg, isError) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className   = 'show' + (isError ? ' error' : '');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.className = ''; }, 3500);
+}
+
+// ──────────────────────────────────────────────────────────
+//  UTILITIES
+// ──────────────────────────────────────────────────────────
+function esc(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function fmtUSD(price) {
+  if (!price) return '—';
+  return price.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
+function fmtBilling(cycle, renewalMonth) {
+  if (cycle === 'monthly') return 'Monthly';
+  const MONTHS = ['January','February','March','April','May','June',
+                  'July','August','September','October','November','December'];
+  return renewalMonth
+    ? String(renewalMonth).padStart(2, '0') + ' - ' + MONTHS[renewalMonth - 1]
+    : 'Annual';
+}
+// ──────────────────────────────────────────────────────────
+//  FEEDBACK
+// ──────────────────────────────────────────────────────────
+function closeFeedbackModal() {
+  document.getElementById('feedback-backdrop').style.display = 'none';
+}
+
+document.getElementById('feedback-btn').addEventListener('click', () => {
+  document.getElementById('feedback-message').value = '';
+  document.getElementById('feedback-backdrop').style.display = 'flex';
+  setTimeout(() => document.getElementById('feedback-message').focus(), 50);
+});
+
+document.getElementById('feedback-close').addEventListener('click',  closeFeedbackModal);
+document.getElementById('feedback-cancel').addEventListener('click', closeFeedbackModal);
+document.getElementById('feedback-backdrop').addEventListener('click', e => {
+  if (e.target === document.getElementById('feedback-backdrop')) closeFeedbackModal();
+});
+
+document.getElementById('feedback-send').addEventListener('click', () => {
+  const msg = document.getElementById('feedback-message').value.trim();
+  if (!msg) { toast('Please enter a message before sending.', true); return; }
+  const btn = document.getElementById('feedback-send');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  google.script.run
+    .withSuccessHandler(() => {
+      closeFeedbackModal();
+      toast('Feedback sent — thank you!');
+      btn.disabled = false; btn.textContent = 'Send Feedback';
+    })
+    .withFailureHandler(err => {
+      toast(err.message, true);
+      btn.disabled = false; btn.textContent = 'Send Feedback';
+    })
+    .sendFeedback(msg);
+});
+</script>
+</body>
+</html>
