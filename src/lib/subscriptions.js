@@ -34,8 +34,11 @@ export async function requestSubscription({ licenseId, suiteKey, suggestedApprov
   if (sub.status === 'pending_sk_verification' && sub.pending_approver_email) {
     notify = { type: 'sk_verification', to: sub.pending_approver_email }
   } else if (sub.status === 'pending' && sub.suite_key) {
-    const { data: sk } = await supabase.from('suite_keys').select('owner_email').eq('suite_key', sub.suite_key).single()
-    if (sk?.owner_email) notify = { type: 'approval_request', to: sk.owner_email }
+    // Direct select would fail here — suite_keys' RLS only allows reading rows
+    // you own (or as admin), and the requester is neither. get_suite_key_owner()
+    // is a narrow RPC that answers just this one question regardless.
+    const { data: ownerEmail } = await supabase.rpc('get_suite_key_owner', { p_suite_key: sub.suite_key })
+    if (ownerEmail) notify = { type: 'approval_request', to: ownerEmail }
   }
 
   return { id, status: sub.status, notify }

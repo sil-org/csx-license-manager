@@ -7,6 +7,7 @@ import Approvals from './pages/Approvals'
 import FAQ from './pages/FAQ'
 import AdminCatalog from './pages/admin/Catalog'
 import AdminAuditLog from './pages/admin/AuditLog'
+import AdminSuiteKeys from './pages/admin/SuiteKeys'
 import RequireAuth from './components/RequireAuth'
 
 export default function App() {
@@ -40,6 +41,10 @@ export default function App() {
 
       <Route path="/admin/audit-log" element={
         <RequireAuth role="admin"><AdminAuditLog /></RequireAuth>
+      } />
+
+      <Route path="/admin/suite-keys" element={
+        <RequireAuth role="admin"><AdminSuiteKeys /></RequireAuth>
       } />
     </Routes>
   )

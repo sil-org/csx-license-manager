@@ -18,7 +18,8 @@ export function getLinks({ categories = [] } = {}) {
       children: [
         { to: '/admin/catalog', label: 'Catalog' },
         { to: '/admin/audit-log', label: 'Audit Log' },
-        // Suite Keys / Ministry IDs admin pages don't exist yet — add here once built.
+        { to: '/admin/suite-keys', label: 'Suite Keys' },
+        // Ministry IDs admin page doesn't exist yet — add here once built.
       ],
     },
   ]

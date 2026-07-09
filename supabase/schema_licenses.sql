@@ -370,9 +370,13 @@ returns table(id uuid, user_email text, license_name text)
 language plpgsql security definer as $$
 declare v_email text := current_profile_email();
 begin
+  -- Also succeeds if already owned by the caller (idempotent) — an admin
+  -- may have already assigned this key to them via admin_update_suite_key_owner(),
+  -- in which case they're just confirming/advancing re-pointed requests, not
+  -- claiming an unowned key.
   update suite_keys set owner_email = v_email
-  where suite_key = p_suite_key and owner_email is null;
-  if not found then raise exception 'suite key not found or already claimed'; end if;
+  where suite_key = p_suite_key and (owner_email is null or owner_email = v_email);
+  if not found then raise exception 'suite key not found or owned by someone else'; end if;
 
   insert into audit_log (action, suite_key, performed_by)
   values ('sk_verified', p_suite_key, v_email);
@@ -404,6 +408,57 @@ begin
     where s.suite_key = p_suite_key and s.status = 'pending_sk_verification'
       and s.pending_approver_email = v_email and l.id = s.license_id
     returning s.id, s.user_email, l.name;
+end;
+$$;
+
+-- ─── RPC: get_suite_key_owner ──────────────────────────────────────────────────
+-- Narrow, RLS-bypassing lookup for one specific thing: who owns a given
+-- Suite Key. Needed because suite_keys' own SELECT policy only lets you read
+-- rows you own (or as admin) — but e.g. after request_subscription() puts a
+-- subscription into 'pending', the *requester* (who doesn't own the key)
+-- needs the owner's email client-side to send the approval-request
+-- notification. Deliberately returns only owner_email, not the whole row.
+
+create or replace function get_suite_key_owner(p_suite_key text)
+returns text language sql stable security definer as $$
+  select owner_email from suite_keys where suite_key = p_suite_key;
+$$;
+
+-- ─── RPC: admin_update_suite_key_owner ─────────────────────────────────────────
+-- Mirrors Managers.gs updateSuiteKeyOwner(): admin-only, creates the Suite Key
+-- row if it doesn't exist yet. Ownership takes effect immediately (admin
+-- assignment is authoritative, unlike the self-service "suggested approver"
+-- path, which requires the suggested person's own confirmation) — matches
+-- GAS, which set the owner unconditionally. Any subscriptions still awaiting
+-- verification on this key get re-pointed to the new owner so they show up
+-- in the new owner's Approvals queue; returned so the caller can notify them.
+-- Passing an empty/null owner unassigns the key (GAS supported this too) and
+-- skips re-pointing, since there's no one to route pending requests to.
+
+create or replace function admin_update_suite_key_owner(
+  p_suite_key text, p_new_owner_email text, p_description text default null
+) returns table(id uuid, user_email text, license_name text)
+language plpgsql security definer as $$
+declare v_owner text := nullif(lower(trim(p_new_owner_email)), '');
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+  p_suite_key := trim(p_suite_key);
+  if p_suite_key = '' then raise exception 'suite key is required'; end if;
+
+  insert into suite_keys (suite_key, owner_email, description)
+  values (p_suite_key, v_owner, p_description)
+  on conflict (suite_key) do update
+    set owner_email = v_owner,
+        description = coalesce(p_description, suite_keys.description);
+
+  if v_owner is not null then
+    return query
+      update subscriptions s
+      set pending_approver_email = v_owner
+      from licenses l
+      where s.suite_key = p_suite_key and s.status = 'pending_sk_verification' and l.id = s.license_id
+      returning s.id, s.user_email, l.name;
+  end if;
 end;
 $$;
 

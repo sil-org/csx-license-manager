@@ -80,6 +80,21 @@ export function approvalRequestEmailHtml({ suiteKey, licenseName, userEmail }) {
   `)
 }
 
+export function suiteKeyAssignedEmailSubject(suiteKey) {
+  return `You've been assigned as the owner of Suite Key ${suiteKey}`
+}
+
+export function suiteKeyAssignedEmailHtml({ suiteKey, pendingCount }) {
+  return wrapEmail(`
+    <p>An admin has registered you as the budget owner for Suite Key <strong>${suiteKey}</strong> in License Manager.</p>
+    ${pendingCount > 0 ? `
+    <p>${pendingCount} request${pendingCount === 1 ? ' is' : 's are'} already waiting on your approval.</p>
+    ` : ''}
+    <p>Sign in to <a href="${appUrl('/approvals')}" style="color:#005CB9">License Manager &rarr; Approvals</a>
+       any time you have requests to review.</p>
+  `)
+}
+
 export function skOwnershipDeniedEmailSubject(licenseName) {
   return `License Request Declined: ${licenseName}`
 }
