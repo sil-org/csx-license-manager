@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react'
 import NavBar from '../components/NavBar'
+import { useAuth } from '../context/AuthContext'
 import { getActiveLicenses } from '../lib/licenses'
 import { requestSubscription } from '../lib/subscriptions'
+import {
+  sendEmail,
+  skVerificationEmailSubject, skVerificationEmailHtml,
+  approvalRequestEmailSubject, approvalRequestEmailHtml,
+} from '../lib/email'
 
 export default function Catalog() {
   const [licenses, setLicenses] = useState(null)
@@ -52,7 +58,37 @@ export default function Catalog() {
   )
 }
 
+// Fires the right notification email for whatever request_subscription() decided,
+// mirroring Subscriptions.gs's inline _sendSkVerificationEmail/_sendApprovalRequestEmail
+// calls. Never lets a failed send block the request itself — same restraint GAS used
+// (try/catch + console.error around every MailApp.sendEmail call).
+async function notifyForRequest({ notify, id, suiteKey, licenseName, requesterEmail }) {
+  if (!notify) return
+  try {
+    if (notify.type === 'sk_verification') {
+      await sendEmail({
+        to: notify.to,
+        subject: skVerificationEmailSubject(suiteKey),
+        html: skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail }),
+        template: 'sk_verification',
+        subscriptionId: id,
+      })
+    } else if (notify.type === 'approval_request') {
+      await sendEmail({
+        to: notify.to,
+        subject: approvalRequestEmailSubject(suiteKey),
+        html: approvalRequestEmailHtml({ suiteKey, licenseName, userEmail: requesterEmail }),
+        template: 'approval_request',
+        subscriptionId: id,
+      })
+    }
+  } catch (err) {
+    console.error('notification email failed:', err.message)
+  }
+}
+
 function RequestModal({ license, onClose }) {
+  const { profile } = useAuth()
   const [mode, setMode] = useState('suite_key') // 'suite_key' | 'ministry_id'
   const [suiteKey, setSuiteKey] = useState('')
   const [suggestedApproverEmail, setSuggestedApproverEmail] = useState('')
@@ -68,12 +104,19 @@ function RequestModal({ license, onClose }) {
     setSubmitting(true)
     setError(null)
     try {
-      await requestSubscription({
+      const result = await requestSubscription({
         licenseId: license.id,
         suiteKey: license.gtis_sponsored ? null : mode === 'suite_key' ? suiteKey : null,
         suggestedApproverEmail: mode === 'suite_key' ? suggestedApproverEmail : null,
         ministryId: mode === 'ministry_id' ? ministryId : null,
         fy,
+      })
+      await notifyForRequest({
+        notify: result.notify,
+        id: result.id,
+        suiteKey,
+        licenseName: license.name,
+        requesterEmail: profile?.primary_email,
       })
       setDone(true)
     } catch (err) {

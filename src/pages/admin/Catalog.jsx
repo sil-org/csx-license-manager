@@ -92,13 +92,20 @@ export default function AdminCatalog() {
             <div className="grid grid-cols-2 gap-3">
               <label className="text-sm text-gray-700">
                 Billing cycle
-                <select value={editing.billing_cycle} onChange={e => setEditing({ ...editing, billing_cycle: e.target.value })}
+                <select value={editing.billing_cycle}
+                  onChange={e => setEditing({
+                    ...editing, billing_cycle: e.target.value,
+                    ...(e.target.value === 'one_time' ? { renewal_month: '', renewal_reminder: false } : {}),
+                  })}
                   className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
                   <option value="annual">Annual</option>
                   <option value="monthly">Monthly</option>
+                  <option value="one_time">One-time (not recurring)</option>
                 </select>
               </label>
-              <Field label="Renewal month (1-12)" type="number" value={editing.renewal_month} onChange={v => setEditing({ ...editing, renewal_month: v })} />
+              {editing.billing_cycle !== 'one_time' && (
+                <Field label="Renewal month (1-12)" type="number" value={editing.renewal_month} onChange={v => setEditing({ ...editing, renewal_month: v })} />
+              )}
             </div>
             <Field label="Activation URL" value={editing.activation_url} onChange={v => setEditing({ ...editing, activation_url: v })}
               hint="Set this if activation needs manual admin/service-manager provisioning after approval." />

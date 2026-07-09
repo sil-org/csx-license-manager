@@ -33,14 +33,19 @@ export async function getProvisioningQueue() {
   return data
 }
 
+// Both return the subscriptions they just advanced ({id, user_email, license_name}[])
+// so the caller can notify each one — see src/lib/email.js.
+
 export async function confirmSkOwnership(suiteKey) {
-  const { error } = await supabase.rpc('confirm_sk_ownership', { p_suite_key: suiteKey })
+  const { data, error } = await supabase.rpc('confirm_sk_ownership', { p_suite_key: suiteKey })
   if (error) throw error
+  return data
 }
 
 export async function denySkOwnership(suiteKey) {
-  const { error } = await supabase.rpc('deny_sk_ownership', { p_suite_key: suiteKey })
+  const { data, error } = await supabase.rpc('deny_sk_ownership', { p_suite_key: suiteKey })
   if (error) throw error
+  return data
 }
 
 export async function approveSubscription(subscriptionId) {

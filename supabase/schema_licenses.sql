@@ -27,11 +27,21 @@ create type subscription_status as enum (
   'declined', 'revoked', 'cancelled'
 );
 create type renewal_status as enum ('none', 'opted_in', 'opted_out');
-create type billing_cycle as enum ('annual', 'monthly');
+-- 'one_time' is for non-recurring purchases (e.g. an OS license bought outright) —
+-- renewal_month/renewal_reminder are meaningless for these and should be left
+-- null/false; nothing enforces that at the DB level, the admin UI just hides
+-- those fields when this is selected.
+create type billing_cycle as enum ('annual', 'monthly', 'one_time');
 create type audit_action as enum (
   'requested', 'auto_approved', 'approved', 'declined',
-  'activated', 'revoked', 'cancelled', 'sk_verified'
+  'activated', 'revoked', 'cancelled', 'sk_verified', 'imported'
 );
+-- Which billing path a subscription used. Replaces the original GAS-ported
+-- design of overloading suite_key with the literal strings 'GTIS' /
+-- 'MIN:XXXXXX' — that broke the suite_key FK below, since neither value is
+-- ever a real row in suite_keys. suite_key/ministry_id are only populated
+-- for their matching billing_type; both are null for 'gtis'.
+create type subscription_billing_type as enum ('suite_key', 'gtis', 'ministry');
 
 -- ─── PROFILE EXTENSIONS ──────────────────────────────────────────────────────
 -- Needed so RPCs below can join subscriptions/licenses (keyed by email) back
@@ -89,6 +99,8 @@ create table if not exists subscriptions (
   user_email            text not null,
   license_id            uuid not null references licenses(id),
   suite_key             text references suite_keys(suite_key),
+  billing_type          subscription_billing_type not null default 'suite_key',
+  ministry_id           text references ministry_ids(ministry_id),
   start_date            date not null default current_date,
   fy                    int not null,
   status                subscription_status not null default 'pending',
@@ -113,7 +125,8 @@ create table if not exists renewals (
   subscription_id uuid not null references subscriptions(id) on delete cascade,
   fiscal_year    int not null,
   opt_in_date    date not null default current_date,
-  opted_in_by    text
+  opted_in_by    text,
+  unique (subscription_id, fiscal_year)
 );
 
 -- Immutable audit trail. Only ever inserted into, by the RPCs below.
@@ -129,6 +142,22 @@ create table if not exists audit_log (
   notes          text
 );
 
+-- Delivery log for the send-email Edge Function (Resend). Written by that
+-- function using the service-role key; not written to directly by RPCs.
+create table if not exists email_log (
+  id             uuid primary key default gen_random_uuid(),
+  created_at     timestamptz not null default now(),
+  to_email       text not null,
+  subject        text not null,
+  template       text not null,
+  subscription_id uuid references subscriptions(id),
+  resend_id      text,
+  status         text not null,
+  error          text
+);
+
+create index if not exists email_log_subscription_id_idx on email_log (subscription_id);
+
 create index if not exists audit_log_subscription_id_idx on audit_log (subscription_id);
 create index if not exists audit_log_suite_key_idx on audit_log (suite_key);
 
@@ -140,6 +169,7 @@ alter table licenses enable row level security;
 alter table subscriptions enable row level security;
 alter table renewals enable row level security;
 alter table audit_log enable row level security;
+alter table email_log enable row level security;
 
 -- Helpers
 
@@ -222,6 +252,10 @@ create policy "audit_log: suite key owner read own" on audit_log for select
 create policy "audit_log: user read own" on audit_log for select
   using (user_email = current_profile_email());
 
+create policy "email_log: admin read" on email_log for select using (is_admin());
+-- No insert/update policies for authenticated — only the send-email Edge
+-- Function writes here, via the service-role key (which bypasses RLS).
+
 -- ─── RPC: request_subscription ────────────────────────────────────────────────
 -- Mirrors Subscriptions.gs createSubscription(). Branches on GTIS-sponsored /
 -- ministry-ID / suite-key paths to decide the initial status.
@@ -238,7 +272,10 @@ declare
   v_email text := current_profile_email();
   v_sub_id uuid;
   v_status subscription_status;
-  v_suite_key text := p_suite_key;
+  v_billing_type subscription_billing_type;
+  v_suite_key text := null;
+  v_ministry_id text := null;
+  v_audit_suite_key text;  -- display-only label for the audit log; NOT written to subscriptions.suite_key
   v_owner text;
   v_pending_approver text := null;
 begin
@@ -256,28 +293,42 @@ begin
   end if;
 
   if v_license.gtis_sponsored then
-    v_suite_key := 'GTIS';
-    v_status := 'active';
+    v_billing_type := 'gtis';
+    v_audit_suite_key := 'GTIS';
+    v_status := case when v_license.activation_url is not null then 'approved' else 'active' end;
 
   elsif p_ministry_id is not null then
+    if p_ministry_id !~ '^\d{6}$' then
+      raise exception 'ministry ID must be exactly 6 digits';
+    end if;
+    v_billing_type := 'ministry';
+    v_ministry_id := p_ministry_id;
+    v_audit_suite_key := 'MIN:' || p_ministry_id;
     insert into ministry_ids (email, ministry_id) values (v_email, p_ministry_id)
       on conflict (email) do update set ministry_id = excluded.ministry_id;
-    v_suite_key := 'MIN:' || p_ministry_id;
-    v_status := 'active';
+    v_status := case when v_license.activation_url is not null then 'approved' else 'active' end;
 
   else
-    if v_suite_key is null then raise exception 'a suite key is required'; end if;
+    v_billing_type := 'suite_key';
+    if p_suite_key is null then raise exception 'a suite key is required'; end if;
+    v_suite_key := p_suite_key;
+    v_audit_suite_key := p_suite_key;
 
     select owner_email into v_owner from suite_keys where suite_key = v_suite_key;
     if not found then
-      if p_suggested_approver_email is null then
-        raise exception 'unknown suite key — provide a suggested approver email';
-      end if;
       insert into suite_keys (suite_key, owner_email) values (v_suite_key, null);
       v_owner := null;
     end if;
 
+    -- Unified check: a suite key with no row at all, or an existing row
+    -- with no owner claimed yet, both require a suggested approver —
+    -- mirrors GAS's `!skExists || !skOwnerEmail` condition. Previously this
+    -- only checked the "no row" case, so an existing-but-unclaimed key could
+    -- reach pending_sk_verification with pending_approver_email left null.
     if v_owner is null then
+      if p_suggested_approver_email is null then
+        raise exception 'suite key % has no owner on file — provide a suggested approver email', v_suite_key;
+      end if;
       v_status := 'pending_sk_verification';
       v_pending_approver := p_suggested_approver_email;
     elsif v_owner = v_email then
@@ -288,17 +339,17 @@ begin
   end if;
 
   insert into subscriptions (
-    user_email, license_id, suite_key, fy, status, billing_cycle,
+    user_email, license_id, suite_key, billing_type, ministry_id, fy, status, billing_cycle,
     renewal_month, renewal_reminder, price_at_signup, pending_approver_email, requested_by
   ) values (
-    v_email, p_license_id, v_suite_key, p_fy, v_status, v_license.billing_cycle,
+    v_email, p_license_id, v_suite_key, v_billing_type, v_ministry_id, p_fy, v_status, v_license.billing_cycle,
     v_license.renewal_month, v_license.renewal_reminder, v_license.price, v_pending_approver, current_profile_id()
   ) returning id into v_sub_id;
 
   insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by)
   values (
     (case when v_status in ('active', 'approved') then 'auto_approved' else 'requested' end)::audit_action,
-    v_sub_id, v_license.name, v_email, v_suite_key, v_email
+    v_sub_id, v_license.name, v_email, v_audit_suite_key, v_email
   );
 
   return v_sub_id;
@@ -307,35 +358,52 @@ $$;
 
 -- ─── RPC: confirm_sk_ownership / deny_sk_ownership ────────────────────────────
 
+-- Both of these now return the subscriptions they just advanced (id, the
+-- subscriber's email, license name) instead of void, so the caller knows
+-- who to email — see src/lib/email.js. Changing the return type requires
+-- dropping the old version first (see the DROP statements above each).
+
+drop function if exists confirm_sk_ownership(text);
+
 create or replace function confirm_sk_ownership(p_suite_key text)
-returns void language plpgsql security definer as $$
+returns table(id uuid, user_email text, license_name text)
+language plpgsql security definer as $$
 declare v_email text := current_profile_email();
 begin
   update suite_keys set owner_email = v_email
   where suite_key = p_suite_key and owner_email is null;
   if not found then raise exception 'suite key not found or already claimed'; end if;
 
-  update subscriptions
-  set status = 'pending', pending_approver_email = null
-  where suite_key = p_suite_key and status = 'pending_sk_verification'
-    and pending_approver_email = v_email;
-
   insert into audit_log (action, suite_key, performed_by)
   values ('sk_verified', p_suite_key, v_email);
+
+  return query
+    update subscriptions s
+    set status = 'pending', pending_approver_email = null
+    from licenses l
+    where s.suite_key = p_suite_key and s.status = 'pending_sk_verification'
+      and s.pending_approver_email = v_email and l.id = s.license_id
+    returning s.id, s.user_email, l.name;
 end;
 $$;
 
+drop function if exists deny_sk_ownership(text);
+
 create or replace function deny_sk_ownership(p_suite_key text)
-returns void language plpgsql security definer as $$
+returns table(id uuid, user_email text, license_name text)
+language plpgsql security definer as $$
 declare v_email text := current_profile_email();
 begin
-  update subscriptions
-  set status = 'declined'
-  where suite_key = p_suite_key and status = 'pending_sk_verification'
-    and pending_approver_email = v_email;
-
   insert into audit_log (action, suite_key, performed_by, notes)
   values ('declined', p_suite_key, v_email, 'suite key ownership declined');
+
+  return query
+    update subscriptions s
+    set status = 'declined'
+    from licenses l
+    where s.suite_key = p_suite_key and s.status = 'pending_sk_verification'
+      and s.pending_approver_email = v_email and l.id = s.license_id
+    returning s.id, s.user_email, l.name;
 end;
 $$;
 

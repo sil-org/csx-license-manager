@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react'
 import NavBar from '../components/NavBar'
+import { useAuth } from '../context/AuthContext'
 import {
   getPendingSkVerifications, getPendingApprovals, getProvisioningQueue,
   confirmSkOwnership, denySkOwnership, approveSubscription, declineSubscription, activateSubscription,
 } from '../lib/approvals'
+import {
+  sendEmail,
+  approvalRequestEmailSubject, approvalRequestEmailHtml,
+  skOwnershipDeniedEmailSubject, skOwnershipDeniedEmailHtml,
+} from '../lib/email'
 
 export default function Approvals() {
+  const { profile } = useAuth()
   const [verifications, setVerifications] = useState(null)
   const [approvals, setApprovals] = useState(null)
   const [provisioning, setProvisioning] = useState(null)
@@ -23,6 +30,53 @@ export default function Approvals() {
     try {
       await action(...args)
       reload()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  // confirm_sk_ownership/deny_sk_ownership return the subscriptions they just
+  // advanced — mirrors GAS's confirmSkOwnershipAll/denySkOwnershipAll, which
+  // sent one email per advanced request rather than per Suite Key.
+  async function handleConfirmSk(suiteKey) {
+    try {
+      const advanced = await confirmSkOwnership(suiteKey)
+      reload()
+      for (const sub of advanced || []) {
+        try {
+          await sendEmail({
+            to: profile?.primary_email,
+            subject: approvalRequestEmailSubject(suiteKey),
+            html: approvalRequestEmailHtml({ suiteKey, licenseName: sub.license_name, userEmail: sub.user_email }),
+            template: 'approval_request',
+            subscriptionId: sub.id,
+          })
+        } catch (err) {
+          console.error('approval request email failed:', err.message)
+        }
+      }
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function handleDenySk(suiteKey) {
+    try {
+      const declined = await denySkOwnership(suiteKey)
+      reload()
+      for (const sub of declined || []) {
+        try {
+          await sendEmail({
+            to: sub.user_email,
+            subject: skOwnershipDeniedEmailSubject(sub.license_name),
+            html: skOwnershipDeniedEmailHtml({ suiteKey, licenseName: sub.license_name }),
+            template: 'sk_ownership_denied',
+            subscriptionId: sub.id,
+          })
+        } catch (err) {
+          console.error('sk ownership denied email failed:', err.message)
+        }
+      }
     } catch (err) {
       setError(err.message)
     }
@@ -46,8 +100,8 @@ export default function Approvals() {
           <Section title="Suite Key verification needed">
             {verifications.map(sub => (
               <Row key={sub.id} title={sub.license?.name} sub={`Suite Key ${sub.suite_key} · ${sub.user_email}`}>
-                <button onClick={() => handle(confirmSkOwnership, sub.suite_key)} className="text-xs font-medium text-sil-green">Confirm ownership</button>
-                <button onClick={() => handle(denySkOwnership, sub.suite_key)} className="text-xs font-medium text-sil-red">Deny</button>
+                <button onClick={() => handleConfirmSk(sub.suite_key)} className="text-xs font-medium text-sil-green">Confirm ownership</button>
+                <button onClick={() => handleDenySk(sub.suite_key)} className="text-xs font-medium text-sil-red">Deny</button>
               </Row>
             ))}
           </Section>

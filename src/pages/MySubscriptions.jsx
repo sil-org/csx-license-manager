@@ -23,6 +23,12 @@ const STATUS_COLOR = {
   cancelled: 'text-gray-400',
 }
 
+function billingLabel(sub) {
+  if (sub.billing_type === 'gtis') return 'GTIS'
+  if (sub.billing_type === 'ministry') return `Ministry ID ${sub.ministry_id}`
+  return sub.suite_key
+}
+
 export default function MySubscriptions() {
   const { profile } = useAuth()
   const [subs, setSubs] = useState(null)
@@ -62,10 +68,10 @@ export default function MySubscriptions() {
               <div>
                 <p className="font-semibold text-brand">{sub.license?.name}</p>
                 <p className={`text-sm ${STATUS_COLOR[sub.status]}`}>{STATUS_LABEL[sub.status]}</p>
-                <p className="text-xs text-gray-400">FY{sub.fy} &middot; {sub.suite_key}</p>
+                <p className="text-xs text-gray-400">FY{sub.fy} &middot; {billingLabel(sub)}</p>
               </div>
               <div className="flex gap-2">
-                {sub.status === 'active' && sub.renewal_status === 'none' && (
+                {sub.status === 'active' && sub.renewal_status === 'none' && sub.billing_cycle !== 'one_time' && (
                   <>
                     <button onClick={() => handle(optInRenewal, sub.id)} className="text-xs font-medium text-sil-green">Opt in to renew</button>
                     <button onClick={() => handle(optOutRenewal, sub.id)} className="text-xs font-medium text-gray-400">Opt out</button>
