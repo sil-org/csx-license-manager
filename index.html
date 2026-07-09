@@ -5,10 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>License Manager</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <!-- SIL brand fonts: Source Sans 3 (body/UI), Playfair Display (headlines) -->
+    <!-- SIL brand font: Source Sans 3 (body/UI). Headlines use Roboto, matching
+         the GAS License Manager's actual look — its CSS asked for 'Google Sans'
+         first, but that font isn't available outside Google's own properties,
+         so Roboto (the next fallback) is what actually rendered for everyone. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div id="root"></div>

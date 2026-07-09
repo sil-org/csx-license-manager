@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
-import NavBar from '../components/NavBar'
+import { useEffect, useState, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import AppLayout from '../components/AppLayout'
+import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
 import { getActiveLicenses } from '../lib/licenses'
 import { requestSubscription } from '../lib/subscriptions'
@@ -13,22 +15,33 @@ export default function Catalog() {
   const [licenses, setLicenses] = useState(null)
   const [error, setError] = useState(null)
   const [requesting, setRequesting] = useState(null) // license being requested
+  const [searchParams] = useSearchParams()
+  const activeCategory = searchParams.get('category')
 
   useEffect(() => {
     getActiveLicenses().then(setLicenses).catch(e => setError(e.message))
   }, [])
 
+  const categories = useMemo(
+    () => [...new Set((licenses || []).map(l => l.category).filter(Boolean))].sort(),
+    [licenses]
+  )
+  const visibleLicenses = activeCategory
+    ? licenses?.filter(l => l.category === activeCategory)
+    : licenses
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <NavBar />
+    <AppLayout appName="License Manager" links={getLinks({ categories })}>
       <div className="max-w-5xl mx-auto p-6">
-        <h1 className="font-display text-2xl font-bold text-brand mb-6">License Catalog</h1>
+        <h1 className="font-display text-2xl font-bold text-brand mb-6">
+          License Catalog{activeCategory ? ` — ${activeCategory}` : ''}
+        </h1>
 
         {error && <p className="text-sil-red mb-4">{error}</p>}
         {!licenses && !error && <p className="text-gray-400">Loading…</p>}
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {licenses?.map(license => (
+          {visibleLicenses?.map(license => (
             <div key={license.id} className="bg-white rounded-xl shadow-sm p-5 flex flex-col">
               {license.logo_url && <img src={license.logo_url} alt="" className="h-8 mb-3 object-contain" />}
               <h2 className="font-semibold text-brand">{license.name}</h2>
@@ -48,13 +61,17 @@ export default function Catalog() {
           ))}
         </div>
 
-        {licenses?.length === 0 && <p className="text-gray-400">No licenses available yet.</p>}
+        {visibleLicenses?.length === 0 && (
+          <p className="text-gray-400">
+            {activeCategory ? `No licenses in ${activeCategory}.` : 'No licenses available yet.'}
+          </p>
+        )}
       </div>
 
       {requesting && (
         <RequestModal license={requesting} onClose={() => setRequesting(null)} />
       )}
-    </div>
+    </AppLayout>
   )
 }
 

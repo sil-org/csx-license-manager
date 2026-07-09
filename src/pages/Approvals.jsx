@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import NavBar from '../components/NavBar'
+import AppLayout from '../components/AppLayout'
+import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
 import {
   getPendingSkVerifications, getPendingApprovals, getProvisioningQueue,
@@ -86,8 +87,7 @@ export default function Approvals() {
     verifications?.length === 0 && approvals?.length === 0 && provisioning?.length === 0
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <NavBar />
+    <AppLayout appName="License Manager" links={getLinks()}>
       <div className="max-w-3xl mx-auto p-6">
         <h1 className="font-display text-2xl font-bold text-brand mb-6">Approvals</h1>
         {error && <p className="text-sil-red mb-4">{error}</p>}
@@ -129,7 +129,7 @@ export default function Approvals() {
           </Section>
         )}
       </div>
-    </div>
+    </AppLayout>
   )
 }
 

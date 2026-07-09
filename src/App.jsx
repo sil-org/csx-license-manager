@@ -4,6 +4,7 @@ import AuthCallback from './pages/AuthCallback'
 import Catalog from './pages/Catalog'
 import MySubscriptions from './pages/MySubscriptions'
 import Approvals from './pages/Approvals'
+import FAQ from './pages/FAQ'
 import AdminCatalog from './pages/admin/Catalog'
 import AdminAuditLog from './pages/admin/AuditLog'
 import RequireAuth from './components/RequireAuth'
@@ -27,6 +28,10 @@ export default function App() {
           supabase/schema_licenses.sql). */}
       <Route path="/approvals" element={
         <RequireAuth><Approvals /></RequireAuth>
+      } />
+
+      <Route path="/faq" element={
+        <RequireAuth><FAQ /></RequireAuth>
       } />
 
       <Route path="/admin/catalog" element={

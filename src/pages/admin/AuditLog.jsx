@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import NavBar from '../../components/NavBar'
+import AppLayout from '../../components/AppLayout'
+import { getLinks } from '../../navLinks'
 import { getAuditLog } from '../../lib/admin'
 
 export default function AdminAuditLog() {
@@ -11,8 +12,7 @@ export default function AdminAuditLog() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <NavBar />
+    <AppLayout appName="License Manager" links={getLinks()}>
       <div className="max-w-5xl mx-auto p-6">
         <h1 className="font-display text-2xl font-bold text-brand mb-6">Admin — Audit Log</h1>
         {error && <p className="text-sil-red mb-4">{error}</p>}
@@ -46,6 +46,6 @@ export default function AdminAuditLog() {
           </table>
         </div>
       </div>
-    </div>
+    </AppLayout>
   )
 }

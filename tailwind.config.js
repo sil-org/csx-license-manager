@@ -23,10 +23,11 @@ export default {
         },
       },
       fontFamily: {
-        // SIL brand typography: Source Sans 3 for body/UI (default sans),
-        // Playfair Display reserved for headlines — use `font-display`.
+        // Source Sans 3 for body/UI (default sans). `font-display` (headlines)
+        // uses Roboto instead of a serif face, matching the GAS License
+        // Manager's actual rendered look — see index.html for why.
         sans: ['"Source Sans 3"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        display: ['"Playfair Display"', 'ui-serif', 'Georgia', 'serif'],
+        display: ['Roboto', 'Arial', 'ui-sans-serif', 'sans-serif'],
       },
     },
   },
