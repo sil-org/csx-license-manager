@@ -25,7 +25,7 @@ export default function AdminAuditLog() {
                 <th className="p-3">Action</th>
                 <th className="p-3">License</th>
                 <th className="p-3">User</th>
-                <th className="p-3">Suite Key</th>
+                <th className="p-3">SuiteKey</th>
                 <th className="p-3">By</th>
                 <th className="p-3">Notes</th>
               </tr>

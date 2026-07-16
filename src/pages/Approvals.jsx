@@ -10,6 +10,7 @@ import {
   sendEmail,
   approvalRequestEmailSubject, approvalRequestEmailHtml,
   skOwnershipDeniedEmailSubject, skOwnershipDeniedEmailHtml,
+  activationEmailSubject, activationEmailHtml,
 } from '../lib/email'
 
 export default function Approvals() {
@@ -38,7 +39,7 @@ export default function Approvals() {
 
   // confirm_sk_ownership/deny_sk_ownership return the subscriptions they just
   // advanced — mirrors GAS's confirmSkOwnershipAll/denySkOwnershipAll, which
-  // sent one email per advanced request rather than per Suite Key.
+  // sent one email per advanced request rather than per SuiteKey.
   async function handleConfirmSk(suiteKey) {
     try {
       const advanced = await confirmSkOwnership(suiteKey)
@@ -83,6 +84,26 @@ export default function Approvals() {
     }
   }
 
+  async function handleActivate(sub) {
+    try {
+      await activateSubscription(sub.id)
+      reload()
+      try {
+        await sendEmail({
+          to: sub.user_email,
+          subject: activationEmailSubject(sub.license?.name),
+          html: activationEmailHtml({ sub, licenseName: sub.license?.name, onboardingMessage: sub.license?.onboarding_message }),
+          template: 'activation',
+          subscriptionId: sub.id,
+        })
+      } catch (err) {
+        console.error('activation email failed:', err.message)
+      }
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   const nothingToDo =
     verifications?.length === 0 && approvals?.length === 0 && provisioning?.length === 0
 
@@ -93,13 +114,13 @@ export default function Approvals() {
         {error && <p className="text-sil-red mb-4">{error}</p>}
 
         {nothingToDo && (
-          <p className="text-gray-400">Nothing needs your attention right now. This page shows requests for Suite Keys you own or licenses you service-manage.</p>
+          <p className="text-gray-400">Nothing needs your attention right now. This page shows requests for SuiteKeys you own or licenses you service-manage.</p>
         )}
 
         {verifications?.length > 0 && (
-          <Section title="Suite Key verification needed">
+          <Section title="SuiteKey verification needed">
             {verifications.map(sub => (
-              <Row key={sub.id} title={sub.license?.name} sub={`Suite Key ${sub.suite_key} · ${sub.user_email}`}>
+              <Row key={sub.id} title={sub.license?.name} sub={`SuiteKey ${sub.suite_key} · ${sub.user_email}`}>
                 <button onClick={() => handleConfirmSk(sub.suite_key)} className="text-xs font-medium text-sil-green">Confirm ownership</button>
                 <button onClick={() => handleDenySk(sub.suite_key)} className="text-xs font-medium text-sil-red">Deny</button>
               </Row>
@@ -123,7 +144,7 @@ export default function Approvals() {
             {provisioning.map(sub => (
               <Row key={sub.id} title={sub.license?.name} sub={sub.user_email}>
                 <a href={sub.license?.activation_url} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand">Open vendor portal</a>
-                <button onClick={() => handle(activateSubscription, sub.id)} className="text-xs font-medium text-sil-green">Mark active</button>
+                <button onClick={() => handleActivate(sub)} className="text-xs font-medium text-sil-green">Mark active</button>
               </Row>
             ))}
           </Section>

@@ -1,0 +1,214 @@
+import { createClient } from 'jsr:@supabase/supabase-js@2'
+
+// Refreshes the group_memberships cache table from Google's Admin SDK
+// Directory API — the only way suite_keys.owner_group_email authorization
+// checks work, since Postgres RLS can't make live calls to Google.
+//
+// Only syncs groups actually referenced as a suite_keys.owner_group_email —
+// never the whole organization's group directory. Call this on a schedule
+// (Supabase Scheduled Functions, or pg_cron + pg_net if that's not available)
+// — every 15-60 min is plenty given how infrequently these rosters change.
+//
+// Auth: a domain-wide-delegated service account, narrowly scoped to
+// admin.directory.group.readonly + admin.directory.group.member.readonly —
+// nothing else. This was a deliberate choice over a personal OAuth token:
+// the delegation belongs to the Workspace domain, not to whichever admin
+// granted it, so it keeps working regardless of personnel changes. See the
+// setup notes at the bottom of this file for what a Workspace super admin
+// needs to do once, by hand, to authorize it.
+//
+// Required secrets (Supabase Edge Function secrets, not the frontend .env):
+//   GOOGLE_SERVICE_ACCOUNT_EMAIL       the service account's own email
+//   GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY its PEM private key (the "private_key"
+//                                      field from the downloaded JSON key file)
+//   GOOGLE_ADMIN_IMPERSONATE_EMAIL     a real Workspace admin's email the
+//                                      service account impersonates for
+//                                      Directory API calls (the `sub` claim)
+
+const DIRECTORY_SCOPES = [
+  'https://www.googleapis.com/auth/admin.directory.group.readonly',
+  'https://www.googleapis.com/auth/admin.directory.group.member.readonly',
+].join(' ')
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders() })
+
+  try {
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    )
+
+    const { data: rows, error: groupsError } = await supabase
+      .from('suite_keys')
+      .select('owner_group_email')
+      .not('owner_group_email', 'is', null)
+    if (groupsError) throw groupsError
+
+    const groupEmails = [...new Set((rows || []).map(r => r.owner_group_email).filter(Boolean))]
+    if (!groupEmails.length) {
+      return json({ ok: true, groupsSynced: 0, message: 'No suite_keys currently have a Google Group owner.' })
+    }
+
+    const accessToken = await getAccessToken()
+    const summary = []
+
+    for (const groupEmail of groupEmails) {
+      let members: string[]
+      try {
+        members = await listGroupMembers(accessToken, groupEmail)
+      } catch (err) {
+        // Leave this group's cache untouched on failure rather than treat
+        // "API call failed" the same as "group genuinely has zero members" —
+        // the latter should clear the cache, the former shouldn't touch it.
+        console.error(`Skipping ${groupEmail}: ${err.message}`)
+        summary.push({ groupEmail, error: err.message })
+        continue
+      }
+
+      // Replace this group's full membership set — upsert current members,
+      // delete anyone no longer present so removals are reflected too.
+      if (members.length) {
+        const { error: upsertError } = await supabase
+          .from('group_memberships')
+          .upsert(
+            members.map(email => ({ group_email: groupEmail, member_email: email, synced_at: new Date().toISOString() })),
+            { onConflict: 'group_email,member_email' }
+          )
+        if (upsertError) throw upsertError
+        const { error: deleteError } = await supabase
+          .from('group_memberships')
+          .delete()
+          .eq('group_email', groupEmail)
+          .not('member_email', 'in', `(${members.join(',')})`)
+        if (deleteError) throw deleteError
+      } else {
+        // Genuinely zero current members (API call succeeded, list was
+        // empty) — clear the cache for this group entirely.
+        const { error: deleteError } = await supabase.from('group_memberships').delete().eq('group_email', groupEmail)
+        if (deleteError) throw deleteError
+      }
+
+      summary.push({ groupEmail, memberCount: members.length })
+    }
+
+    return json({ ok: true, groupsSynced: summary.length, summary })
+  } catch (err) {
+    console.error(err)
+    return json({ error: err.message }, 500)
+  }
+})
+
+async function listGroupMembers(accessToken: string, groupEmail: string): Promise<string[]> {
+  const emails: string[] = []
+  let pageToken: string | undefined
+
+  do {
+    const url = new URL(`https://admin.googleapis.com/admin/directory/v1/groups/${encodeURIComponent(groupEmail)}/members`)
+    url.searchParams.set('maxResults', '200')
+    if (pageToken) url.searchParams.set('pageToken', pageToken)
+
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
+    if (!res.ok) {
+      // Throws rather than returning [] — the caller treats "API call
+      // failed" differently from "group genuinely has zero members".
+      throw new Error(`Failed to list members of ${groupEmail}: ${res.status} ${await res.text()}`)
+    }
+    const data = await res.json()
+    for (const m of data.members || []) {
+      if (m.email) emails.push(m.email.toLowerCase())
+    }
+    pageToken = data.nextPageToken
+  } while (pageToken)
+
+  return emails
+}
+
+// ─── Google service-account JWT auth (RS256, signed with Web Crypto) ───────
+// Deliberately not using the `googleapis`/`google-auth-library` npm packages
+// here — they're heavy Node-oriented libraries that don't sit well in Deno's
+// npm compat layer. This is the whole OAuth2 service-account flow in ~30
+// lines using only built-ins (Web Crypto + fetch).
+
+async function getAccessToken(): Promise<string> {
+  const email = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_EMAIL')!
+  const privateKeyPem = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY')!
+  const impersonate = Deno.env.get('GOOGLE_ADMIN_IMPERSONATE_EMAIL')!
+
+  const now = Math.floor(Date.now() / 1000)
+  const header = { alg: 'RS256', typ: 'JWT' }
+  const claims = {
+    iss: email,
+    scope: DIRECTORY_SCOPES,
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+    sub: impersonate,
+  }
+
+  const unsigned = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(claims))}`
+  const key = await importPrivateKey(privateKeyPem)
+  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(unsigned))
+  const jwt = `${unsigned}.${base64url(signature)}`
+
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt,
+    }),
+  })
+  if (!res.ok) throw new Error(`Failed to get access token: ${res.status} ${await res.text()}`)
+  const { access_token } = await res.json()
+  return access_token
+}
+
+async function importPrivateKey(pem: string): Promise<CryptoKey> {
+  const contents = pem
+    .replace(/-----BEGIN PRIVATE KEY-----/, '')
+    .replace(/-----END PRIVATE KEY-----/, '')
+    .replace(/\s/g, '')
+  const der = Uint8Array.from(atob(contents), c => c.charCodeAt(0))
+  return crypto.subtle.importKey('pkcs8', der, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['sign'])
+}
+
+function base64url(input: string | ArrayBuffer): string {
+  const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : new Uint8Array(input)
+  let str = ''
+  for (const b of bytes) str += String.fromCharCode(b)
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), { status, headers: { ...corsHeaders(), 'Content-Type': 'application/json' } })
+}
+
+function corsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  }
+}
+
+// ─── One-time setup a Workspace super admin needs to do by hand ────────────
+// 1. Google Cloud Console (use an org-owned project, not a personal one):
+//    - Create/select a project, enable the "Admin SDK API".
+//    - Create a service account, generate a JSON key, note its email and
+//      the "private_key" field.
+// 2. Google Workspace Admin Console → Security → API controls →
+//    Domain-wide delegation → Add new:
+//    - Client ID: the service account's numeric client ID (not its email).
+//    - Scopes: https://www.googleapis.com/auth/admin.directory.group.readonly,
+//              https://www.googleapis.com/auth/admin.directory.group.member.readonly
+// 3. Set these as Supabase Edge Function secrets (Project Settings > Edge
+//    Functions, or `supabase secrets set`):
+//      GOOGLE_SERVICE_ACCOUNT_EMAIL
+//      GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY   (paste the full PEM, including
+//                                            the BEGIN/END lines)
+//      GOOGLE_ADMIN_IMPERSONATE_EMAIL       (a real admin's email — this is
+//                                            whose identity Directory API
+//                                            calls run as; needs Workspace
+//                                            admin privileges over Groups)
+// 4. Deploy this function, then schedule it (Supabase Scheduled Functions,
+//    or pg_cron calling it via pg_net) — every 15-60 min is plenty.

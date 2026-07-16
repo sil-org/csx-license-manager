@@ -55,12 +55,32 @@ create unique index if not exists profiles_primary_email_idx on profiles (lower(
 -- ─── TABLES ──────────────────────────────────────────────────────────────────
 
 -- Cost-center / budget keys. owner_email is null until someone claims it via
--- confirm_sk_ownership() (the "suite key verification" flow).
+-- confirm_sk_ownership() (the "suite key verification" flow). owner_email and
+-- owner_group_email are mutually exclusive — a key is owned by one individual
+-- OR by anyone currently in a Google Group, never both (admin_update_suite_key_owner()
+-- enforces this). Group ownership skips the self-service verification step
+-- entirely, since an admin assigning a group is already an authoritative
+-- claim — see is_suite_key_owner() and request_subscription() below.
 create table if not exists suite_keys (
-  suite_key   text primary key,
-  owner_email text,
-  description text,
-  created_at  timestamptz not null default now()
+  suite_key       text primary key,
+  owner_email     text,
+  owner_group_email text,
+  description     text,
+  created_at      timestamptz not null default now()
+);
+
+-- Cache of Google Group membership, refreshed on a schedule by the
+-- sync-group-memberships Edge Function (a domain-wide-delegated service
+-- account, narrowly scoped to admin.directory.group[.member].readonly).
+-- RLS can't make live calls to Google's API, so authorization checks read
+-- this cache rather than querying Directory API per-request. Only ever
+-- populated for groups actually referenced as a suite_keys.owner_group_email —
+-- not a sync of the whole organization's group directory.
+create table if not exists group_memberships (
+  group_email  text not null,
+  member_email text not null,
+  synced_at    timestamptz not null default now(),
+  primary key (group_email, member_email)
 );
 
 -- Self-owned billing IDs (bypass suite-key approval entirely).
@@ -90,6 +110,7 @@ create table if not exists licenses (
   google_group_email   text,
   pro_rated            boolean not null default false,
   service_manager_email text,
+  onboarding_message   text,   -- overrides the default "your license is ready" activation email body for this license
   created_at           timestamptz not null default now()
 );
 
@@ -170,6 +191,7 @@ alter table subscriptions enable row level security;
 alter table renewals enable row level security;
 alter table audit_log enable row level security;
 alter table email_log enable row level security;
+alter table group_memberships enable row level security;
 
 -- Helpers
 
@@ -183,11 +205,26 @@ returns boolean language sql stable security definer as $$
   select get_profile_role() = 'admin'
 $$;
 
+-- Every RPC/RLS policy that gates on Suite Key ownership calls this one
+-- helper, so extending it to cover group ownership cascades everywhere
+-- (approve/decline/revoke, the subscriptions/renewals/audit_log RLS
+-- policies) without touching each call site individually.
 create or replace function is_suite_key_owner(p_suite_key text)
 returns boolean language sql stable security definer as $$
   select exists(
-    select 1 from suite_keys
-    where suite_key = p_suite_key and owner_email = current_profile_email()
+    select 1 from suite_keys sk
+    where sk.suite_key = p_suite_key
+      and (
+        sk.owner_email = current_profile_email()
+        or (
+          sk.owner_group_email is not null
+          and exists(
+            select 1 from group_memberships gm
+            where gm.group_email = sk.owner_group_email
+              and gm.member_email = current_profile_email()
+          )
+        )
+      )
   )
 $$;
 
@@ -209,12 +246,37 @@ returns boolean language sql stable security definer as $$
   select exists(select 1 from suite_keys where owner_email = current_profile_email())
 $$;
 
+-- Direct + indirect reports of the current user, walking profiles.manager_email
+-- recursively — replicates Managers.gs's getReportEmails(). Used both by the
+-- subscriptions RLS policy below and by the My Team page to know who to query for.
+create or replace function get_report_emails()
+returns setof text language sql stable security definer as $$
+  with recursive reports as (
+    select lower(p.primary_email) as email
+    from profiles p
+    where lower(p.manager_email) = lower(current_profile_email())
+    union
+    select lower(p.primary_email)
+    from profiles p
+    join reports r on lower(p.manager_email) = r.email
+  )
+  select email from reports
+$$;
+
+create or replace function is_org_manager()
+returns boolean language sql stable security definer as $$
+  select exists(select 1 from profiles where lower(manager_email) = lower(current_profile_email()))
+$$;
+
 -- Policies
 
 create policy "suite_keys: owner or admin read" on suite_keys for select
-  using (owner_email = current_profile_email() or is_admin());
+  using (is_suite_key_owner(suite_key) or is_admin());
 create policy "suite_keys: admin write" on suite_keys for insert with check (is_admin());
 create policy "suite_keys: admin update" on suite_keys for update using (is_admin());
+
+create policy "group_memberships: admin read" on group_memberships for select using (is_admin());
+-- No client write policy — only sync-group-memberships (service-role key) writes here.
 
 create policy "ministry_ids: own or admin read" on ministry_ids for select
   using (email = current_profile_email() or is_admin());
@@ -230,6 +292,7 @@ create policy "subscriptions: read own or authority" on subscriptions for select
     or is_admin()
     or (suite_key is not null and is_suite_key_owner(suite_key))
     or is_service_manager_for(license_id)
+    or lower(user_email) in (select get_report_emails())
   );
 -- All writes go through the security-definer RPCs below, which enforce
 -- status-transition and authority checks themselves; no direct write
@@ -277,6 +340,7 @@ declare
   v_ministry_id text := null;
   v_audit_suite_key text;  -- display-only label for the audit log; NOT written to subscriptions.suite_key
   v_owner text;
+  v_owner_group text;
   v_pending_approver text := null;
 begin
   if v_email is null then raise exception 'not authenticated'; end if;
@@ -314,18 +378,31 @@ begin
     v_suite_key := p_suite_key;
     v_audit_suite_key := p_suite_key;
 
-    select owner_email into v_owner from suite_keys where suite_key = v_suite_key;
+    select owner_email, owner_group_email into v_owner, v_owner_group from suite_keys where suite_key = v_suite_key;
     if not found then
       insert into suite_keys (suite_key, owner_email) values (v_suite_key, null);
       v_owner := null;
+      v_owner_group := null;
     end if;
+
+    if v_owner_group is not null then
+      -- Group-owned: no verification step, ever — an admin assigning a group
+      -- is already an authoritative claim, and current membership itself is
+      -- the authorization check (is_suite_key_owner() below covers this).
+      if exists (
+        select 1 from group_memberships where group_email = v_owner_group and member_email = v_email
+      ) then
+        v_status := case when v_license.activation_url is not null then 'approved' else 'active' end;
+      else
+        v_status := 'pending';
+      end if;
 
     -- Unified check: a suite key with no row at all, or an existing row
     -- with no owner claimed yet, both require a suggested approver —
     -- mirrors GAS's `!skExists || !skOwnerEmail` condition. Previously this
     -- only checked the "no row" case, so an existing-but-unclaimed key could
     -- reach pending_sk_verification with pending_approver_email left null.
-    if v_owner is null then
+    elsif v_owner is null then
       if p_suggested_approver_email is null then
         raise exception 'suite key % has no owner on file — provide a suggested approver email', v_suite_key;
       end if;
@@ -411,47 +488,105 @@ begin
 end;
 $$;
 
+-- ─── RPC: get_my_suite_keys ─────────────────────────────────────────────────────
+-- Exactly which Suite Keys the current user owns (individually or via a
+-- Google Group). Needed instead of a plain `select suite_key from suite_keys`
+-- because suite_keys' RLS policy returns *every* row to an admin — correct
+-- for RLS's purposes, but wrong for "which keys are mine": an admin querying
+-- suite_keys directly would see all of them and wrongly conclude they own
+-- every Suite Key in the system. This is what src/lib/suiteKeyCharges.js
+-- should call, not a raw select.
+
+create or replace function get_my_suite_keys()
+returns setof text language sql stable security definer as $$
+  select suite_key from suite_keys where is_suite_key_owner(suite_key)
+$$;
+
+-- ─── RPC: search_suite_keys ─────────────────────────────────────────────────────
+-- Typeahead for the Catalog request form, mirroring GAS's searchSuiteKeys().
+-- suite_keys' own SELECT policy only returns keys you own (or all of them, if
+-- you're an admin) — but anyone requesting a license needs to search *any*
+-- Suite Key, including ones owned by someone else entirely, to avoid
+-- accidentally creating a duplicate. Bypasses RLS for just this lookup, and
+-- deliberately never returns owner_email/owner_group_email — only whether the
+-- key already has an owner — so a regular requester can't harvest other
+-- people's email addresses through the search box.
+
+create or replace function search_suite_keys(p_query text)
+returns table(suite_key text, description text, has_owner boolean)
+language sql stable security definer as $$
+  select suite_key, description, (owner_email is not null or owner_group_email is not null) as has_owner
+  from suite_keys
+  where suite_key ilike '%' || trim(p_query) || '%'
+  order by suite_key
+  limit 10
+$$;
+
 -- ─── RPC: get_suite_key_owner ──────────────────────────────────────────────────
--- Narrow, RLS-bypassing lookup for one specific thing: who owns a given
--- Suite Key. Needed because suite_keys' own SELECT policy only lets you read
--- rows you own (or as admin) — but e.g. after request_subscription() puts a
--- subscription into 'pending', the *requester* (who doesn't own the key)
--- needs the owner's email client-side to send the approval-request
--- notification. Deliberately returns only owner_email, not the whole row.
+-- Narrow, RLS-bypassing lookup for one specific thing: who to notify about a
+-- given Suite Key. Needed because suite_keys' own SELECT policy only lets you
+-- read rows you own (or as admin) — but e.g. after request_subscription()
+-- puts a subscription into 'pending', the *requester* (who doesn't own the
+-- key) needs to know who to email client-side. Returns both columns since a
+-- key is owned by exactly one of the two (never both) — the caller checks
+-- owner_group_email first, falling back to owner_email.
+
+drop function if exists get_suite_key_owner(text);
 
 create or replace function get_suite_key_owner(p_suite_key text)
-returns text language sql stable security definer as $$
-  select owner_email from suite_keys where suite_key = p_suite_key;
+returns table(owner_email text, owner_group_email text)
+language sql stable security definer as $$
+  select owner_email, owner_group_email from suite_keys where suite_key = p_suite_key;
 $$;
 
 -- ─── RPC: admin_update_suite_key_owner ─────────────────────────────────────────
--- Mirrors Managers.gs updateSuiteKeyOwner(): admin-only, creates the Suite Key
--- row if it doesn't exist yet. Ownership takes effect immediately (admin
--- assignment is authoritative, unlike the self-service "suggested approver"
--- path, which requires the suggested person's own confirmation) — matches
--- GAS, which set the owner unconditionally. Any subscriptions still awaiting
--- verification on this key get re-pointed to the new owner so they show up
--- in the new owner's Approvals queue; returned so the caller can notify them.
--- Passing an empty/null owner unassigns the key (GAS supported this too) and
--- skips re-pointing, since there's no one to route pending requests to.
+-- Mirrors Managers.gs updateSuiteKeyOwner(), extended for group ownership.
+-- Admin-only, creates the Suite Key row if it doesn't exist yet. Exactly one
+-- of p_new_owner_email / p_owner_group_email may be set (mutually exclusive);
+-- passing both is an error, passing neither unassigns the key entirely.
+--
+-- Ownership takes effect immediately either way (admin assignment is
+-- authoritative) — but what happens to subscriptions still awaiting
+-- verification on this key differs:
+--   - Individual owner: only pending_approver_email is re-pointed to them —
+--     matches GAS, and they still need to actually confirm via
+--     confirm_sk_ownership() (widened earlier to allow this) before the
+--     request advances to 'pending'.
+--   - Group owner: goes straight to 'pending' with no confirmation step at
+--     all — being in the group already proves authorization, there's no
+--     "suggested approver" to verify.
+-- Either way, the affected subscriptions are returned so the caller can notify.
 
 create or replace function admin_update_suite_key_owner(
-  p_suite_key text, p_new_owner_email text, p_description text default null
+  p_suite_key text, p_new_owner_email text, p_description text default null, p_owner_group_email text default null
 ) returns table(id uuid, user_email text, license_name text)
 language plpgsql security definer as $$
-declare v_owner text := nullif(lower(trim(p_new_owner_email)), '');
+declare
+  v_owner text := nullif(lower(trim(p_new_owner_email)), '');
+  v_group text := nullif(lower(trim(p_owner_group_email)), '');
 begin
   if not is_admin() then raise exception 'admin only'; end if;
   p_suite_key := trim(p_suite_key);
   if p_suite_key = '' then raise exception 'suite key is required'; end if;
+  if v_owner is not null and v_group is not null then
+    raise exception 'a suite key can have an individual owner or a group owner, not both';
+  end if;
 
-  insert into suite_keys (suite_key, owner_email, description)
-  values (p_suite_key, v_owner, p_description)
+  insert into suite_keys (suite_key, owner_email, owner_group_email, description)
+  values (p_suite_key, v_owner, v_group, p_description)
   on conflict (suite_key) do update
     set owner_email = v_owner,
+        owner_group_email = v_group,
         description = coalesce(p_description, suite_keys.description);
 
-  if v_owner is not null then
+  if v_group is not null then
+    return query
+      update subscriptions s
+      set status = 'pending', pending_approver_email = null
+      from licenses l
+      where s.suite_key = p_suite_key and s.status = 'pending_sk_verification' and l.id = s.license_id
+      returning s.id, s.user_email, l.name;
+  elsif v_owner is not null then
     return query
       update subscriptions s
       set pending_approver_email = v_owner
@@ -627,6 +762,31 @@ begin
 end;
 $$;
 
+-- ─── RPC: admin_update_ministry_id ──────────────────────────────────────────────
+-- Mirrors Managers.gs updateMinistryId(): admin-only, upserts a 6-digit
+-- Ministry ID for an email, or deletes the row if p_ministry_id is blank.
+
+create or replace function admin_update_ministry_id(p_email text, p_ministry_id text)
+returns void language plpgsql security definer as $$
+declare
+  v_email text := lower(trim(p_email));
+  v_id text := nullif(trim(p_ministry_id), '');
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+  if v_email = '' then raise exception 'email is required'; end if;
+
+  if v_id is null then
+    delete from ministry_ids where email = v_email;
+    return;
+  end if;
+
+  if v_id !~ '^\d{6}$' then raise exception 'ministry ID must be exactly 6 digits'; end if;
+
+  insert into ministry_ids (email, ministry_id) values (v_email, v_id)
+  on conflict (email) do update set ministry_id = excluded.ministry_id;
+end;
+$$;
+
 -- ─── RPC: save_license / deactivate_license (admin catalog CRUD) ─────────────
 
 create or replace function save_license(p_license jsonb)
@@ -640,7 +800,8 @@ begin
     insert into licenses (
       name, vendor, category, price, price_unit, notes, gtis_sponsored,
       billing_cycle, renewal_month, renewal_reminder, logo_url, activation_url,
-      more_info_url, google_group_email, pro_rated, service_manager_email, created_by
+      more_info_url, google_group_email, pro_rated, service_manager_email,
+      onboarding_message, created_by
     ) values (
       p_license->>'name', p_license->>'vendor', p_license->>'category',
       (p_license->>'price')::numeric, p_license->>'price_unit', p_license->>'notes',
@@ -650,7 +811,7 @@ begin
       coalesce((p_license->>'renewal_reminder')::boolean, true),
       p_license->>'logo_url', p_license->>'activation_url', p_license->>'more_info_url',
       p_license->>'google_group_email', coalesce((p_license->>'pro_rated')::boolean, false),
-      p_license->>'service_manager_email', current_profile_id()
+      p_license->>'service_manager_email', nullif(p_license->>'onboarding_message', ''), current_profile_id()
     ) returning id into v_id;
   else
     update licenses set
@@ -663,7 +824,8 @@ begin
       logo_url = p_license->>'logo_url', activation_url = p_license->>'activation_url',
       more_info_url = p_license->>'more_info_url', google_group_email = p_license->>'google_group_email',
       pro_rated = coalesce((p_license->>'pro_rated')::boolean, false),
-      service_manager_email = p_license->>'service_manager_email'
+      service_manager_email = p_license->>'service_manager_email',
+      onboarding_message = nullif(p_license->>'onboarding_message', '')
     where id = v_id;
   end if;
 

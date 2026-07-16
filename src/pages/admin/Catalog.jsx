@@ -7,7 +7,7 @@ const BLANK = {
   id: null, name: '', vendor: '', category: '', price: '', price_unit: '',
   gtis_sponsored: false, billing_cycle: 'annual', renewal_month: '', renewal_reminder: true,
   activation_url: '', more_info_url: '', logo_url: '', google_group_email: '',
-  pro_rated: false, service_manager_email: '',
+  pro_rated: false, service_manager_email: '', onboarding_message: '',
 }
 
 export default function AdminCatalog() {
@@ -114,6 +114,20 @@ export default function AdminCatalog() {
             <Field label="Google Group email" value={editing.google_group_email} onChange={v => setEditing({ ...editing, google_group_email: v })}
               hint="Not automated yet — see supabase/schema_licenses.sql notes." />
             <Field label="Service manager email" value={editing.service_manager_email} onChange={v => setEditing({ ...editing, service_manager_email: v })} />
+
+            <label className="block text-sm text-gray-700">
+              Onboarding email override
+              <textarea
+                value={editing.onboarding_message ?? ''}
+                onChange={e => setEditing({ ...editing, onboarding_message: e.target.value })}
+                rows={3}
+                placeholder="Leave blank to use the default &quot;your license is ready&quot; message"
+                className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              />
+              <span className="block text-xs text-gray-400 mt-0.5">
+                Replaces the default activation email body for this license — e.g. setup steps a generic message wouldn't cover.
+              </span>
+            </label>
 
             <div className="flex gap-4 text-sm pt-1">
               <label className="flex items-center gap-2">

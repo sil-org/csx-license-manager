@@ -36,9 +36,13 @@ export async function requestSubscription({ licenseId, suiteKey, suggestedApprov
   } else if (sub.status === 'pending' && sub.suite_key) {
     // Direct select would fail here — suite_keys' RLS only allows reading rows
     // you own (or as admin), and the requester is neither. get_suite_key_owner()
-    // is a narrow RPC that answers just this one question regardless.
-    const { data: ownerEmail } = await supabase.rpc('get_suite_key_owner', { p_suite_key: sub.suite_key })
-    if (ownerEmail) notify = { type: 'approval_request', to: ownerEmail }
+    // is a narrow RPC that answers just this one question regardless. Returns
+    // one row (or none); a group-owned key has no individual to email, so the
+    // notification goes to the group address itself — Workspace fans it out.
+    const { data } = await supabase.rpc('get_suite_key_owner', { p_suite_key: sub.suite_key })
+    const owner = data?.[0]
+    const to = owner?.owner_group_email || owner?.owner_email
+    if (to) notify = { type: 'approval_request', to }
   }
 
   return { id, status: sub.status, notify }

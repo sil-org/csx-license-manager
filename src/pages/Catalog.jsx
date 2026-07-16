@@ -5,6 +5,7 @@ import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
 import { getActiveLicenses } from '../lib/licenses'
 import { requestSubscription } from '../lib/subscriptions'
+import { searchSuiteKeys } from '../lib/suiteKeys'
 import {
   sendEmail,
   skVerificationEmailSubject, skVerificationEmailHtml,
@@ -108,6 +109,8 @@ function RequestModal({ license, onClose }) {
   const { profile } = useAuth()
   const [mode, setMode] = useState('suite_key') // 'suite_key' | 'ministry_id'
   const [suiteKey, setSuiteKey] = useState('')
+  const [suggestions, setSuggestions] = useState([])
+  const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestedApproverEmail, setSuggestedApproverEmail] = useState('')
   const [ministryId, setMinistryId] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -115,6 +118,25 @@ function RequestModal({ license, onClose }) {
   const [done, setDone] = useState(false)
 
   const fy = new Date().getFullYear()
+
+  // Debounced typeahead — mirrors GAS's searchSuiteKeys(), which searched
+  // every SuiteKey regardless of ownership so requesters don't accidentally
+  // create a duplicate of one that already exists.
+  useEffect(() => {
+    if (mode !== 'suite_key' || !suiteKey.trim()) { setSuggestions([]); return }
+    let cancelled = false
+    const timer = setTimeout(() => {
+      searchSuiteKeys(suiteKey)
+        .then(results => { if (!cancelled) setSuggestions(results) })
+        .catch(() => { if (!cancelled) setSuggestions([]) })
+    }, 250)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [suiteKey, mode])
+
+  function selectSuggestion(s) {
+    setSuiteKey(s.suite_key)
+    setShowSuggestions(false)
+  }
 
   async function submit(e) {
     e.preventDefault()
@@ -170,7 +192,7 @@ function RequestModal({ license, onClose }) {
             <div className="flex gap-4 text-sm">
               <label className="flex items-center gap-2">
                 <input type="radio" checked={mode === 'suite_key'} onChange={() => setMode('suite_key')} />
-                Suite Key
+                SuiteKey
               </label>
               <label className="flex items-center gap-2">
                 <input type="radio" checked={mode === 'ministry_id'} onChange={() => setMode('ministry_id')} />
@@ -180,14 +202,39 @@ function RequestModal({ license, onClose }) {
 
             {mode === 'suite_key' ? (
               <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Suite Key</label>
-                  <input value={suiteKey} onChange={e => setSuiteKey(e.target.value)} required
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                <div className="relative">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">SuiteKey</label>
+                  <input
+                    value={suiteKey}
+                    onChange={e => setSuiteKey(e.target.value)}
+                    onFocus={() => setShowSuggestions(true)}
+                    onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                    required
+                    autoComplete="off"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                  {showSuggestions && suggestions.length > 0 && (
+                    <ul className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-md max-h-48 overflow-y-auto">
+                      {suggestions.map(s => (
+                        <li key={s.suite_key}>
+                          <button
+                            type="button"
+                            onMouseDown={() => selectSuggestion(s)}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between gap-2"
+                          >
+                            <span className="font-medium text-brand">{s.suite_key}</span>
+                            <span className="text-xs text-gray-400 truncate">
+                              {s.has_owner ? (s.description || 'Has an owner') : 'No owner yet'}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Suggested approver email <span className="text-gray-400">(only needed if this is a new Suite Key)</span>
+                    Suggested approver email <span className="text-gray-400">(only needed if this is a new SuiteKey)</span>
                   </label>
                   <input type="email" value={suggestedApproverEmail} onChange={e => setSuggestedApproverEmail(e.target.value)}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />

@@ -26,7 +26,7 @@ export async function getPendingApprovals() {
 export async function getProvisioningQueue() {
   const { data, error } = await supabase
     .from('subscriptions')
-    .select('*, license:licenses(name, activation_url, service_manager_email)')
+    .select('*, license:licenses(name, activation_url, service_manager_email, onboarding_message)')
     .eq('status', 'approved')
     .order('created_at')
   if (error) throw error

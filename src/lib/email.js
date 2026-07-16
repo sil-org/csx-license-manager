@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { billingLabel, fyLabel } from './subscriptionDisplay'
 
 // Mirrors Emails.gs / the inline MailApp.sendEmail() calls in Subscriptions.gs
 // and Approvals.gs. Unlike the GAS originals, none of these embed one-click
@@ -24,14 +25,18 @@ function appUrl(path) {
   return `${window.location.origin}${path}`
 }
 
-function wrapEmail(bodyHtml) {
+function wrapEmail(bodyHtml, footer = {
+  text: 'You can also act on this from',
+  path: '/approvals',
+  linkText: 'License Manager → Approvals',
+}) {
   return `
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #202124;">
   <h3 style="color: #005CB9; margin: 0 0 12px;">License Manager</h3>
   ${bodyHtml}
   <p style="color: #666666; font-size: 12px; margin-top: 24px;">
-    You can also act on this from
-    <a href="${appUrl('/approvals')}" style="color: #005CB9;">License Manager &rarr; Approvals</a>.
+    ${footer.text}
+    <a href="${appUrl(footer.path)}" style="color: #005CB9;">${footer.linkText}</a>.
   </p>
 </div>`
 }
@@ -46,32 +51,32 @@ function detailsTable(rows) {
 }
 
 export function skVerificationEmailSubject(suiteKey) {
-  return `Action Required: Suite Key Ownership Confirmation — ${suiteKey}`
+  return `Action Required: SuiteKey Ownership Confirmation — ${suiteKey}`
 }
 
 export function skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail }) {
   return wrapEmail(`
-    <p>You've been identified as the potential owner of Suite Key <strong>${suiteKey}</strong>.
+    <p>You've been identified as the potential owner of SuiteKey <strong>${suiteKey}</strong>.
        A license request has been submitted against it and needs your confirmation before it can proceed.</p>
     ${detailsTable([
-      ['Suite Key', `<strong>${suiteKey}</strong>`],
+      ['SuiteKey', `<strong>${suiteKey}</strong>`],
       ['License', licenseName],
       ['Requested by', requesterEmail],
     ])}
     <p>Sign in to <a href="${appUrl('/approvals')}" style="color:#005CB9">License Manager &rarr; Approvals</a>
-       to confirm or deny that you manage this Suite Key.</p>
+       to confirm or deny that you manage this SuiteKey.</p>
   `)
 }
 
 export function approvalRequestEmailSubject(suiteKey) {
-  return `Action Required: License request for Suite Key ${suiteKey}`
+  return `Action Required: License request for SuiteKey ${suiteKey}`
 }
 
 export function approvalRequestEmailHtml({ suiteKey, licenseName, userEmail }) {
   return wrapEmail(`
-    <p>A software license has been requested against your Suite Key and needs your approval.</p>
+    <p>A software license has been requested against your SuiteKey and needs your approval.</p>
     ${detailsTable([
-      ['Suite Key', `<strong>${suiteKey}</strong>`],
+      ['SuiteKey', `<strong>${suiteKey}</strong>`],
       ['License', licenseName],
       ['Requested by', userEmail],
     ])}
@@ -81,18 +86,45 @@ export function approvalRequestEmailHtml({ suiteKey, licenseName, userEmail }) {
 }
 
 export function suiteKeyAssignedEmailSubject(suiteKey) {
-  return `You've been assigned as the owner of Suite Key ${suiteKey}`
+  return `You've been assigned as the owner of SuiteKey ${suiteKey}`
 }
 
 export function suiteKeyAssignedEmailHtml({ suiteKey, pendingCount }) {
   return wrapEmail(`
-    <p>An admin has registered you as the budget owner for Suite Key <strong>${suiteKey}</strong> in License Manager.</p>
+    <p>An admin has registered you as the budget owner for SuiteKey <strong>${suiteKey}</strong> in License Manager.</p>
     ${pendingCount > 0 ? `
     <p>${pendingCount} request${pendingCount === 1 ? ' is' : 's are'} already waiting on your approval.</p>
     ` : ''}
     <p>Sign in to <a href="${appUrl('/approvals')}" style="color:#005CB9">License Manager &rarr; Approvals</a>
        any time you have requests to review.</p>
   `)
+}
+
+export function activationEmailSubject(licenseName) {
+  return `Your ${licenseName} account is ready!`
+}
+
+// Mirrors Emails.gs's _notifyUserOfActivation() — sent once a subscription
+// reaches 'active'. Not built at all until now; the GAS original was never
+// carried over during the initial port. `onboardingMessage` is the
+// per-license override (licenses.onboarding_message, set in Admin → Catalog);
+// falls back to a generic default if the license doesn't have one set. FY is
+// only shown when it's a meaningful concept for this subscription — see
+// src/lib/subscriptionDisplay.js.
+export function activationEmailHtml({ sub, licenseName, onboardingMessage }) {
+  const intro = onboardingMessage
+    ? onboardingMessage
+    : `Your <strong>${licenseName}</strong> account has been set up and is ready to use.`
+  const fy = fyLabel(sub)
+  return wrapEmail(`
+    <p>${intro}</p>
+    ${detailsTable([
+      ['License', licenseName],
+      ['Billing', billingLabel(sub)],
+      ...(fy ? [['Fiscal Year', fy]] : []),
+    ])}
+    <p style="font-size:13px;color:#666666">Questions? Contact the License Manager team.</p>
+  `, { text: 'View your subscriptions at', path: '/subscriptions', linkText: 'License Manager → My Subscriptions' })
 }
 
 export function skOwnershipDeniedEmailSubject(licenseName) {
@@ -103,8 +135,8 @@ export function skOwnershipDeniedEmailHtml({ suiteKey, licenseName }) {
   return wrapEmail(`
     <p>Your request for <strong>${licenseName}</strong> has been declined.</p>
     <div style="background:#fce8e6;border-left:4px solid #D52227;border-radius:4px;padding:10px 14px;margin:16px 0;font-size:14px">
-      The person we asked to confirm ownership of Suite Key <strong>${suiteKey}</strong> indicated they don't manage it.
+      The person we asked to confirm ownership of SuiteKey <strong>${suiteKey}</strong> indicated they don't manage it.
     </div>
-    <p style="font-size:13px;color:#666666">Please resubmit your request with the correct Suite Key or approver.</p>
+    <p style="font-size:13px;color:#666666">Please resubmit your request with the correct SuiteKey or approver.</p>
   `)
 }

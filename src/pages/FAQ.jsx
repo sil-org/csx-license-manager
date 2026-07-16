@@ -3,9 +3,9 @@ import { getLinks } from '../navLinks'
 
 // Ported from the GAS app's FAQ tab (gas-legacy's faq_replacement.py). A few
 // answers were adjusted to describe what this app actually does today rather
-// than what GAS did — subscribing on behalf of someone else, My Team, Suite
-// Key Charges, and automatic renewal-reminder emails aren't built yet (see
-// the README's "not ported yet" list). Update this copy as each ships.
+// than what GAS did — subscribing on behalf of someone else and automatic
+// renewal-reminder emails aren't built yet (see the README's "not ported
+// yet" list). Update this copy as each ships.
 const SECTIONS = [
   {
     title: 'Getting Started',
@@ -19,11 +19,11 @@ const SECTIONS = [
         a: (
           <>
             Open the <strong>Catalog</strong>, click <em>Request</em> on a license, then choose how to pay
-            &mdash; Suite Key or Ministry ID (for non-GTIS licenses).
+            &mdash; SuiteKey or Ministry ID (for non-GTIS licenses).
             <br /><br />
             What happens next depends on the license:
             <ul className="list-disc pl-5 mt-2 space-y-1">
-              <li>If you own the Suite Key, or it's GTIS-funded with no manual setup required, the subscription becomes <strong>Active</strong> immediately.</li>
+              <li>If you own the SuiteKey, or it's GTIS-funded with no manual setup required, the subscription becomes <strong>Active</strong> immediately.</li>
               <li>If approval is needed, the budget manager is notified and your subscription shows as <strong>Awaiting approval</strong>.</li>
               <li>If the vendor side requires a seat to be provisioned first, it shows as <strong>Approved &mdash; being provisioned</strong> until GTIS sets it up.</li>
             </ul>
@@ -40,7 +40,7 @@ const SECTIONS = [
           <table className="w-full text-sm border-collapse">
             <tbody>
               {[
-                ['Awaiting Suite Key verification', 'Waiting for a suggested Suite Key manager to confirm they own that budget.'],
+                ['Awaiting SuiteKey verification', 'Waiting for a suggested SuiteKey manager to confirm they own that budget.'],
                 ['Awaiting approval', 'The budget manager has been notified and needs to approve or decline.'],
                 ['Approved — being provisioned', 'Approved; GTIS is setting up your account on the vendor side.'],
                 ['Active', 'Your license is live and ready to use.'],
@@ -61,20 +61,20 @@ const SECTIONS = [
     title: 'Billing',
     items: [
       {
-        q: 'What is a Suite Key?',
-        a: 'A Suite Key is a budget cost center code. When you subscribe to a non-GTIS license, you select the Suite Key that should be charged — that key’s budget manager then approves or declines the request.',
+        q: 'What is a SuiteKey?',
+        a: 'A SuiteKey is a budget cost center code. When you subscribe to a non-GTIS license, you select the SuiteKey that should be charged — that key’s budget manager then approves or declines the request.',
       },
       {
-        q: 'What if my Suite Key is not listed, or has no manager?',
+        q: 'What if my SuiteKey is not listed, or has no manager?',
         a: 'You’ll be asked for the email of the person who manages that budget. They’ll be notified to confirm or deny ownership on the Approvals page. If they confirm, they’re registered as the manager and your request moves into the normal approval queue. If they deny it, you’ll need to resubmit with the correct contact.',
       },
       {
         q: 'What is a Ministry ID?',
-        a: 'A Ministry ID is a personal 6-digit billing identifier for staff whose costs are covered by a ministry rather than a Suite Key. No approval is required for this path. Contact the License Manager team if your Ministry ID is missing or needs correcting.',
+        a: 'A Ministry ID is a personal 6-digit billing identifier for staff whose costs are covered by a ministry rather than a SuiteKey. No approval is required for this path. Contact the License Manager team if your Ministry ID is missing or needs correcting.',
       },
       {
         q: 'What does "GTIS-sponsored" mean?',
-        a: 'GTIS centrally covers the cost of certain licenses. If a license is marked GTIS-sponsored, no Suite Key or Ministry ID is required — just request it. Some GTIS licenses activate immediately; others still require a seat to be provisioned first.',
+        a: 'GTIS centrally covers the cost of certain licenses. If a license is marked GTIS-sponsored, no SuiteKey or Ministry ID is required — just request it. Some GTIS licenses activate immediately; others still require a seat to be provisioned first.',
       },
       {
         q: 'Are subscriptions refundable?',
@@ -99,8 +99,8 @@ const SECTIONS = [
     title: 'For Budget Managers & Service Managers',
     items: [
       {
-        q: 'I own a Suite Key — how do I manage approval requests?',
-        a: 'The Approvals page shows any Suite Key ownership verifications and subscription approvals waiting on you — it’s empty unless something needs your attention. A full view of every charge to your Suite Key(s), not just pending ones, is planned but not built yet.',
+        q: 'I own a SuiteKey — how do I manage approval requests?',
+        a: 'The Approvals page shows any SuiteKey ownership verifications and subscription approvals waiting on you — it’s empty unless something needs your attention. For a full view of every charge to your SuiteKey(s), not just the pending ones, see SuiteKey Charges in the sidebar.',
       },
       {
         q: 'I manage a license’s vendor setup — where do I provision seats?',
@@ -108,7 +108,7 @@ const SECTIONS = [
       },
       {
         q: 'I’m a people manager — where can I see my team’s subscriptions?',
-        a: 'Not yet available in this version — a "My Team" view is planned.',
+        a: 'My Team, in the sidebar, lists every active or pending subscription used by your direct and indirect reports.',
       },
     ],
   },
