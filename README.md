@@ -2,8 +2,9 @@
 
 Software license/subscription request and approval tool for SIL staff.
 Built on [`sil-app-template`](https://github.com/kode-monki/sil-app-template):
-React + Vite + Tailwind frontend, Supabase (Postgres + Auth + RLS) backend,
-deployed to AWS S3/CloudFront via GitHub Actions.
+React + Vite + Tailwind frontend, Supabase (Postgres + Auth + RLS) backend.
+Frontend hosting is AWS Amplify (connected to this repo, builds/deploys on
+push to `main`); Supabase Edge Functions deploy via GitHub Actions.
 
 Ported from a Google Apps Script + Sheets app — the original source is kept
 under `gas-legacy/` for reference.

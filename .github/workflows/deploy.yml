@@ -1,12 +1,15 @@
-name: Deploy to S3
+name: Deploy Edge Functions
+
+# Frontend hosting is AWS Amplify, connected directly to this repo — it
+# builds and deploys itself on push to main, no GitHub Actions involved.
+# This workflow only handles the one thing Amplify doesn't: Supabase Edge
+# Functions (see supabase/functions/README.md).
 
 on:
   push:
     branches: [main]
 
 jobs:
-  # Remove this job if you have no Supabase Edge Functions yet
-  # (see supabase/functions/README.md).
   deploy-edge-functions:
     runs-on: ubuntu-latest
     steps:
@@ -21,35 +24,3 @@ jobs:
         run: supabase functions deploy --no-verify-jwt --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-
-  deploy-frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - run: npm ci
-
-      - run: npm run build
-        env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Sync to S3
-        run: aws s3 sync dist/ s3://${{ secrets.S3_BUCKET }} --delete
-
-      - name: Invalidate CloudFront
-        run: |
-          aws cloudfront create-invalidation \
-            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-            --paths "/*"

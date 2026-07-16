@@ -56,64 +56,43 @@ be bypassed.
 
 ---
 
-## 3. Create the S3 bucket + CloudFront distribution
+## 3. Connect AWS Amplify Hosting
 
-### S3 bucket
-1. **S3 > Create bucket** → name `YOUR_APP_NAME-web` (globally unique), region `us-east-1`
-2. Uncheck "Block all public access" → confirm
-3. **Permissions > Bucket policy**:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Principal": "*",
-    "Action": "s3:GetObject",
-    "Resource": "arn:aws:s3:::YOUR_APP_NAME-web/*"
-  }]
-}
-```
-
-4. **Properties > Static website hosting > Enable** — Index document: `index.html`,
-   Error document: `index.html` (required for React Router)
-
-### SSL certificate (ACM, must be in us-east-1)
-1. **Certificate Manager > Request a public certificate** for `YOUR_DOMAIN`
-2. DNS validation → create the validation record in Route 53
-3. Wait for status **Issued**
-
-### CloudFront distribution
-1. **CloudFront > Create distribution**
-2. Origin: the S3 bucket's **website endpoint** (not the bucket name directly)
-3. Viewer protocol policy: **Redirect HTTP to HTTPS**
-4. Alternate domain name (CNAME): `YOUR_DOMAIN`
-5. Custom SSL certificate: the one from above
-6. Default root object: `index.html`
-7. Copy the **Distribution ID**
-
-### Route 53 DNS
-Create an **A** record (Alias) for `YOUR_DOMAIN` pointing at the CloudFront distribution.
+1. **Amplify > New app > Host web app**, connect the GitHub repo, branch `main`
+2. Framework detection should recognize the Vite app automatically; if it
+   offers a build spec, the defaults (`npm ci`, `npm run build`, artifacts
+   from `dist/`) are correct — no custom `amplify.yml` needed
+3. **App settings > Environment variables** — add:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+   (from Supabase Project Settings > API)
+4. **App settings > Rewrites and redirects** — add a rule so React Router's
+   client-side routes don't 404 on refresh/direct link (Amplify's own SPA
+   shorthand — simpler than a CloudFront-style regex):
+   ```json
+   { "source": "/<*>", "status": "404-200", "target": "/index.html" }
+   ```
+   `<*>` matches any path; `404-200` only kicks in when the request would
+   otherwise 404, so real static files still serve normally.
+5. Optional custom domain: **App settings > Domain management > Add domain**
+   → `YOUR_DOMAIN`, follow the DNS validation steps (Amplify manages the
+   certificate itself, no separate ACM/Route 53 setup needed)
+6. Trigger a deploy (push to `main`, or **Run build** in the console) and
+   confirm the app loads at the Amplify-assigned URL (or your custom domain)
 
 ---
 
-## 4. Add GitHub Secrets
+## 4. Add GitHub Secrets (Edge Functions only)
 
-**Settings > Secrets and variables > Actions**:
+Frontend deploys happen entirely inside Amplify — GitHub Actions here is
+only for Supabase Edge Functions (`supabase/functions/`). If you're not
+using Edge Functions yet, delete `.github/workflows/deploy.yml` entirely.
+Otherwise, **Settings > Secrets and variables > Actions**:
 
 | Secret name | Value |
 |---|---|
-| `AWS_ACCESS_KEY_ID` | IAM credentials with S3 + CloudFront permissions |
-| `AWS_SECRET_ACCESS_KEY` | " |
-| `AWS_REGION` | `us-east-1` |
-| `S3_BUCKET` | `YOUR_APP_NAME-web` |
-| `CLOUDFRONT_DISTRIBUTION_ID` | from step 3 |
-| `VITE_SUPABASE_URL` | Supabase Project Settings > API |
-| `VITE_SUPABASE_ANON_KEY` | Supabase Project Settings > API |
-
-If you're not using Edge Functions yet, delete the `deploy-edge-functions`
-job from `.github/workflows/deploy.yml` (otherwise also add
-`SUPABASE_ACCESS_TOKEN` and `SUPABASE_PROJECT_REF`).
+| `SUPABASE_ACCESS_TOKEN` | Supabase account menu > Access Tokens > generate new |
+| `SUPABASE_PROJECT_REF` | Supabase Project Settings > General > Reference ID |
 
 ---
 
@@ -123,7 +102,8 @@ job from `.github/workflows/deploy.yml` (otherwise also add
 git push -u origin main
 ```
 
-The GitHub Action deploys to S3 + invalidates CloudFront automatically.
+Amplify picks up the push and builds/deploys the frontend on its own. The
+GitHub Action only runs the Edge Functions deploy.
 
 ---
 
