@@ -80,9 +80,15 @@ create policy "profiles: own read"
   on profiles for select
   using (id = current_profile_id() or get_profile_role() = 'admin');
 
+-- with check blocks changing role via this policy specifically — nothing
+-- previously stopped a signed-in user from just updating their own role to
+-- 'admin' via a direct client-side call. Role changes now only happen
+-- through a security-definer RPC (e.g. admin_set_role() in the domain
+-- schema), which bypasses RLS as the table owner and is unaffected by this.
 create policy "profiles: own update"
   on profiles for update
-  using (id = current_profile_id());
+  using (id = current_profile_id())
+  with check (id = current_profile_id() and role = get_profile_role());
 
 -- linked_accounts: users can read their own; admins can read/insert all
 create policy "linked_accounts: own read"

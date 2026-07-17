@@ -15,14 +15,10 @@ export function getLinks({ categories = [] } = {}) {
     { to: '/my-team', label: 'My Team', icon: Users },
     { to: '/suite-key-charges', label: 'SuiteKey Charges', icon: KeyRound },
     { to: '/faq', label: 'FAQ', icon: HelpCircle },
-    {
-      label: 'Admin', icon: Settings, adminOnly: true,
-      children: [
-        { to: '/admin/catalog', label: 'Catalog' },
-        { to: '/admin/audit-log', label: 'Audit Log' },
-        { to: '/admin/suite-keys', label: 'SuiteKeys' },
-        { to: '/admin/ministry-ids', label: 'Ministry IDs' },
-      ],
-    },
+    // A single direct link now, not an expandable submenu — switching between
+    // admin views happens via the horizontal AdminTabs bar each admin page
+    // renders instead, matching GAS's layout (less mouse travel than
+    // reopening a sidebar dropdown for every switch).
+    { to: '/admin/catalog', label: 'Admin', icon: Settings, adminOnly: true },
   ]
 }

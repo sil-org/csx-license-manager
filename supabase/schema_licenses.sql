@@ -3,22 +3,25 @@
 -- accounts, resolve_profile). Ported from the original Google Apps Script /
 -- Sheets version — see /gas-legacy for the source this was modeled on.
 --
--- NOT ported in this pass (left as follow-up work):
---   - Emails.gs: all outbound email (request/approval/renewal notifications).
---     Wire these up as Supabase Edge Functions triggered from the RPCs below.
---   - Google Group membership sync on activate/revoke (Approvals.gs) — needs
---     an Edge Function calling the Admin SDK Directory API with a service
---     account; noted with a TODO in activate_subscription()'s audit note.
+-- STILL NOT ported (see README.md's "What's not ported yet" for full detail):
+--   - Emails.gs: outbound email is wired up (Resend, send-email Edge
+--     Function), but doesn't actually send until infra finishes Resend's
+--     domain setup.
+--   - Google Group membership sync on activate/revoke (Approvals.gs) — the
+--     license's own Google Group, not SuiteKey ownership groups (those work).
+--     Needs an Edge Function calling the Admin SDK Directory API; noted with
+--     a TODO in activate_subscription()'s audit note.
 --   - Provisioning.gs's Gmail-inbox scanning automation — GAS-specific
 --     housekeeping with no direct equivalent; drop or reimplement as a
 --     scheduled job against Gmail's API if still needed.
---   - Catalog.gs's finance export and bulk CSV import.
---   - Managers.gs's org-hierarchy "my team's subscriptions" view — profiles
---     gets `manager_email`/`department` columns below so this can be added
---     later, but the recursive reports-lookup itself isn't built here.
 --   - Requesting a subscription on behalf of someone else (GAS allowed
 --     UserEmail != requester); this schema only supports self-service
 --     requests for now.
+--
+-- Since ported: Catalog.gs's finance export and bulk CSV import
+-- (calc_prorated_cost/get_finance_export, admin_import_subscriptions below),
+-- and Managers.gs's org-hierarchy "my team's subscriptions" view
+-- (get_report_emails, My Team page).
 
 -- ─── ENUMS ───────────────────────────────────────────────────────────────────
 
@@ -34,7 +37,7 @@ create type renewal_status as enum ('none', 'opted_in', 'opted_out');
 create type billing_cycle as enum ('annual', 'monthly', 'one_time');
 create type audit_action as enum (
   'requested', 'auto_approved', 'approved', 'declined',
-  'activated', 'revoked', 'cancelled', 'sk_verified', 'imported'
+  'activated', 'revoked', 'cancelled', 'sk_verified', 'imported', 'sk_merged'
 );
 -- Which billing path a subscription used. Replaces the original GAS-ported
 -- design of overloading suite_key with the literal strings 'GTIS' /
@@ -68,6 +71,14 @@ create table if not exists suite_keys (
   description     text,
   created_at      timestamptz not null default now()
 );
+
+-- Belt-and-suspenders against the class of bug where a case-mismatched
+-- SuiteKey (e.g. "relations-u_sil" vs "Relations-U_SIL") silently creates a
+-- second, unowned row instead of matching the real one. request_subscription()
+-- and admin_update_suite_key_owner() both normalize to the existing row's
+-- casing before writing, but this index turns any path that doesn't into a
+-- loud constraint error instead of quietly corrupting data.
+create unique index if not exists suite_keys_lower_suite_key_idx on suite_keys (lower(suite_key));
 
 -- Cache of Google Group membership, refreshed on a schedule by the
 -- sync-group-memberships Edge Function (a domain-wide-delegated service
@@ -339,6 +350,7 @@ declare
   v_suite_key text := null;
   v_ministry_id text := null;
   v_audit_suite_key text;  -- display-only label for the audit log; NOT written to subscriptions.suite_key
+  v_canonical_key text;
   v_owner text;
   v_owner_group text;
   v_pending_approver text := null;
@@ -375,11 +387,29 @@ begin
   else
     v_billing_type := 'suite_key';
     if p_suite_key is null then raise exception 'a suite key is required'; end if;
-    v_suite_key := p_suite_key;
-    v_audit_suite_key := p_suite_key;
+    -- Trim here to match admin_update_suite_key_owner()'s trim before its
+    -- suite_keys upsert — a stray leading/trailing space on this insert
+    -- would otherwise create a row that upsert can never match again later,
+    -- since Postgres treats "key" and "key " as distinct primary key text.
+    v_suite_key := trim(p_suite_key);
+    if v_suite_key like '%~%' then
+      raise exception 'SuiteKey cannot contain "~" — check for stray text pasted in after the real key';
+    end if;
 
-    select owner_email, owner_group_email into v_owner, v_owner_group from suite_keys where suite_key = v_suite_key;
-    if not found then
+    -- Match case-insensitively, but if a row already exists, normalize to
+    -- its actual stored casing (not whatever case the requester happened to
+    -- type) — e.g. typing "relations-u_sil" must land on the existing
+    -- "Relations-U_SIL" row, not silently create a second, unowned one that
+    -- looks identical at a glance. This is the same duplicate-row failure
+    -- mode as the earlier whitespace bug, just triggered by case instead.
+    select suite_key, owner_email, owner_group_email into v_canonical_key, v_owner, v_owner_group
+    from suite_keys where lower(suite_key) = lower(v_suite_key);
+    if v_canonical_key is not null then
+      v_suite_key := v_canonical_key;
+    end if;
+    v_audit_suite_key := v_suite_key;
+
+    if v_canonical_key is null then
       insert into suite_keys (suite_key, owner_email) values (v_suite_key, null);
       v_owner := null;
       v_owner_group := null;
@@ -464,6 +494,52 @@ begin
     from licenses l
     where s.suite_key = p_suite_key and s.status = 'pending_sk_verification'
       and s.pending_approver_email = v_email and l.id = s.license_id
+    returning s.id, s.user_email, l.name;
+end;
+$$;
+
+-- ─── RPC: admin_confirm_sk_ownership ────────────────────────────────────────────
+-- The "Confirm as {suggested approver}" quick-confirm button in Admin: SuiteKeys
+-- needs this, NOT admin_update_suite_key_owner(). That RPC is for "an admin is
+-- assigning/correcting who owns this key" — it deliberately leaves affected
+-- subscriptions in pending_sk_verification, since the new owner still has to
+-- confirm themselves (they may not even know yet). Quick-confirm means the
+-- opposite: the suggested approver already confirmed out-of-band (email,
+-- verbally), so this should behave like confirm_sk_ownership() itself — advance
+-- matching subscriptions straight to 'pending' — just triggered by an admin on
+-- that person's behalf instead of by the person signing in.
+--
+-- Scoped to s.pending_approver_email = p_owner_email specifically (mirrors
+-- confirm_sk_ownership()'s own scoping) — admin_update_suite_key_owner()'s
+-- blanket "every pending_sk_verification row on this suite_key" match is what
+-- let one click silently touch a different requester's unrelated pending
+-- request that happened to share the same suite_key with a different
+-- suggested approver.
+
+create or replace function admin_confirm_sk_ownership(p_suite_key text, p_owner_email text)
+returns table(id uuid, user_email text, license_name text)
+language plpgsql security definer as $$
+declare
+  v_owner text := nullif(lower(trim(p_owner_email)), '');
+  v_admin text := current_profile_email();
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+  p_suite_key := trim(p_suite_key);
+  if v_owner is null then raise exception 'owner email is required'; end if;
+
+  update suite_keys set owner_email = v_owner, owner_group_email = null
+  where suite_key = p_suite_key;
+  if not found then raise exception 'suite key not found'; end if;
+
+  insert into audit_log (action, suite_key, performed_by)
+  values ('sk_verified', p_suite_key, v_admin);
+
+  return query
+    update subscriptions s
+    set status = 'pending', pending_approver_email = null
+    from licenses l
+    where s.suite_key = p_suite_key and s.status = 'pending_sk_verification'
+      and s.pending_approver_email = v_owner and l.id = s.license_id
     returning s.id, s.user_email, l.name;
 end;
 $$;
@@ -564,12 +640,25 @@ language plpgsql security definer as $$
 declare
   v_owner text := nullif(lower(trim(p_new_owner_email)), '');
   v_group text := nullif(lower(trim(p_owner_group_email)), '');
+  v_canonical_key text;
 begin
   if not is_admin() then raise exception 'admin only'; end if;
   p_suite_key := trim(p_suite_key);
   if p_suite_key = '' then raise exception 'suite key is required'; end if;
+  if p_suite_key like '%~%' then
+    raise exception 'SuiteKey cannot contain "~" — check for stray text pasted in after the real key';
+  end if;
   if v_owner is not null and v_group is not null then
     raise exception 'a suite key can have an individual owner or a group owner, not both';
+  end if;
+
+  -- Normalize to any existing row's actual casing before the upsert below —
+  -- otherwise typing a "new" SuiteKey that only differs by case from one
+  -- that already exists (e.g. "relations-u_sil" vs "Relations-U_SIL")
+  -- silently creates a second, duplicate row instead of updating the real one.
+  select suite_key into v_canonical_key from suite_keys where lower(suite_key) = lower(p_suite_key);
+  if v_canonical_key is not null then
+    p_suite_key := v_canonical_key;
   end if;
 
   insert into suite_keys (suite_key, owner_email, owner_group_email, description)
@@ -594,6 +683,87 @@ begin
       where s.suite_key = p_suite_key and s.status = 'pending_sk_verification' and l.id = s.license_id
       returning s.id, s.user_email, l.name;
   end if;
+end;
+$$;
+
+-- ─── RPC: admin_merge_suite_key ────────────────────────────────────────────────
+-- For data-entry mistakes: someone types e.g. "Relations-U_SIL~5407" (garbage
+-- appended, a paste artifact, a typo) instead of the real "Relations-U_SIL".
+-- That's a genuinely different suite_keys row from request_subscription()'s
+-- perspective — not a case/whitespace variant the earlier fixes catch — so it
+-- creates a real, separate, unowned key. There was previously no way to
+-- delete it: subscriptions.suite_key's FK blocks a plain delete while any
+-- subscription still points at it. This repoints those subscriptions to the
+-- correct key first, then deletes the bad row.
+--
+-- Refuses to merge away a key that has a real owner on file — that's very
+-- unlikely to be a typo, and merging would silently destroy real ownership
+-- data. If that guard is ever wrong, unassign the owner first (admin_update_
+-- suite_key_owner with a blank owner), then merge.
+
+create or replace function admin_merge_suite_key(p_bad_key text, p_correct_key text)
+returns void language plpgsql security definer as $$
+declare
+  v_bad text := trim(p_bad_key);
+  v_correct text;
+  v_owner text;
+  v_owner_group text;
+  r record;
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+  if v_bad = '' or p_correct_key is null or trim(p_correct_key) = '' then
+    raise exception 'both the bad and correct suite keys are required';
+  end if;
+
+  select suite_key, owner_email, owner_group_email into v_correct, v_owner, v_owner_group
+  from suite_keys where lower(suite_key) = lower(trim(p_correct_key));
+  if v_correct is null then raise exception 'suite key % does not exist', p_correct_key; end if;
+
+  if lower(v_bad) = lower(v_correct) then
+    raise exception 'bad and correct suite keys must be different';
+  end if;
+
+  if exists (
+    select 1 from suite_keys where suite_key = v_bad and (owner_email is not null or owner_group_email is not null)
+  ) then
+    raise exception 'suite key % has an owner on file — this looks like a real key, not a typo', v_bad;
+  end if;
+
+  update subscriptions set suite_key = v_correct where suite_key = v_bad;
+
+  -- Repointing alone isn't enough: any of those subscriptions sitting in
+  -- pending_sk_verification were waiting on someone to confirm the (bad,
+  -- unowned) key's ownership. Now that they're on the correct key, ownership
+  -- may already be established — re-run the same owner/group decision
+  -- request_subscription() would have made if it had matched the right key
+  -- to begin with, instead of leaving them stuck awaiting a confirmation
+  -- that's no longer needed.
+  for r in
+    select s.id, s.user_email, l.activation_url
+    from subscriptions s join licenses l on l.id = s.license_id
+    where s.suite_key = v_correct and s.status = 'pending_sk_verification'
+  loop
+    if v_owner_group is not null then
+      if exists (select 1 from group_memberships where group_email = v_owner_group and member_email = r.user_email) then
+        update subscriptions set status = (case when r.activation_url is not null then 'approved' else 'active' end)::subscription_status, pending_approver_email = null where id = r.id;
+      else
+        update subscriptions set status = 'pending', pending_approver_email = null where id = r.id;
+      end if;
+    elsif v_owner is not null then
+      if v_owner = r.user_email then
+        update subscriptions set status = (case when r.activation_url is not null then 'approved' else 'active' end)::subscription_status, pending_approver_email = null where id = r.id;
+      else
+        update subscriptions set status = 'pending', pending_approver_email = null where id = r.id;
+      end if;
+    end if;
+    -- else: the correct key is itself still unowned — leave it in
+    -- pending_sk_verification, genuinely still awaiting a suggested approver.
+  end loop;
+
+  insert into audit_log (action, suite_key, performed_by, notes)
+  values ('sk_merged', v_correct, current_profile_email(), 'merged from "' || v_bad || '"');
+
+  delete from suite_keys where suite_key = v_bad;
 end;
 $$;
 
@@ -838,5 +1008,250 @@ returns void language plpgsql security definer as $$
 begin
   if not is_admin() then raise exception 'admin only'; end if;
   update licenses set active = false where id = p_license_id;
+end;
+$$;
+
+-- save_license()'s UPDATE branch deliberately never touches `active` — it's
+-- a distinct action with its own confirmation, not a field you'd casually
+-- leave toggled while editing everything else. This is the reactivate side
+-- deactivate_license() was missing entirely.
+create or replace function reactivate_license(p_license_id uuid)
+returns void language plpgsql security definer as $$
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+  update licenses set active = true where id = p_license_id;
+end;
+$$;
+
+-- ─── RPC: calc_prorated_cost / get_finance_export ──────────────────────────────
+-- Ported from gas-legacy/src/Catalog.gs's _calcProRatedCost()/getFinanceExport().
+-- Pro-rating only applies when licenses.pro_rated is set — everything else
+-- charges the flat license price regardless of when in the cycle it started.
+--   - Monthly: day-based — days remaining in the start month (inclusive of
+--     the start day) as a fraction of days in that month.
+--   - Annual (default): month-based — months remaining from the start date
+--     to the next occurrence of the license's renewal_month (1-12), defaulting
+--     to October (SIL's FY start) if unset.
+-- Not security definer — relies on the caller's own RLS read access (admins
+-- can already read every subscriptions/licenses row via existing policies;
+-- this just adds the math on top).
+
+create or replace function calc_prorated_cost(
+  p_price numeric, p_billing_cycle billing_cycle, p_renewal_month int, p_pro_rated boolean, p_start_date date
+) returns numeric language plpgsql immutable as $$
+declare
+  v_day int;
+  v_days_in_month int;
+  v_days_left int;
+  v_renew_month int;
+  v_start_month int;
+  v_months int;
+begin
+  if not p_pro_rated then
+    return p_price;
+  end if;
+
+  if p_billing_cycle = 'monthly' then
+    v_day := extract(day from p_start_date)::int;
+    v_days_in_month := extract(day from (date_trunc('month', p_start_date) + interval '1 month - 1 day'))::int;
+    v_days_left := v_days_in_month - v_day + 1;
+    return round(p_price * v_days_left / v_days_in_month, 2);
+  end if;
+
+  v_renew_month := coalesce(nullif(p_renewal_month, 0), 10);
+  v_start_month := extract(month from p_start_date)::int;
+  v_months := v_renew_month - v_start_month;
+  if v_months <= 0 then
+    v_months := v_months + 12;
+  end if;
+  return round(p_price * v_months / 12, 2);
+end;
+$$;
+
+create or replace function get_finance_export(p_start_date date, p_end_date date)
+returns table(
+  user_email text, license_name text, billing_label text, cost numeric, start_date date, status text
+) language sql stable as $$
+  select
+    s.user_email,
+    l.name,
+    case
+      when s.billing_type = 'gtis' then 'GTIS'
+      when s.billing_type = 'ministry' then 'Ministry ID ' || s.ministry_id
+      else s.suite_key
+    end,
+    calc_prorated_cost(l.price, l.billing_cycle, l.renewal_month, l.pro_rated, s.start_date),
+    s.start_date,
+    s.status::text
+  from subscriptions s
+  join licenses l on l.id = s.license_id
+  where s.status in ('active', 'approved')
+    and s.start_date >= p_start_date
+    and s.start_date <= p_end_date
+  order by s.start_date;
+$$;
+
+-- ─── RPC: admin_import_subscriptions ────────────────────────────────────────────
+-- Ported from gas-legacy/src/Catalog.gs's importSubscriptions(). Bulk-creates
+-- already-active subscriptions from a legacy/historical source — no approval
+-- emails, no SK verification step, no Google Group changes. Skips rows where
+-- the user already has a non-cancelled/declined/revoked subscription for the
+-- same license+FY (mirrors request_subscription()'s own duplicate check).
+--
+-- p_rows is a JSON array of {user_email, license_name, suite_key, start_date,
+-- fy}: suite_key accepts a real SuiteKey, a 6-digit Ministry ID (bare or
+-- "MIN:XXXXXX"), or blank for a GTIS-sponsored license. Applies the same
+-- SuiteKey trim/tilde-block/case-insensitive-match rules as
+-- request_subscription(), for the same reasons — and the same FY rollover
+-- rule as GAS's getCurrentFiscalYear() when fy isn't given (October start).
+--
+-- Each row is processed in its own sub-block so one bad row can't abort the
+-- whole batch — returns one result object per input row: {ok, error?, row}.
+-- NOT ported: GAS's ALLOWED_DOMAINS allowlist (a specific list of SIL-
+-- affiliated external domains) — add it back here if bulk imports need it.
+
+create or replace function admin_import_subscriptions(p_rows jsonb)
+returns jsonb language plpgsql security definer as $$
+declare
+  v_admin text := current_profile_email();
+  v_row jsonb;
+  v_results jsonb := '[]'::jsonb;
+  v_user_email text;
+  v_license_name text;
+  v_raw_suite_key text;
+  v_start_date date;
+  v_fy int;
+  v_license licenses%rowtype;
+  v_billing_type subscription_billing_type;
+  v_suite_key text;
+  v_ministry_id text;
+  v_canonical_key text;
+  v_sub_id uuid;
+  v_error text;
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+
+  for v_row in select * from jsonb_array_elements(p_rows)
+  loop
+    begin
+      v_error := null;
+      v_user_email := lower(trim(v_row->>'user_email'));
+      v_license_name := trim(v_row->>'license_name');
+      v_raw_suite_key := trim(coalesce(v_row->>'suite_key', ''));
+      v_billing_type := null;
+      v_suite_key := null;
+      v_ministry_id := null;
+      v_license := null;
+
+      if v_user_email = '' or v_user_email is null then
+        v_error := 'Missing email';
+      elsif v_user_email !~ '^[^\s@]+@[^\s@]+\.[^\s@]+$' then
+        v_error := 'Invalid email';
+      elsif v_license_name = '' or v_license_name is null then
+        v_error := 'Missing license name';
+      end if;
+
+      if v_error is null then
+        select * into v_license from licenses where lower(name) = lower(v_license_name) and active;
+        if v_license.id is null then
+          v_error := 'License not found in catalog: ' || v_license_name;
+        end if;
+      end if;
+
+      if v_error is null then
+        v_start_date := nullif(v_row->>'start_date', '')::date;
+        if v_start_date is null then v_start_date := current_date; end if;
+
+        if v_row->>'fy' is not null and (v_row->>'fy') != '' then
+          v_fy := (v_row->>'fy')::int;
+        else
+          v_fy := extract(year from v_start_date)::int + (case when extract(month from v_start_date) >= 10 then 1 else 0 end);
+        end if;
+
+        if v_license.gtis_sponsored and v_raw_suite_key = '' then
+          v_billing_type := 'gtis';
+        elsif v_raw_suite_key ~ '^\d{6}$' or v_raw_suite_key ~* '^MIN:\d{6}$' then
+          v_ministry_id := regexp_replace(v_raw_suite_key, '^MIN:', '', 'i');
+          v_billing_type := 'ministry';
+        elsif v_raw_suite_key = '' then
+          v_error := 'Missing SuiteKey or Ministry ID';
+        else
+          v_billing_type := 'suite_key';
+          if v_raw_suite_key like '%~%' then
+            v_error := 'SuiteKey cannot contain "~"';
+          else
+            select suite_key into v_canonical_key from suite_keys where lower(suite_key) = lower(v_raw_suite_key);
+            v_suite_key := coalesce(v_canonical_key, v_raw_suite_key);
+            if v_canonical_key is null then
+              insert into suite_keys (suite_key, owner_email) values (v_suite_key, null);
+            end if;
+          end if;
+        end if;
+      end if;
+
+      if v_error is null and exists (
+        select 1 from subscriptions
+        where user_email = v_user_email and license_id = v_license.id and fy = v_fy
+          and status not in ('declined', 'revoked', 'cancelled')
+      ) then
+        v_error := 'Already has a subscription for FY' || v_fy;
+      end if;
+
+      if v_error is not null then
+        v_results := v_results || jsonb_build_object('ok', false, 'error', v_error, 'row', v_row);
+        continue;
+      end if;
+
+      insert into subscriptions (
+        user_email, license_id, suite_key, billing_type, ministry_id, fy, status,
+        billing_cycle, renewal_month, renewal_reminder, price_at_signup, requested_by
+      ) values (
+        v_user_email, v_license.id, v_suite_key, v_billing_type, v_ministry_id, v_fy, 'active',
+        v_license.billing_cycle, v_license.renewal_month, v_license.renewal_reminder, v_license.price, current_profile_id()
+      ) returning id into v_sub_id;
+
+      if v_ministry_id is not null then
+        insert into ministry_ids (email, ministry_id) values (v_user_email, v_ministry_id)
+          on conflict (email) do update set ministry_id = excluded.ministry_id;
+      end if;
+
+      insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, notes)
+      values (
+        'imported', v_sub_id, v_license.name, v_user_email,
+        case when v_billing_type = 'gtis' then 'GTIS' when v_billing_type = 'ministry' then 'MIN:' || v_ministry_id else v_suite_key end,
+        v_admin, 'imported from legacy system'
+      );
+
+      v_results := v_results || jsonb_build_object('ok', true, 'id', v_sub_id, 'row', v_row);
+    exception when others then
+      v_results := v_results || jsonb_build_object('ok', false, 'error', sqlerrm, 'row', v_row);
+    end;
+  end loop;
+
+  return v_results;
+end;
+$$;
+
+-- ─── RPC: admin_set_role ────────────────────────────────────────────────────────
+-- The only sanctioned way a profile's role can change now — see the fix to
+-- profiles' "own update" RLS policy in schema.sql, which now blocks changing
+-- role via a direct client-side update (nothing previously stopped a signed-
+-- in user from just updating their own role that way — this closes that).
+--
+-- Refuses to demote the last remaining admin, so the app can never end up
+-- with zero admins and nobody able to fix it without raw SQL.
+
+create or replace function admin_set_role(p_profile_id uuid, p_role user_role)
+returns void language plpgsql security definer as $$
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+
+  if p_role = 'member' and (select role from profiles where id = p_profile_id) = 'admin' then
+    if (select count(*) from profiles where role = 'admin') <= 1 then
+      raise exception 'cannot demote the last remaining admin';
+    end if;
+  end if;
+
+  update profiles set role = p_role where id = p_profile_id;
 end;
 $$;

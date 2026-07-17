@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
 import AppLayout from '../../components/AppLayout'
+import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
-import { getAllLicenses, saveLicense, deactivateLicense } from '../../lib/licenses'
+import { getAllLicenses, saveLicense, deactivateLicense, reactivateLicense } from '../../lib/licenses'
 
 const BLANK = {
   id: null, name: '', vendor: '', category: '', price: '', price_unit: '',
@@ -10,10 +12,47 @@ const BLANK = {
   pro_rated: false, service_manager_email: '', onboarding_message: '',
 }
 
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+
+function billingLabel(license) {
+  if (license.billing_cycle === 'monthly') return 'Monthly'
+  if (license.billing_cycle === 'one_time') return 'One-time'
+  if (!license.renewal_month) return '—'
+  return `${String(license.renewal_month).padStart(2, '0')} - ${MONTH_NAMES[license.renewal_month - 1]}`
+}
+
+// Each column's sort() returns a directly-comparable value — keeps the
+// header-click handler and the actual comparator generic across columns
+// instead of a big switch statement.
+const COLUMNS = [
+  { key: 'name', label: 'Name', sort: l => l.name.toLowerCase() },
+  { key: 'vendor', label: 'Vendor', sort: l => (l.vendor || '').toLowerCase() },
+  { key: 'category', label: 'Category', sort: l => (l.category || '').toLowerCase() },
+  { key: 'price', label: 'Price', sort: l => Number(l.price) || 0 },
+  { key: 'billing', label: 'Billing', sort: l => (l.billing_cycle === 'monthly' ? 0 : l.renewal_month || 0) },
+  { key: 'paid_by', label: 'Paid By', sort: l => (l.gtis_sponsored ? 'GTIS' : 'User') },
+  { key: 'active', label: 'Active', sort: l => (l.active ? 1 : 0) },
+]
+
 export default function AdminCatalog() {
   const [licenses, setLicenses] = useState(null)
   const [error, setError] = useState(null)
   const [editing, setEditing] = useState(null) // license object, or BLANK for "new"
+  const [search, setSearch] = useState('')
+  const [sortKey, setSortKey] = useState('name')
+  const [sortDir, setSortDir] = useState('asc')
+
+  function handleSort(key) {
+    if (key === sortKey) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortKey(key)
+      setSortDir('asc')
+    }
+  }
 
   function reload() {
     getAllLicenses().then(setLicenses).catch(e => setError(e.message))
@@ -36,18 +75,49 @@ export default function AdminCatalog() {
     }
   }
 
-  async function handleDeactivate(id) {
+  async function handleDeactivate() {
+    if (!confirm(`Deactivate ${editing.name}? Existing subscriptions are unaffected, but no new subscriptions can be requested for it.`)) return
     try {
-      await deactivateLicense(id)
+      await deactivateLicense(editing.id)
+      setEditing(null)
       reload()
     } catch (err) {
       setError(err.message)
     }
   }
 
+  async function handleReactivate() {
+    if (!confirm(`Reactivate ${editing.name}? It'll show up in the Catalog again.`)) return
+    try {
+      await reactivateLicense(editing.id)
+      setEditing(null)
+      reload()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const q = search.trim().toLowerCase()
+  const filteredLicenses = !q ? licenses : licenses?.filter(l =>
+    l.name.toLowerCase().includes(q) ||
+    (l.vendor || '').toLowerCase().includes(q) ||
+    (l.category || '').toLowerCase().includes(q)
+  )
+  const visibleLicenses = useMemo(() => {
+    if (!filteredLicenses) return filteredLicenses
+    const col = COLUMNS.find(c => c.key === sortKey)
+    const sorted = [...filteredLicenses].sort((a, b) => {
+      const av = col.sort(a), bv = col.sort(b)
+      return av < bv ? -1 : av > bv ? 1 : 0
+    })
+    return sortDir === 'desc' ? sorted.reverse() : sorted
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredLicenses, sortKey, sortDir])
+
   return (
     <AppLayout appName="License Manager" links={getLinks()}>
-      <div className="max-w-4xl mx-auto p-6">
+      <div className="max-w-6xl mx-auto p-6">
+        <AdminTabs />
         <div className="flex items-center justify-between mb-6">
           <h1 className="font-display text-2xl font-bold text-brand">Admin — Catalog</h1>
           <button onClick={() => setEditing(BLANK)} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">
@@ -57,21 +127,59 @@ export default function AdminCatalog() {
 
         {error && <p className="text-sil-red mb-4">{error}</p>}
 
-        <div className="bg-white rounded-xl shadow-sm divide-y">
-          {licenses?.map(license => (
-            <div key={license.id} className="p-4 flex items-center justify-between">
-              <div>
-                <p className={`font-medium ${license.active ? 'text-brand' : 'text-gray-400 line-through'}`}>{license.name}</p>
-                <p className="text-xs text-gray-400">{license.vendor} · {license.category}</p>
-              </div>
-              <div className="flex gap-3">
-                <button onClick={() => setEditing(license)} className="text-xs font-medium text-brand">Edit</button>
-                {license.active && (
-                  <button onClick={() => handleDeactivate(license.id)} className="text-xs font-medium text-sil-red">Deactivate</button>
-                )}
-              </div>
-            </div>
-          ))}
+        {licenses?.length > 0 && (
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Filter by name, vendor, or category…"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
+          />
+        )}
+        {licenses?.length > 0 && visibleLicenses.length === 0 && (
+          <p className="text-gray-400 mb-4">No licenses match "{search}".</p>
+        )}
+
+        <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-gray-400 border-b">
+              <tr>
+                {COLUMNS.map(col => (
+                  <th key={col.key} className="p-3">
+                    <button
+                      onClick={() => handleSort(col.key)}
+                      className="flex items-center gap-1 font-semibold uppercase text-xs tracking-wide hover:text-gray-600"
+                    >
+                      {col.label}
+                      {sortKey === col.key
+                        ? (sortDir === 'asc' ? <ChevronUp size={13} /> : <ChevronDown size={13} />)
+                        : <ChevronsUpDown size={13} className="text-gray-300" />}
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {visibleLicenses?.map(license => (
+                <tr
+                  key={license.id}
+                  onClick={() => setEditing(license)}
+                  className="cursor-pointer hover:bg-gray-50 transition-colors"
+                >
+                  <td className={`p-3 font-medium ${license.active ? 'text-brand' : 'text-gray-400 line-through'}`}>{license.name}</td>
+                  <td className="p-3 text-gray-500">{license.vendor}</td>
+                  <td className="p-3 text-gray-500">{license.category}</td>
+                  <td className="p-3 text-gray-700">{license.price != null ? `$${Number(license.price).toFixed(2)}` : '—'}</td>
+                  <td className="p-3 text-gray-500 whitespace-nowrap">{billingLabel(license)}</td>
+                  <td className="p-3 text-gray-500">{license.gtis_sponsored ? 'GTIS' : 'User'}</td>
+                  <td className="p-3">
+                    <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${license.active ? 'bg-sil-green/10 text-sil-green' : 'bg-gray-100 text-gray-400'}`}>
+                      {license.active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -140,9 +248,16 @@ export default function AdminCatalog() {
               </label>
             </div>
 
-            <div className="flex gap-3 pt-3">
-              <button type="submit" className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">Save</button>
-              <button type="button" onClick={() => setEditing(null)} className="text-sm font-medium text-gray-500">Cancel</button>
+            <div className="flex items-center justify-between pt-3">
+              <div className="flex gap-3">
+                <button type="submit" className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">Save</button>
+                <button type="button" onClick={() => setEditing(null)} className="text-sm font-medium text-gray-500">Cancel</button>
+              </div>
+              {editing.id && (
+                editing.active
+                  ? <button type="button" onClick={handleDeactivate} className="text-sm font-medium text-sil-red">Deactivate</button>
+                  : <button type="button" onClick={handleReactivate} className="text-sm font-medium text-sil-green">Reactivate</button>
+              )}
             </div>
           </form>
         </div>

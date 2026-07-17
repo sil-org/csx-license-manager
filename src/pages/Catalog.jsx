@@ -12,10 +12,19 @@ import {
   approvalRequestEmailSubject, approvalRequestEmailHtml,
 } from '../lib/email'
 
+// Postgres numeric columns come through supabase-js as strings, hence the
+// Number() — whole dollar amounts show with no decimals, anything else
+// always shows exactly two (never one, e.g. never "$9.5").
+function formatPrice(price) {
+  const n = Number(price)
+  return n % 1 === 0 ? `$${n}` : `$${n.toFixed(2)}`
+}
+
 export default function Catalog() {
   const [licenses, setLicenses] = useState(null)
   const [error, setError] = useState(null)
   const [requesting, setRequesting] = useState(null) // license being requested
+  const [search, setSearch] = useState('')
   const [searchParams] = useSearchParams()
   const activeCategory = searchParams.get('category')
 
@@ -27,9 +36,15 @@ export default function Catalog() {
     () => [...new Set((licenses || []).map(l => l.category).filter(Boolean))].sort(),
     [licenses]
   )
-  const visibleLicenses = activeCategory
+  const categoryFiltered = activeCategory
     ? licenses?.filter(l => l.category === activeCategory)
     : licenses
+  const q = search.trim().toLowerCase()
+  const visibleLicenses = !q ? categoryFiltered : categoryFiltered?.filter(l =>
+    l.name.toLowerCase().includes(q) ||
+    (l.vendor || '').toLowerCase().includes(q) ||
+    (l.category || '').toLowerCase().includes(q)
+  )
 
   return (
     <AppLayout appName="License Manager" links={getLinks({ categories })}>
@@ -41,17 +56,30 @@ export default function Catalog() {
         {error && <p className="text-sil-red mb-4">{error}</p>}
         {!licenses && !error && <p className="text-gray-400">Loading…</p>}
 
+        {licenses?.length > 0 && (
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name, vendor, or category…"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
+          />
+        )}
+
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {visibleLicenses?.map(license => (
             <div key={license.id} className="bg-white rounded-xl shadow-sm p-5 flex flex-col">
-              {license.logo_url && <img src={license.logo_url} alt="" className="h-8 mb-3 object-contain" />}
-              <h2 className="font-semibold text-brand">{license.name}</h2>
-              <p className="text-sm text-gray-500 mb-1">{license.vendor} &middot; {license.category}</p>
-              {license.price != null && (
-                <p className="text-sm text-gray-700 mb-3">
-                  ${license.price} {license.price_unit}
-                </p>
-              )}
+              <div className="flex items-start gap-3 mb-3">
+                {license.logo_url && (
+                  <img src={license.logo_url} alt="" className="h-10 w-10 object-contain flex-shrink-0" />
+                )}
+                <div>
+                  <h2 className="font-semibold text-brand">{license.name}</h2>
+                  <p className="text-sm text-gray-500">{license.vendor} &middot; {license.category}</p>
+                  {license.price != null && (
+                    <p className="text-sm text-gray-700">{formatPrice(license.price)} {license.price_unit}</p>
+                  )}
+                </div>
+              </div>
               <button
                 onClick={() => setRequesting(license)}
                 className="mt-auto text-sm font-medium bg-brand text-white rounded-lg px-4 py-2 hover:bg-brand-dark transition"
@@ -64,7 +92,9 @@ export default function Catalog() {
 
         {visibleLicenses?.length === 0 && (
           <p className="text-gray-400">
-            {activeCategory ? `No licenses in ${activeCategory}.` : 'No licenses available yet.'}
+            {q
+              ? `No licenses match "${search}".`
+              : activeCategory ? `No licenses in ${activeCategory}.` : 'No licenses available yet.'}
           </p>
         )}
       </div>
@@ -145,7 +175,7 @@ function RequestModal({ license, onClose }) {
     try {
       const result = await requestSubscription({
         licenseId: license.id,
-        suiteKey: license.gtis_sponsored ? null : mode === 'suite_key' ? suiteKey : null,
+        suiteKey: license.gtis_sponsored ? null : mode === 'suite_key' ? suiteKey.trim() : null,
         suggestedApproverEmail: mode === 'suite_key' ? suggestedApproverEmail : null,
         ministryId: mode === 'ministry_id' ? ministryId : null,
         fy,
@@ -211,6 +241,8 @@ function RequestModal({ license, onClose }) {
                     onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                     required
                     autoComplete="off"
+                    pattern="[^~]*"
+                    title='Cannot contain "~" — check for stray text pasted in after the real key'
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                   />
                   {showSuggestions && suggestions.length > 0 && (
@@ -243,8 +275,16 @@ function RequestModal({ license, onClose }) {
             ) : (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Ministry ID</label>
-                <input value={ministryId} onChange={e => setMinistryId(e.target.value)} required
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                <input
+                  value={ministryId}
+                  onChange={e => setMinistryId(e.target.value)}
+                  inputMode="numeric"
+                  pattern="\d{6}"
+                  maxLength={6}
+                  placeholder="6 digits"
+                  required
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
               </div>
             )}
 

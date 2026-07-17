@@ -19,43 +19,70 @@ Follow `SETUP.md`, then run both schema files in the Supabase SQL Editor, in ord
 
 ## What's here
 
-- **Catalog** (`/catalog`) — browse active licenses, request a subscription
-  (Suite Key, Ministry ID, or GTIS-sponsored)
+- **Catalog** (`/catalog`) — browse/search active licenses, request a
+  subscription (SuiteKey with typeahead, Ministry ID, or GTIS-sponsored)
 - **My Subscriptions** (`/subscriptions`) — view your requests, cancel, opt
   in/out of renewal
-- **Approvals** (`/approvals`) — for Suite Key owners and license service
-  managers: verify Suite Key ownership, approve/decline requests, mark
+- **Approvals** (`/approvals`) — for SuiteKey owners and license service
+  managers: verify SuiteKey ownership, approve/decline requests, mark
   approved licenses as provisioned. Not role-gated in the UI — it's empty
-  unless you own a Suite Key or service-manage a license (enforced by RLS)
-- **Admin → Catalog** (`/admin/catalog`) — create/edit/deactivate licenses
-- **Admin → Audit Log** (`/admin/audit-log`) — full history of every
-  request/approval/decline/activation/cancellation/revocation
+  unless you own a SuiteKey or service-manage a license (enforced by RLS)
+- **My Team** (`/my-team`) — for people managers: every active/pending
+  subscription used by your direct and indirect reports (`profiles.manager_email`)
+- **SuiteKey Charges** (`/suite-key-charges`) — every charge against any
+  SuiteKey you own, individually or via a Google Group
+- **FAQ** (`/faq`)
+- **Admin → Catalog** — create/edit/deactivate licenses, with search
+- **Admin → All Subscriptions** — every subscription, every user, every
+  status, unfiltered
+- **Admin → Audit Log** — full history of every request/approval/decline/
+  activation/cancellation/revocation/merge, with search
+- **Admin → Finance Export** — pro-rated cost export (CSV or on-screen
+  preview) for a date range
+- **Admin → SuiteKeys** — assign/reassign owners (individual or Google
+  Group), quick-confirm a suggested approver on their behalf, search, and
+  merge a mistyped SuiteKey into the correct one
+- **Admin → Ministry IDs** — assign/edit staff Ministry IDs, with search
+- **Admin → Import** — bulk-import already-active subscriptions from a CSV
+  (for historical/legacy data)
+- **Admin → Users** — promote/demote admins (previously only possible via
+  raw SQL)
 
 All the state-transition logic (who can approve what, valid status
-transitions) lives in Postgres RPCs in `supabase/schema_licenses.sql`
-(`request_subscription`, `approve_subscription`, `activate_subscription`,
-etc.) rather than in the frontend — the UI just calls them.
+transitions, SuiteKey matching/merging, finance math) lives in Postgres RPCs
+in `supabase/schema_licenses.sql` rather than in the frontend — the UI just
+calls them. New migrations land in `supabase/pending/` as numbered `.sql`
+files (run them in order in the Supabase SQL Editor) before being folded
+into `schema_licenses.sql` as the living source of truth.
 
 ## What's not ported yet
 
 See the header comment in `supabase/schema_licenses.sql` for the full list.
 The big ones:
 
-- **Email notifications** — the original sent an email at every step
-  (request submitted, approval needed, approved, renewal reminder). None of
-  that is wired up; add Supabase Edge Functions triggered from the RPCs
-  above (`supabase/functions/README.md`).
-- **Google Group membership sync** — activating a subscription no longer
-  automatically adds the user to the license's Google Group. Needs an Edge
-  Function calling the Admin SDK Directory API with a service account.
-  `activate_subscription()` leaves a TODO note in the audit log instead.
-- **Org-hierarchy "my team's subscriptions" view** — `profiles` has
-  `department`/`manager_email` columns ready for it, but the recursive
-  reports lookup and UI aren't built.
-- Finance export, bulk CSV import, and the Gmail-inbox provisioning-scanner
-  automation (all GAS/Sheets-specific, no direct equivalent needed here).
+- **Email notifications** — built (Resend, via the `send-email` Edge
+  Function — see `supabase/functions/README.md`), but depends on SIL's
+  infrastructure team finishing Resend domain setup before it actually sends.
+  Until then, requests/approvals/activations work fine, they just don't
+  email anyone.
+- **Google Group membership sync on activation** — activating a subscription
+  doesn't automatically add the user to the *license's own* Google Group
+  (separate from SuiteKey *ownership* groups, which do work). Needs an Edge
+  Function calling the Admin SDK Directory API; `activate_subscription()`
+  leaves a TODO note in the audit log instead.
+- **SuiteKey group-ownership sync itself isn't scheduled yet** — the
+  `sync-group-memberships` Edge Function exists and is deployed, but needs a
+  one-time external Google Cloud/Workspace setup (domain-wide-delegated
+  service account) before it can actually run on a schedule. Until then,
+  group-owned SuiteKeys won't reflect current Google Group membership.
+- **Historical data migration** — Admin → Import can now do this, but the
+  actual one-time import of historical subscriptions/renewals/audit log from
+  the old GAS sheet hasn't been run yet.
 - Requesting a subscription *on behalf of* someone else — only self-service
   requests are supported for now.
+- Weekly renewal-reminder and pending-approval digest emails.
+- The Gmail-inbox provisioning-scanner automation (GAS/Sheets-specific, no
+  direct equivalent needed here).
 
 ## Branding
 

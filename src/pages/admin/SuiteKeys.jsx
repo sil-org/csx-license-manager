@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react'
 import AppLayout from '../../components/AppLayout'
+import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
-import { getSuiteKeys, updateSuiteKeyOwner } from '../../lib/admin'
-import { sendEmail, suiteKeyAssignedEmailSubject, suiteKeyAssignedEmailHtml } from '../../lib/email'
+import { getSuiteKeys, updateSuiteKeyOwner, confirmSuiteKeyOwnership, mergeSuiteKey } from '../../lib/admin'
+import {
+  sendEmail,
+  suiteKeyAssignedEmailSubject, suiteKeyAssignedEmailHtml,
+  approvalRequestEmailSubject, approvalRequestEmailHtml,
+} from '../../lib/email'
 
 const BLANK = { suite_key: '', owner_email: '', owner_group_email: '', description: '' }
 
@@ -49,11 +54,10 @@ export default function AdminSuiteKeys() {
     setSaving(true)
     setError(null)
     try {
-      const isGroup = editing.ownership_mode === 'group'
       await applyOwner({
         suiteKey: editing.suite_key,
-        ownerEmail: isGroup ? '' : editing.owner_email,
-        ownerGroupEmail: isGroup ? editing.owner_group_email : '',
+        ownerEmail: editing.is_group ? '' : editing.owner_input,
+        ownerGroupEmail: editing.is_group ? editing.owner_input : '',
         description: editing.description,
         previous: editing._originalOwner,
       })
@@ -73,16 +77,45 @@ export default function AdminSuiteKeys() {
   // skips the modal entirely and just confirms the already-known suggested
   // approver as owner directly. (Only ever an individual — group-owned keys
   // never generate a pending_sk_verification row in the first place.)
+  //
+  // Deliberately NOT applyOwner()/updateSuiteKeyOwner() — that RPC is for
+  // "assign a new owner who still has to confirm themselves" and leaves
+  // requests parked in pending_sk_verification, which is why this button used
+  // to look like it did nothing. confirmSuiteKeyOwnership() actually advances
+  // them, same as if the approver had confirmed via Approvals themselves.
   async function handleQuickConfirm(k) {
     setError(null)
     try {
-      await applyOwner({
-        suiteKey: k.suite_key,
-        ownerEmail: k.pendingApproverEmail,
-        ownerGroupEmail: '',
-        description: k.description,
-        previous: k.owner_email,
-      })
+      const advanced = await confirmSuiteKeyOwnership({ suiteKey: k.suite_key, ownerEmail: k.pendingApproverEmail })
+      reload()
+      for (const sub of advanced || []) {
+        try {
+          await sendEmail({
+            to: k.pendingApproverEmail,
+            subject: approvalRequestEmailSubject(k.suite_key),
+            html: approvalRequestEmailHtml({ suiteKey: k.suite_key, licenseName: sub.license_name, userEmail: sub.user_email }),
+            template: 'approval_request',
+            subscriptionId: sub.id,
+          })
+        } catch (err) {
+          console.error('approval request email failed:', err.message)
+        }
+      }
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  // For data-entry typos, e.g. someone types "Relations-U_SIL~5407" instead
+  // of the real "Relations-U_SIL" — repoints its subscriptions onto the
+  // correct key and deletes the bad row. Server-side refuses if the "bad"
+  // key actually has an owner on file (unlikely to really be a typo then).
+  async function handleMerge(k) {
+    const correct = window.prompt(`Merge "${k.suite_key}" into which correct SuiteKey?`)
+    if (!correct) return
+    setError(null)
+    try {
+      await mergeSuiteKey({ badKey: k.suite_key, correctKey: correct })
       reload()
     } catch (err) {
       setError(err.message)
@@ -93,7 +126,8 @@ export default function AdminSuiteKeys() {
     setEditing({
       ...k,
       isNew: false,
-      ownership_mode: k.owner_group_email ? 'group' : 'individual',
+      is_group: !!k.owner_group_email,
+      owner_input: k.owner_group_email || k.owner_email || '',
       _originalOwner: k.owner_group_email || k.owner_email || '',
     })
   }
@@ -108,10 +142,11 @@ export default function AdminSuiteKeys() {
 
   return (
     <AppLayout appName="License Manager" links={getLinks()}>
-      <div className="max-w-3xl mx-auto p-6">
+      <div className="max-w-6xl mx-auto p-6">
+        <AdminTabs />
         <div className="flex items-center justify-between mb-6">
           <h1 className="font-display text-2xl font-bold text-brand">Admin — SuiteKeys</h1>
-          <button onClick={() => setEditing({ ...BLANK, isNew: true, ownership_mode: 'individual' })} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">
+          <button onClick={() => setEditing({ ...BLANK, isNew: true, is_group: false, owner_input: '' })} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">
             + New SuiteKey
           </button>
         </div>
@@ -154,6 +189,15 @@ export default function AdminSuiteKeys() {
                   </button>
                 )}
                 <button onClick={() => openEdit(k)} className="text-xs font-medium text-brand">Edit</button>
+                {!k.owner_email && !k.owner_group_email && (
+                  <button
+                    onClick={() => handleMerge(k)}
+                    className="text-xs font-medium text-gray-400"
+                    title="Fix a typo — repoint this key's requests onto the correct SuiteKey and remove this one"
+                  >
+                    Merge into…
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -178,49 +222,30 @@ export default function AdminSuiteKeys() {
               />
             </label>
 
-            <div className="flex gap-4 text-sm">
-              <label className="flex items-center gap-2">
-                <input type="radio" checked={editing.ownership_mode === 'individual'} onChange={() => setEditing({ ...editing, ownership_mode: 'individual' })} />
-                Individual owner
-              </label>
-              <label className="flex items-center gap-2">
-                <input type="radio" checked={editing.ownership_mode === 'group'} onChange={() => setEditing({ ...editing, ownership_mode: 'group' })} />
-                Google Group
-              </label>
-            </div>
+            <label className="block text-sm text-gray-700">
+              Owner email
+              <input
+                type="email"
+                value={editing.owner_input || ''}
+                onChange={e => setEditing({ ...editing, owner_input: e.target.value })}
+                placeholder="Leave blank to unassign"
+                className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              />
+            </label>
 
-            {editing.ownership_mode === 'individual' ? (
-              <label className="block text-sm text-gray-700">
-                Owner email
-                <input
-                  type="email"
-                  value={editing.owner_email || ''}
-                  onChange={e => setEditing({ ...editing, owner_email: e.target.value })}
-                  placeholder="Leave blank to unassign"
-                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                />
-                <span className="block text-xs text-gray-400 mt-0.5">
-                  Takes effect immediately — no confirmation needed from them. Any requests still awaiting
-                  verification on this key move into their Approvals queue and they're notified by email.
-                </span>
-              </label>
-            ) : (
-              <label className="block text-sm text-gray-700">
-                Google Group email
-                <input
-                  type="email"
-                  value={editing.owner_group_email || ''}
-                  onChange={e => setEditing({ ...editing, owner_group_email: e.target.value })}
-                  placeholder="e.g. it-team@sil.org"
-                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                />
-                <span className="block text-xs text-gray-400 mt-0.5">
-                  Anyone currently in this group can approve/decline/revoke charges to this key — no per-request
-                  verification step, since group membership is already the authorization check. Membership is
-                  synced from Google on a schedule, not read live.
-                </span>
-              </label>
-            )}
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={!!editing.is_group}
+                onChange={e => setEditing({ ...editing, is_group: e.target.checked })}
+              />
+              This is a Google Group, not one person
+            </label>
+            <span className="block text-xs text-gray-400 -mt-2">
+              {editing.is_group
+                ? "Anyone currently in this group can approve/decline/revoke charges to this key — no per-request verification step, since group membership is already the authorization check. Membership is synced from Google on a schedule, not read live."
+                : "Takes effect immediately — no confirmation needed from them. Any requests still awaiting verification on this key move into their Approvals queue and they're notified by email."}
+            </span>
 
             <label className="block text-sm text-gray-700">
               Description

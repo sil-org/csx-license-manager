@@ -30,3 +30,8 @@ export async function deactivateLicense(licenseId) {
   const { error } = await supabase.rpc('deactivate_license', { p_license_id: licenseId })
   if (error) throw error
 }
+
+export async function reactivateLicense(licenseId) {
+  const { error } = await supabase.rpc('reactivate_license', { p_license_id: licenseId })
+  if (error) throw error
+}

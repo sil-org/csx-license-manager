@@ -54,6 +54,31 @@ export async function updateSuiteKeyOwner({ suiteKey, newOwnerEmail, description
   return data
 }
 
+// For the "Confirm as {suggested approver}" quick-confirm button — behaves
+// like the person themselves calling confirm_sk_ownership(), just triggered
+// by an admin on their behalf. NOT the same as updateSuiteKeyOwner() above:
+// this actually advances matching subscriptions out of pending_sk_verification.
+export async function confirmSuiteKeyOwnership({ suiteKey, ownerEmail }) {
+  const { data, error } = await supabase.rpc('admin_confirm_sk_ownership', {
+    p_suite_key: suiteKey,
+    p_owner_email: ownerEmail,
+  })
+  if (error) throw error
+  return data
+}
+
+// For data-entry typos ("Relations-U_SIL~5407" instead of "Relations-U_SIL")
+// — repoints every subscription off the bad key onto the correct one, then
+// deletes the bad row. Refuses (server-side) if the bad key has a real owner
+// on file, since that's very unlikely to actually be a typo.
+export async function mergeSuiteKey({ badKey, correctKey }) {
+  const { error } = await supabase.rpc('admin_merge_suite_key', {
+    p_bad_key: badKey,
+    p_correct_key: correctKey,
+  })
+  if (error) throw error
+}
+
 // Admin-only. Same RLS shape as suite_keys — admins can read every row directly.
 export async function getMinistryIds() {
   const { data, error } = await supabase.from('ministry_ids').select('*').order('email')
@@ -67,5 +92,51 @@ export async function updateMinistryId({ email, ministryId }) {
     p_email: email,
     p_ministry_id: ministryId || null,
   })
+  if (error) throw error
+}
+
+// Admin-only. Every subscription, every user — mirrors GAS's getAllSubscriptions().
+// Relies on RLS (admins can already read every subscriptions/licenses row).
+export async function getAllSubscriptions() {
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('*, license:licenses(name, vendor, category)')
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data
+}
+
+// Mirrors GAS's getFinanceExport()/_calcProRatedCost() — see calc_prorated_cost()
+// in supabase/schema_licenses.sql for the actual pro-ration math.
+export async function getFinanceExport({ from, to }) {
+  const { data, error } = await supabase.rpc('get_finance_export', {
+    p_start_date: from,
+    p_end_date: to,
+  })
+  if (error) throw error
+  return data || []
+}
+
+// Bulk-imports already-active subscriptions from a legacy/historical source.
+// Returns one {ok, error?, row} result per input row — mirrors GAS's
+// importSubscriptions(), which never let one bad row fail the whole batch.
+export async function importSubscriptions(rows) {
+  const { data, error } = await supabase.rpc('admin_import_subscriptions', { p_rows: rows })
+  if (error) throw error
+  return data || []
+}
+
+// Admin-only. Lists every profile (email, role) for the Admin Users page.
+export async function getProfiles() {
+  const { data, error } = await supabase.from('profiles').select('id, display_name, primary_email, role').order('primary_email')
+  if (error) throw error
+  return data
+}
+
+// The only sanctioned way to change a profile's role — see admin_set_role()
+// and the fix to profiles' RLS in supabase/schema.sql for why this can't be
+// done via a plain client-side update anymore.
+export async function setProfileRole({ profileId, role }) {
+  const { error } = await supabase.rpc('admin_set_role', { p_profile_id: profileId, p_role: role })
   if (error) throw error
 }

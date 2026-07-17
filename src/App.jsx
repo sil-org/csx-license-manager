@@ -8,9 +8,13 @@ import MyTeam from './pages/MyTeam'
 import SuiteKeyCharges from './pages/SuiteKeyCharges'
 import FAQ from './pages/FAQ'
 import AdminCatalog from './pages/admin/Catalog'
+import AdminAllSubscriptions from './pages/admin/AllSubscriptions'
 import AdminAuditLog from './pages/admin/AuditLog'
+import AdminFinanceExport from './pages/admin/FinanceExport'
 import AdminSuiteKeys from './pages/admin/SuiteKeys'
 import AdminMinistryIds from './pages/admin/MinistryIds'
+import AdminImport from './pages/admin/Import'
+import AdminUsers from './pages/admin/AdminUsers'
 import RequireAuth from './components/RequireAuth'
 
 export default function App() {
@@ -53,8 +57,16 @@ export default function App() {
         <RequireAuth role="admin"><AdminCatalog /></RequireAuth>
       } />
 
+      <Route path="/admin/all-subscriptions" element={
+        <RequireAuth role="admin"><AdminAllSubscriptions /></RequireAuth>
+      } />
+
       <Route path="/admin/audit-log" element={
         <RequireAuth role="admin"><AdminAuditLog /></RequireAuth>
+      } />
+
+      <Route path="/admin/finance-export" element={
+        <RequireAuth role="admin"><AdminFinanceExport /></RequireAuth>
       } />
 
       <Route path="/admin/suite-keys" element={
@@ -63,6 +75,14 @@ export default function App() {
 
       <Route path="/admin/ministry-ids" element={
         <RequireAuth role="admin"><AdminMinistryIds /></RequireAuth>
+      } />
+
+      <Route path="/admin/import" element={
+        <RequireAuth role="admin"><AdminImport /></RequireAuth>
+      } />
+
+      <Route path="/admin/users" element={
+        <RequireAuth role="admin"><AdminUsers /></RequireAuth>
       } />
     </Routes>
   )

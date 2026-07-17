@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import AppLayout from '../../components/AppLayout'
+import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
 import { getMinistryIds, updateMinistryId } from '../../lib/admin'
 
@@ -10,6 +11,7 @@ export default function AdminMinistryIds() {
   const [error, setError] = useState(null)
   const [editing, setEditing] = useState(null) // ministry_ids row, or BLANK for "new"
   const [saving, setSaving] = useState(false)
+  const [search, setSearch] = useState('')
 
   function reload() {
     getMinistryIds().then(setIds).catch(e => setError(e.message))
@@ -42,9 +44,15 @@ export default function AdminMinistryIds() {
     }
   }
 
+  const q = search.trim().toLowerCase()
+  const visibleIds = !q ? ids : ids?.filter(m =>
+    m.email.toLowerCase().includes(q) || m.ministry_id.includes(q)
+  )
+
   return (
     <AppLayout appName="License Manager" links={getLinks()}>
-      <div className="max-w-2xl mx-auto p-6">
+      <div className="max-w-6xl mx-auto p-6">
+        <AdminTabs />
         <div className="flex items-center justify-between mb-6">
           <h1 className="font-display text-2xl font-bold text-brand">Admin — Ministry IDs</h1>
           <button onClick={() => setEditing({ ...BLANK, isNew: true })} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">
@@ -56,8 +64,20 @@ export default function AdminMinistryIds() {
         {!ids && !error && <p className="text-gray-400">Loading…</p>}
         {ids?.length === 0 && <p className="text-gray-400">No Ministry IDs on file yet.</p>}
 
+        {ids?.length > 0 && (
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Filter by email or Ministry ID…"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
+          />
+        )}
+        {ids?.length > 0 && visibleIds.length === 0 && (
+          <p className="text-gray-400 mb-4">No Ministry IDs match "{search}".</p>
+        )}
+
         <div className="bg-white rounded-xl shadow-sm divide-y">
-          {ids?.map(m => (
+          {visibleIds?.map(m => (
             <div key={m.email} className="p-4 flex items-center justify-between">
               <div>
                 <p className="font-medium text-brand">{m.email}</p>
@@ -101,8 +121,10 @@ export default function AdminMinistryIds() {
               <input
                 value={editing.ministry_id}
                 onChange={e => setEditing({ ...editing, ministry_id: e.target.value })}
+                inputMode="numeric"
                 placeholder="6 digits"
                 pattern="\d{6}"
+                maxLength={6}
                 required
                 className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
               />
