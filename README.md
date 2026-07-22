@@ -60,11 +60,9 @@ into `schema_licenses.sql` as the living source of truth.
 See the header comment in `supabase/schema_licenses.sql` for the full list.
 The big ones:
 
-- **Email notifications** — built (Resend, via the `send-email` Edge
-  Function — see `supabase/functions/README.md`), but depends on SIL's
-  infrastructure team finishing Resend domain setup before it actually sends.
-  Until then, requests/approvals/activations work fine, they just don't
-  email anyone.
+- **Email notifications** — built and live (Resend, via the `send-email`
+  Edge Function — see `supabase/functions/README.md`), sending from
+  `license_manager@em.sil.org`.
 - **Google Group membership sync on activation** — activating a subscription
   doesn't automatically add the user to the *license's own* Google Group
   (separate from SuiteKey *ownership* groups, which do work). Needs an Edge

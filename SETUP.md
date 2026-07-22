@@ -82,7 +82,34 @@ be bypassed.
 
 ---
 
-## 4. Add GitHub Secrets (Edge Functions only)
+## 4. Set up Resend (transactional email)
+
+Emails (approval requests, SuiteKey verification, activation notices) send
+via the `send-email` Edge Function, which calls [Resend](https://resend.com).
+
+1. Sign in to Resend, add the sending domain (e.g. `em.sil.org` — a
+   subdomain keeps this isolated from sil.org's main mail setup) under
+   **Domains > Add Domain**
+2. Add the DNS records Resend gives you (SPF/DKIM/DMARC-related TXT/MX/CNAME
+   records) at your DNS provider, then wait for the domain to show
+   **Verified** in Resend
+3. **API Keys > Create API Key** — copy the key
+4. If the `from` address in `supabase/functions/send-email/index.ts` doesn't
+   match your verified domain, update the `FROM` constant
+5. Set the key as a secret on the linked Supabase project (requires
+   `supabase link --project-ref YOUR_PROJECT_REF` first):
+   ```bash
+   supabase secrets set RESEND_API_KEY=re_your_key_here
+   ```
+6. Deploy the function (or just push to `main` — see the GitHub Secrets step
+   below, which the deploy workflow needs):
+   ```bash
+   supabase functions deploy send-email
+   ```
+
+---
+
+## 5. Add GitHub Secrets (Edge Functions only)
 
 Frontend deploys happen entirely inside Amplify — GitHub Actions here is
 only for Supabase Edge Functions (`supabase/functions/`). If you're not
@@ -96,7 +123,7 @@ Otherwise, **Settings > Secrets and variables > Actions**:
 
 ---
 
-## 5. Push and deploy
+## 6. Push and deploy
 
 ```bash
 git push -u origin main
@@ -107,7 +134,7 @@ GitHub Action only runs the Edge Functions deploy.
 
 ---
 
-## 6. Local development
+## 7. Local development
 
 ```bash
 cp .env.example .env
@@ -119,7 +146,7 @@ npm run dev
 
 ---
 
-## 7. Make yourself admin
+## 8. Make yourself admin
 
 After your first sign-in:
 

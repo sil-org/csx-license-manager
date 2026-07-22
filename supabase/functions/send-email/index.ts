@@ -1,8 +1,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
 const RESEND_API_URL = 'https://api.resend.com/emails'
-// TODO: replace with a domain verified in Resend for this project.
-const FROM = 'License Manager <licenses@sil.org>'
+const FROM = 'License Manager <license_manager@em.sil.org>'
 
 interface EmailRequest {
   to: string
