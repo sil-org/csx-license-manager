@@ -2,6 +2,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 
 const RESEND_API_URL = 'https://api.resend.com/emails'
 const FROM = 'License Manager <license_manager@em.sil.org>'
+const REPLY_TO = 'helpdesk+licenses@sil.org'
 
 interface EmailRequest {
   to: string
@@ -41,7 +42,7 @@ Deno.serve(async (req) => {
         'Authorization': `Bearer ${Deno.env.get('RESEND_API_KEY')}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ from: FROM, to, subject, html }),
+      body: JSON.stringify({ from: FROM, to, subject, html, reply_to: REPLY_TO }),
     })
 
     const resendData = await resendRes.json()
