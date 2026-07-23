@@ -7,10 +7,19 @@ import { getAllLicenses, saveLicense, deactivateLicense, reactivateLicense } fro
 
 const BLANK = {
   id: null, name: '', vendor: '', category: '', price: '',
-  gtis_sponsored: false, billing_cycle: 'annual', renewal_month: '', renewal_reminder: true,
+  gtis_sponsored: false, billing_cycle: 'annual', renewal_month: 10, renewal_reminder: true,
   activation_url: '', more_info_url: '', logo_url: '', google_group_email: '',
   pro_rated: false, service_manager_email: '', onboarding_message: '',
+  provisioning_adapter: '', provisioning_config: '',
 }
+
+// Known sync-provisioning adapters (see supabase/functions/sync-provisioning/adapters/).
+// Adding a new one is just another entry here + an adapter file — no other
+// admin-UI changes needed, since provisioning_config is a generic JSON blob.
+const PROVISIONING_ADAPTERS = [
+  { value: '', label: 'None (manual)' },
+  { value: 'cubebackup', label: 'CubeBackup', configHint: '{"baseUrl": "https://cubebackup.example.org", "domain": "sil.org"}' },
+]
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -43,9 +52,21 @@ export default function AdminCatalog() {
   const [licenses, setLicenses] = useState(null)
   const [error, setError] = useState(null)
   const [editing, setEditing] = useState(null) // license object, or BLANK for "new"
+  const [showLogoInput, setShowLogoInput] = useState(false)
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState('name')
   const [sortDir, setSortDir] = useState('asc')
+
+  function openEditor(license) {
+    setEditing({
+      ...license,
+      // provisioning_config comes back from the DB as a real jsonb object
+      // (or null) — the form edits it as raw JSON text, so stringify it here
+      // and parse it back on save.
+      provisioning_config: license.provisioning_config ? JSON.stringify(license.provisioning_config, null, 2) : '',
+    })
+    setShowLogoInput(false)
+  }
 
   function handleSort(key) {
     if (key === sortKey) {
@@ -64,10 +85,25 @@ export default function AdminCatalog() {
 
   async function handleSave(e) {
     e.preventDefault()
-    const renewalMonth = editing.renewal_month === '' ? null : Number(editing.renewal_month)
-    if (editing.billing_cycle !== 'one_time' && (renewalMonth == null || renewalMonth < 1 || renewalMonth > 12)) {
+    // Only annual licenses have a meaningful renewal month — monthly bills
+    // prorate by day-of-month and one-time purchases don't renew at all (see
+    // calc_prorated_cost() in schema_licenses.sql, which never reads
+    // renewal_month for either of those).
+    const renewalMonth = editing.billing_cycle === 'annual'
+      ? (editing.renewal_month === '' ? null : Number(editing.renewal_month))
+      : null
+    if (editing.billing_cycle === 'annual' && (renewalMonth == null || renewalMonth < 1 || renewalMonth > 12)) {
       setError('Renewal month must be between 1 and 12.')
       return
+    }
+    const configText = editing.provisioning_config.trim()
+    if (configText) {
+      try {
+        JSON.parse(configText)
+      } catch {
+        setError('Provisioning config must be valid JSON (or left blank).')
+        return
+      }
     }
     try {
       await saveLicense({
@@ -75,6 +111,7 @@ export default function AdminCatalog() {
         price: editing.price === '' ? null : Number(editing.price),
         price_unit: PRICE_UNITS[editing.billing_cycle],
         renewal_month: renewalMonth,
+        provisioning_config: configText || null,
       })
       setEditing(null)
       setError(null)
@@ -129,7 +166,7 @@ export default function AdminCatalog() {
         <AdminTabs />
         <div className="flex items-center justify-between mb-6">
           <h1 className="font-display text-2xl font-bold text-brand">Admin — Catalog</h1>
-          <button onClick={() => setEditing(BLANK)} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">
+          <button onClick={() => openEditor(BLANK)} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">
             + New license
           </button>
         </div>
@@ -171,7 +208,7 @@ export default function AdminCatalog() {
               {visibleLicenses?.map(license => (
                 <tr
                   key={license.id}
-                  onClick={() => setEditing(license)}
+                  onClick={() => openEditor(license)}
                   className="cursor-pointer hover:bg-gray-50 transition-colors"
                 >
                   <td className={`p-3 font-medium ${license.active ? 'text-brand' : 'text-gray-400 line-through'}`}>{license.name}</td>
@@ -194,23 +231,43 @@ export default function AdminCatalog() {
 
       {editing && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 overflow-y-auto">
-          <form onSubmit={handleSave} className="bg-white rounded-2xl shadow-lg p-8 max-w-lg w-full space-y-3 my-8">
-            <h2 className="font-display text-xl font-bold text-brand mb-2">{editing.id ? 'Edit license' : 'New license'}</h2>
-            {error && <p className="text-sil-red text-sm">{error}</p>}
+          <form onSubmit={handleSave} className="bg-white rounded-2xl shadow-lg p-8 max-w-2xl w-full my-8">
+            <h2 className="font-display text-xl font-bold text-brand mb-4">{editing.id ? 'Edit license' : 'New license'}</h2>
+            {error && <p className="text-sil-red text-sm mb-3">{error}</p>}
 
-            <Field label="Name" value={editing.name} onChange={v => setEditing({ ...editing, name: v })} required />
-            <div className="grid grid-cols-2 gap-3">
+            <div className="flex items-start gap-3 mb-3">
+              <div className="h-14 w-14 shrink-0 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden">
+                {editing.logo_url
+                  ? <img src={editing.logo_url} alt="" className="h-full w-full object-contain" />
+                  : <span className="text-[10px] text-gray-300 text-center px-1">No logo</span>}
+              </div>
+              <div className="flex-1">
+                <Field label="Name" value={editing.name} onChange={v => setEditing({ ...editing, name: v })} required />
+                {showLogoInput || !editing.logo_url ? (
+                  <div className="mt-1">
+                    <Field label="Logo URL" value={editing.logo_url} onChange={v => setEditing({ ...editing, logo_url: v })} />
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => setShowLogoInput(true)} className="mt-1 text-xs font-medium text-brand">
+                    Change logo
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
               <Field label="Vendor" value={editing.vendor} onChange={v => setEditing({ ...editing, vendor: v })} />
               <Field label="Category" value={editing.category} onChange={v => setEditing({ ...editing, category: v })} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
+
               <Field label="Price" type="number" value={editing.price} onChange={v => setEditing({ ...editing, price: v })} />
               <label className="text-sm text-gray-700">
                 Billing cycle
                 <select value={editing.billing_cycle}
                   onChange={e => setEditing({
                     ...editing, billing_cycle: e.target.value,
-                    ...(e.target.value === 'one_time' ? { renewal_month: '', renewal_reminder: false } : {}),
+                    ...(e.target.value === 'annual'
+                      ? { renewal_month: editing.renewal_month || 10, renewal_reminder: true }
+                      : { renewal_month: '', renewal_reminder: false }),
                   })}
                   className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
                   <option value="annual">Annual</option>
@@ -218,44 +275,69 @@ export default function AdminCatalog() {
                   <option value="one_time">One-time (not recurring)</option>
                 </select>
               </label>
-              {editing.billing_cycle !== 'one_time' && (
+
+              {editing.billing_cycle === 'annual' && (
                 <Field label="Renewal month (1-12)" type="number" min={1} max={12} value={editing.renewal_month} onChange={v => setEditing({ ...editing, renewal_month: v })} />
               )}
-            </div>
-            <Field label="Activation URL" value={editing.activation_url} onChange={v => setEditing({ ...editing, activation_url: v })}
-              hint="Set this if activation needs manual admin/service-manager provisioning after approval." />
-            <Field label="More info URL" value={editing.more_info_url} onChange={v => setEditing({ ...editing, more_info_url: v })} />
-            <Field label="Logo URL" value={editing.logo_url} onChange={v => setEditing({ ...editing, logo_url: v })} />
-            <Field label="Google Group email" value={editing.google_group_email} onChange={v => setEditing({ ...editing, google_group_email: v })}
-              hint="Not automated yet — see supabase/schema_licenses.sql notes." />
-            <Field label="Service manager email" value={editing.service_manager_email} onChange={v => setEditing({ ...editing, service_manager_email: v })} />
+              <div className={`flex flex-col justify-center gap-1.5 text-sm ${editing.billing_cycle !== 'annual' ? 'col-span-2' : ''}`}>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={editing.gtis_sponsored} onChange={e => setEditing({ ...editing, gtis_sponsored: e.target.checked })} />
+                  GTIS-sponsored (no approval needed)
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={editing.pro_rated} onChange={e => setEditing({ ...editing, pro_rated: e.target.checked })} />
+                  Pro-rated
+                </label>
+              </div>
 
-            <label className="block text-sm text-gray-700">
-              Onboarding email override
-              <textarea
-                value={editing.onboarding_message ?? ''}
-                onChange={e => setEditing({ ...editing, onboarding_message: e.target.value })}
-                rows={3}
-                placeholder="Leave blank to use the default &quot;your license is ready&quot; message"
-                className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-              />
-              <span className="block text-xs text-gray-400 mt-0.5">
-                Replaces the default activation email body for this license — e.g. setup steps a generic message wouldn't cover.
-              </span>
-            </label>
+              <Field label="Activation URL" value={editing.activation_url} onChange={v => setEditing({ ...editing, activation_url: v })}
+                hint="Set this if activation needs manual admin/service-manager provisioning after approval." />
+              <Field label="Service manager email" value={editing.service_manager_email} onChange={v => setEditing({ ...editing, service_manager_email: v })} />
 
-            <div className="flex gap-4 text-sm pt-1">
-              <label className="flex items-center gap-2">
-                <input type="checkbox" checked={editing.gtis_sponsored} onChange={e => setEditing({ ...editing, gtis_sponsored: e.target.checked })} />
-                GTIS-sponsored (no approval needed)
+              <Field label="More info URL" value={editing.more_info_url} onChange={v => setEditing({ ...editing, more_info_url: v })} />
+              <Field label="Google Group email" value={editing.google_group_email} onChange={v => setEditing({ ...editing, google_group_email: v })}
+                hint="Not automated yet — see supabase/schema_licenses.sql notes." />
+
+              <label className="text-sm text-gray-700">
+                Provisioning
+                <select value={editing.provisioning_adapter}
+                  onChange={e => setEditing({ ...editing, provisioning_adapter: e.target.value })}
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                  {PROVISIONING_ADAPTERS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                </select>
+                <span className="block text-xs text-gray-400 mt-0.5">
+                  Automatically enable/disable the user in an external vendor system on activation/cancellation (in addition to, or instead of, the manual Activation URL above).
+                </span>
               </label>
-              <label className="flex items-center gap-2">
-                <input type="checkbox" checked={editing.pro_rated} onChange={e => setEditing({ ...editing, pro_rated: e.target.checked })} />
-                Pro-rated
+              {editing.provisioning_adapter && (
+                <label className="block text-sm text-gray-700">
+                  Provisioning config (JSON)
+                  <textarea
+                    value={editing.provisioning_config}
+                    onChange={e => setEditing({ ...editing, provisioning_config: e.target.value })}
+                    rows={2}
+                    placeholder={PROVISIONING_ADAPTERS.find(a => a.value === editing.provisioning_adapter)?.configHint}
+                    className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 font-mono text-xs"
+                  />
+                </label>
+              )}
+
+              <label className="block text-sm text-gray-700 col-span-2">
+                Onboarding email override
+                <textarea
+                  value={editing.onboarding_message ?? ''}
+                  onChange={e => setEditing({ ...editing, onboarding_message: e.target.value })}
+                  rows={2}
+                  placeholder="Leave blank to use the default &quot;your license is ready&quot; message"
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+                <span className="block text-xs text-gray-400 mt-0.5">
+                  Replaces the default activation email body for this license — e.g. setup steps a generic message wouldn't cover.
+                </span>
               </label>
             </div>
 
-            <div className="flex items-center justify-between pt-3">
+            <div className="flex items-center justify-between pt-4">
               <div className="flex gap-3">
                 <button type="submit" className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">Save</button>
                 <button type="button" onClick={() => setEditing(null)} className="text-sm font-medium text-gray-500">Cancel</button>

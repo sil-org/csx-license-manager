@@ -82,7 +82,14 @@ export default function Catalog() {
                   <img src={license.logo_url} alt="" className="h-10 w-10 object-contain flex-shrink-0" />
                 )}
                 <div>
-                  <h2 className="font-semibold text-brand">{license.name}</h2>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="font-semibold text-brand">{license.name}</h2>
+                    {license.gtis_sponsored && (
+                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-sil-green/10 text-sil-green whitespace-nowrap">
+                        GTIS Sponsored
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm text-gray-500">{license.vendor} &middot; {license.category}</p>
                   {license.price != null && (
                     <p className="text-sm text-gray-700">{formatPrice(license.price)} {license.price_unit}</p>

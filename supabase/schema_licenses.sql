@@ -30,10 +30,12 @@ create type subscription_status as enum (
   'declined', 'revoked', 'cancelled'
 );
 create type renewal_status as enum ('none', 'opted_in', 'opted_out');
--- 'one_time' is for non-recurring purchases (e.g. an OS license bought outright) —
--- renewal_month/renewal_reminder are meaningless for these and should be left
--- null/false; nothing enforces that at the DB level, the admin UI just hides
--- those fields when this is selected.
+-- renewal_month/renewal_reminder are only meaningful for 'annual' billing.
+-- 'one_time' is for non-recurring purchases (e.g. an OS license bought
+-- outright) and never renews; 'monthly' prorates by day-of-month instead
+-- (see calc_prorated_cost() below) rather than renewing on a calendar month.
+-- Both should be left null/false — nothing enforces that at the DB level,
+-- the admin UI just hides those fields unless 'annual' is selected.
 create type billing_cycle as enum ('annual', 'monthly', 'one_time');
 create type audit_action as enum (
   'requested', 'auto_approved', 'approved', 'declined',
