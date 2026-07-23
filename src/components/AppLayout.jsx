@@ -1,18 +1,12 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useState } from 'react'
-import { Menu, X, LogOut, ChevronDown, MessageSquare } from 'lucide-react'
+import { Menu, X, LogOut, ChevronDown } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { signOut } from '../lib/auth'
+import { sendEmail, feedbackEmailSubject, feedbackEmailHtml } from '../lib/email'
+import FeedbackWidget from './FeedbackWidget'
 
-// Opens the user's own mail client rather than sending through the app —
-// simplest thing that works today, with no dependency on Resend actually
-// being live yet. Once it is, swap this for an in-app form that calls
-// sendEmail() the same way every other notification does.
-function feedbackMailto(userEmail) {
-  const subject = encodeURIComponent('License Manager feedback')
-  const body = encodeURIComponent(`\n\n—\nFrom: ${userEmail || 'unknown'}\nPage: ${window.location.href}`)
-  return `mailto:licenses@sil.org?subject=${subject}&body=${body}`
-}
+const FEEDBACK_TO = 'kate_brenner@sil.org'
 
 // Left sidebar shell. `links` is:
 //   [{ to?, label, icon: LucideIcon, adminOnly?, badge?, children?: [{to,label}] }]
@@ -130,9 +124,6 @@ export default function AppLayout({ appName, links, children }) {
 
         <div className="px-4 py-3 border-t border-gray-100 text-xs text-gray-500">
           <p className="truncate mb-1.5">{profile?.primary_email}</p>
-          <a href={feedbackMailto(profile?.primary_email)} className="flex items-center gap-1.5 text-brand hover:underline mb-1.5">
-            <MessageSquare size={13} /> Send feedback
-          </a>
           <button onClick={signOut} className="flex items-center gap-1.5 text-brand hover:underline">
             <LogOut size={13} /> Sign out
           </button>
@@ -140,6 +131,13 @@ export default function AppLayout({ appName, links, children }) {
       </nav>
 
       <main className="flex-1 min-w-0">{children}</main>
+
+      <FeedbackWidget onSend={({ rating, comment }) => sendEmail({
+        to: FEEDBACK_TO,
+        subject: feedbackEmailSubject(),
+        html: feedbackEmailHtml({ rating, message: comment, userEmail: profile?.primary_email, page: window.location.href }),
+        template: 'feedback',
+      })} />
     </div>
   )
 }

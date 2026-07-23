@@ -140,3 +140,27 @@ export function skOwnershipDeniedEmailHtml({ suiteKey, licenseName }) {
     <p style="font-size:13px;color:#666666">Please resubmit your request with the correct SuiteKey or approver.</p>
   `)
 }
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+
+export function feedbackEmailSubject() {
+  return 'License Manager feedback'
+}
+
+const RATING_LABELS = { 1: 'Very unhappy', 2: 'Unhappy', 3: 'Neutral', 4: 'Happy', 5: 'Very happy' }
+
+// Free-text user input, unlike every other field this module emails —
+// escaped so a pasted `<` or stray quote can't break the layout (or worse)
+// in the recipient's inbox.
+export function feedbackEmailHtml({ rating, message, userEmail, page }) {
+  return wrapEmail(`
+    ${message ? `<p style="white-space:pre-wrap">${escapeHtml(message)}</p>` : ''}
+    ${detailsTable([
+      ['Rating', rating ? `${rating}/5 (${RATING_LABELS[rating]})` : 'not given'],
+      ['From', escapeHtml(userEmail || 'unknown')],
+      ['Page', escapeHtml(page)],
+    ])}
+  `, { text: 'Sign in to', path: '/', linkText: 'License Manager' })
+}
