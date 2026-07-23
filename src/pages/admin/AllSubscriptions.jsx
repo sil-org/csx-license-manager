@@ -3,6 +3,9 @@ import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
 import { getAllSubscriptions } from '../../lib/admin'
+import { activateSubscription } from '../../lib/approvals'
+import { supabase } from '../../lib/supabase'
+import { sendEmail, activationEmailSubject, activationEmailHtml } from '../../lib/email'
 import { billingLabel, fyLabel, STATUS_LABEL, STATUS_COLOR } from '../../lib/subscriptionDisplay'
 
 // Mirrors GAS's Admin Panel "All Subscriptions" tab — every subscription,
@@ -13,9 +16,34 @@ export default function AdminAllSubscriptions() {
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
 
-  useEffect(() => {
+  function reload() {
     getAllSubscriptions().then(setSubs).catch(e => setError(e.message))
-  }, [])
+  }
+
+  useEffect(reload, [])
+
+  // Mirrors handleActivate() in Approvals.jsx — duplicated rather than shared
+  // since that page's version is tied to its own provisioning-queue reload.
+  async function handleActivate(sub) {
+    try {
+      await activateSubscription(sub.id)
+      reload()
+      try {
+        await sendEmail({
+          to: sub.user_email,
+          subject: activationEmailSubject(sub.license?.name),
+          html: activationEmailHtml({ sub, licenseName: sub.license?.name, onboardingMessage: sub.license?.onboarding_message }),
+          template: 'activation',
+          subscriptionId: sub.id,
+        })
+      } catch (err) {
+        console.error('activation email failed:', err.message)
+      }
+      supabase.functions.invoke('sync-provisioning').catch(err => console.error('provisioning sync kick failed:', err.message))
+    } catch (err) {
+      setError(err.message)
+    }
+  }
 
   const q = search.trim().toLowerCase()
   const visibleSubs = !q ? subs : subs?.filter(s =>
@@ -55,6 +83,7 @@ export default function AdminAllSubscriptions() {
                 <th className="p-3">FY</th>
                 <th className="p-3">Status</th>
                 <th className="p-3">Started</th>
+                <th className="p-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -66,6 +95,18 @@ export default function AdminAllSubscriptions() {
                   <td className="p-3 text-gray-500">{fyLabel(sub) || '—'}</td>
                   <td className={`p-3 ${STATUS_COLOR[sub.status]}`}>{STATUS_LABEL[sub.status]}</td>
                   <td className="p-3 text-gray-500 whitespace-nowrap">{sub.start_date}</td>
+                  <td className="p-3">
+                    {sub.status === 'approved' && (
+                      <div className="flex items-center gap-3 whitespace-nowrap">
+                        {sub.license?.activation_url && (
+                          <a href={sub.license.activation_url} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand">
+                            Open vendor portal
+                          </a>
+                        )}
+                        <button onClick={() => handleActivate(sub)} className="text-xs font-medium text-sil-green">Mark active</button>
+                      </div>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

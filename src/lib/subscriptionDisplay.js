@@ -5,7 +5,7 @@
 export const STATUS_LABEL = {
   pending_sk_verification: 'Awaiting SuiteKey verification',
   pending: 'Awaiting approval',
-  approved: 'Approved — being provisioned',
+  approved: 'Pending',
   active: 'Active',
   declined: 'Declined',
   revoked: 'Revoked',

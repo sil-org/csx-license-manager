@@ -100,7 +100,7 @@ export async function updateMinistryId({ email, ministryId }) {
 export async function getAllSubscriptions() {
   const { data, error } = await supabase
     .from('subscriptions')
-    .select('*, license:licenses(name, vendor, category)')
+    .select('*, license:licenses(name, vendor, category, activation_url, onboarding_message)')
     .order('created_at', { ascending: false })
   if (error) throw error
   return data
