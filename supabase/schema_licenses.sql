@@ -615,6 +615,20 @@ language sql stable security definer as $$
   select owner_email, owner_group_email from suite_keys where suite_key = p_suite_key;
 $$;
 
+-- ─── RPC: get_admin_emails ──────────────────────────────────────────────────────
+-- Same narrow-RLS-bypass rationale as get_suite_key_owner above: when a
+-- subscription lands in 'approved' (needs provisioning) and the license has
+-- no service_manager_email set, the client needs a fallback list of who to
+-- notify — but profiles' own SELECT policy only lets a caller read their own
+-- row (or all rows, if they're already an admin). A brand-new requester is
+-- neither, so this exists to answer just that one question.
+
+create or replace function get_admin_emails()
+returns setof text
+language sql stable security definer as $$
+  select primary_email from profiles where role = 'admin' and primary_email is not null;
+$$;
+
 -- ─── RPC: admin_update_suite_key_owner ─────────────────────────────────────────
 -- Mirrors Managers.gs updateSuiteKeyOwner(), extended for group ownership.
 -- Admin-only, creates the Suite Key row if it doesn't exist yet. Exactly one

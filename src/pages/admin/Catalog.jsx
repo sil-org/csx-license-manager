@@ -6,7 +6,7 @@ import { getLinks } from '../../navLinks'
 import { getAllLicenses, saveLicense, deactivateLicense, reactivateLicense } from '../../lib/licenses'
 
 const BLANK = {
-  id: null, name: '', vendor: '', category: '', price: '', price_unit: '',
+  id: null, name: '', vendor: '', category: '', price: '',
   gtis_sponsored: false, billing_cycle: 'annual', renewal_month: '', renewal_reminder: true,
   activation_url: '', more_info_url: '', logo_url: '', google_group_email: '',
   pro_rated: false, service_manager_email: '', onboarding_message: '',
@@ -16,6 +16,8 @@ const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ]
+
+const PRICE_UNITS = { annual: 'per seat/year', monthly: 'per seat/month', one_time: 'one-time' }
 
 function billingLabel(license) {
   if (license.billing_cycle === 'monthly') return 'Monthly'
@@ -62,13 +64,20 @@ export default function AdminCatalog() {
 
   async function handleSave(e) {
     e.preventDefault()
+    const renewalMonth = editing.renewal_month === '' ? null : Number(editing.renewal_month)
+    if (editing.billing_cycle !== 'one_time' && (renewalMonth == null || renewalMonth < 1 || renewalMonth > 12)) {
+      setError('Renewal month must be between 1 and 12.')
+      return
+    }
     try {
       await saveLicense({
         ...editing,
         price: editing.price === '' ? null : Number(editing.price),
-        renewal_month: editing.renewal_month === '' ? null : Number(editing.renewal_month),
+        price_unit: PRICE_UNITS[editing.billing_cycle],
+        renewal_month: renewalMonth,
       })
       setEditing(null)
+      setError(null)
       reload()
     } catch (err) {
       setError(err.message)
@@ -187,6 +196,7 @@ export default function AdminCatalog() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 overflow-y-auto">
           <form onSubmit={handleSave} className="bg-white rounded-2xl shadow-lg p-8 max-w-lg w-full space-y-3 my-8">
             <h2 className="font-display text-xl font-bold text-brand mb-2">{editing.id ? 'Edit license' : 'New license'}</h2>
+            {error && <p className="text-sil-red text-sm">{error}</p>}
 
             <Field label="Name" value={editing.name} onChange={v => setEditing({ ...editing, name: v })} required />
             <div className="grid grid-cols-2 gap-3">
@@ -195,9 +205,6 @@ export default function AdminCatalog() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Price" type="number" value={editing.price} onChange={v => setEditing({ ...editing, price: v })} />
-              <Field label="Price unit" value={editing.price_unit} onChange={v => setEditing({ ...editing, price_unit: v })} placeholder="per seat/year" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
               <label className="text-sm text-gray-700">
                 Billing cycle
                 <select value={editing.billing_cycle}
@@ -212,7 +219,7 @@ export default function AdminCatalog() {
                 </select>
               </label>
               {editing.billing_cycle !== 'one_time' && (
-                <Field label="Renewal month (1-12)" type="number" value={editing.renewal_month} onChange={v => setEditing({ ...editing, renewal_month: v })} />
+                <Field label="Renewal month (1-12)" type="number" min={1} max={12} value={editing.renewal_month} onChange={v => setEditing({ ...editing, renewal_month: v })} />
               )}
             </div>
             <Field label="Activation URL" value={editing.activation_url} onChange={v => setEditing({ ...editing, activation_url: v })}
@@ -266,7 +273,7 @@ export default function AdminCatalog() {
   )
 }
 
-function Field({ label, value, onChange, type = 'text', required, placeholder, hint }) {
+function Field({ label, value, onChange, type = 'text', required, placeholder, hint, min, max }) {
   return (
     <label className="block text-sm text-gray-700">
       {label}
@@ -276,6 +283,8 @@ function Field({ label, value, onChange, type = 'text', required, placeholder, h
         onChange={e => onChange(e.target.value)}
         required={required}
         placeholder={placeholder}
+        min={min}
+        max={max}
         className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
       />
       {hint && <span className="block text-xs text-gray-400 mt-0.5">{hint}</span>}

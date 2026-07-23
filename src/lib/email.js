@@ -127,6 +127,66 @@ export function activationEmailHtml({ sub, licenseName, onboardingMessage }) {
   `, { text: 'View your subscriptions at', path: '/subscriptions', linkText: 'License Manager → My Subscriptions' })
 }
 
+export function approvedPendingEmailSubject(licenseName) {
+  return `License Request Approved — Setup in Progress: ${licenseName}`
+}
+
+// Mirrors Approvals.gs's _notifySubscriberApprovedPending() — sent to the
+// requester when their request lands in 'approved' (needs provisioning)
+// rather than going straight to 'active', so they're not left wondering why
+// they don't have access yet.
+export function approvedPendingEmailHtml({ sub, licenseName }) {
+  const fy = fyLabel(sub)
+  return wrapEmail(`
+    <p>Your request for <strong>${licenseName}</strong> has been approved.</p>
+    <p>The License Manager team is now setting up your account. You'll receive another email
+       once your access is ready — this may take a few business days.</p>
+    ${detailsTable([
+      ['License', licenseName],
+      ['Billing', billingLabel(sub)],
+      ...(fy ? [['Fiscal Year', fy]] : []),
+    ])}
+    <p style="font-size:13px;color:#666666">Questions? Contact the License Manager team.</p>
+  `, { text: 'View your subscriptions at', path: '/subscriptions', linkText: 'License Manager → My Subscriptions' })
+}
+
+export function provisioningRequiredEmailSubject({ licenseName, userEmail }) {
+  return `Action Required: Provision seat — ${licenseName} for ${userEmail}`
+}
+
+// Mirrors Approvals.gs's _notifyAdminsOfPendingActivation() — sent to the
+// license's service manager (or admins, if none is set) whenever a
+// subscription needs a seat provisioned on the vendor side before it can be
+// marked active. `apiResult` is a hook for a future automated provisioning
+// integration (none exists yet — every license's activation_url is a manual
+// vendor-portal link) — omit it for today's manual-provisioning case.
+export function provisioningRequiredEmailHtml({ sub, licenseName, activationUrl, apiResult }) {
+  const fy = fyLabel(sub)
+  const status = apiResult === 'success'
+    ? `<p>This seat was <strong>provisioned automatically via API</strong> — no manual action needed.</p>`
+    : apiResult === 'failed'
+      ? `<div style="background:#fce8e6;border-left:4px solid #D52227;border-radius:4px;padding:10px 14px;margin:16px 0;font-size:14px">
+           Automatic API provisioning failed for this seat — please provision it manually.
+         </div>`
+      : `<p>A subscription has been approved and is waiting for you to provision the seat on the vendor side.</p>`
+  return wrapEmail(`
+    <h3 style="color:#005CB9;margin:0 0 12px">Seat Provisioning Required</h3>
+    ${status}
+    ${detailsTable([
+      ['User', sub.user_email],
+      ['License', licenseName],
+      ['Billing', billingLabel(sub)],
+      ...(fy ? [['Fiscal Year', fy]] : []),
+    ])}
+    ${activationUrl ? `
+    <p style="margin:20px 0">
+      <a href="${activationUrl}" style="background:#005CB9;color:#fff;padding:12px 24px;border-radius:4px;
+         text-decoration:none;font-weight:bold;display:inline-block">Open Vendor Portal &rarr;</a>
+    </p>` : ''}
+    <p style="color:#666666;font-size:13px">Once the seat is provisioned, mark it as activated from Approvals — the user will be notified automatically.</p>
+  `)
+}
+
 export function skOwnershipDeniedEmailSubject(licenseName) {
   return `License Request Declined: ${licenseName}`
 }

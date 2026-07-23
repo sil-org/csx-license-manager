@@ -11,6 +11,8 @@ import {
   approvalRequestEmailSubject, approvalRequestEmailHtml,
   skOwnershipDeniedEmailSubject, skOwnershipDeniedEmailHtml,
   activationEmailSubject, activationEmailHtml,
+  approvedPendingEmailSubject, approvedPendingEmailHtml,
+  provisioningRequiredEmailSubject, provisioningRequiredEmailHtml,
 } from '../lib/email'
 
 export default function Approvals() {
@@ -84,6 +86,42 @@ export default function Approvals() {
     }
   }
 
+  // approveSubscription() returns the same notify shape as requestSubscription()
+  // (see src/lib/subscriptions.js's buildProvisioningNotifications) — null unless
+  // the license also needs provisioning, in which case both the requester and
+  // whoever provisions the seat get emailed.
+  async function handleApprove(sub) {
+    try {
+      const notify = await approveSubscription(sub.id)
+      reload()
+      for (const n of notify || []) {
+        try {
+          if (n.type === 'approved_pending') {
+            await sendEmail({
+              to: n.to,
+              subject: approvedPendingEmailSubject(n.licenseName),
+              html: approvedPendingEmailHtml({ sub: n.sub, licenseName: n.licenseName }),
+              template: 'approved_pending',
+              subscriptionId: sub.id,
+            })
+          } else if (n.type === 'provisioning_required') {
+            await sendEmail({
+              to: n.to,
+              subject: provisioningRequiredEmailSubject({ licenseName: n.licenseName, userEmail: n.sub.user_email }),
+              html: provisioningRequiredEmailHtml({ sub: n.sub, licenseName: n.licenseName, activationUrl: n.activationUrl }),
+              template: 'provisioning_required',
+              subscriptionId: sub.id,
+            })
+          }
+        } catch (err) {
+          console.error(`${n.type} email failed:`, err.message)
+        }
+      }
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   async function handleActivate(sub) {
     try {
       await activateSubscription(sub.id)
@@ -132,7 +170,7 @@ export default function Approvals() {
           <Section title="Pending approvals">
             {approvals.map(sub => (
               <Row key={sub.id} title={sub.license?.name} sub={`${sub.user_email} · ${sub.suite_key}`}>
-                <button onClick={() => handle(approveSubscription, sub.id)} className="text-xs font-medium text-sil-green">Approve</button>
+                <button onClick={() => handleApprove(sub)} className="text-xs font-medium text-sil-green">Approve</button>
                 <button onClick={() => handle(declineSubscription, sub.id)} className="text-xs font-medium text-sil-red">Decline</button>
               </Row>
             ))}

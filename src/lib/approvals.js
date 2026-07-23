@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { buildProvisioningNotifications } from './subscriptions'
 
 // Everything a suite-key owner or service manager might need to act on.
 // RLS already scopes these selects to rows the caller is authorized to see.
@@ -48,9 +49,21 @@ export async function denySkOwnership(suiteKey) {
   return data
 }
 
+// Returns the same shape as requestSubscription()'s notify — null unless the
+// subscription landed in 'approved' (still needs provisioning), in which case
+// an array of { type, to, ... } entries (see handleApprove() in Approvals.jsx).
 export async function approveSubscription(subscriptionId) {
   const { error } = await supabase.rpc('approve_subscription', { p_subscription_id: subscriptionId })
   if (error) throw error
+
+  const { data: sub, error: subError } = await supabase
+    .from('subscriptions')
+    .select('status, suite_key, user_email, fy, billing_cycle, billing_type, ministry_id, license:licenses(name, activation_url, service_manager_email)')
+    .eq('id', subscriptionId)
+    .single()
+  if (subError) throw subError
+
+  return sub.status === 'approved' ? buildProvisioningNotifications(sub) : null
 }
 
 export async function declineSubscription(subscriptionId, notes) {

@@ -10,9 +10,35 @@ export async function getMySubscriptions(email) {
   return data
 }
 
+// Both request_subscription and approve_subscription (src/lib/approvals.js)
+// can land a subscription straight in 'approved' (auto-approved or manually
+// approved, but the license needs provisioning before it's active) — same
+// two emails either way: tell the requester setup is in progress, and tell
+// whoever needs to provision the seat. Exported so approve_subscription can
+// reuse it instead of duplicating the recipient-fallback logic.
+export async function buildProvisioningNotifications(sub) {
+  const notifications = [{ type: 'approved_pending', to: sub.user_email, sub, licenseName: sub.license.name }]
+
+  let recipients = sub.license.service_manager_email ? [sub.license.service_manager_email] : []
+  if (!recipients.length) {
+    const { data } = await supabase.rpc('get_admin_emails')
+    recipients = data || []
+  }
+  // send-email only accepts a single address per call (and logs one email_log
+  // row per send) — one notification per recipient rather than joining into
+  // a comma-separated `to`, which Resend wouldn't treat as multiple addresses.
+  for (const to of recipients) {
+    notifications.push({
+      type: 'provisioning_required', to, sub,
+      licenseName: sub.license.name, activationUrl: sub.license.activation_url,
+    })
+  }
+  return notifications
+}
+
 // Returns { id, status, notify } — notify is null unless someone needs to be
-// emailed as a result (see src/lib/email.js), in which case it's
-// { type: 'sk_verification' | 'approval_request', to: email }.
+// emailed as a result, otherwise an array of { type, to, ... } entries (see
+// notifyForRequest() in src/pages/Catalog.jsx, which dispatches on type).
 export async function requestSubscription({ licenseId, suiteKey, suggestedApproverEmail, ministryId, fy }) {
   const { data: id, error } = await supabase.rpc('request_subscription', {
     p_license_id: licenseId,
@@ -25,14 +51,14 @@ export async function requestSubscription({ licenseId, suiteKey, suggestedApprov
 
   const { data: sub, error: subError } = await supabase
     .from('subscriptions')
-    .select('status, suite_key, pending_approver_email')
+    .select('status, suite_key, pending_approver_email, user_email, fy, billing_cycle, billing_type, ministry_id, license:licenses(name, activation_url, service_manager_email)')
     .eq('id', id)
     .single()
   if (subError) throw subError
 
   let notify = null
   if (sub.status === 'pending_sk_verification' && sub.pending_approver_email) {
-    notify = { type: 'sk_verification', to: sub.pending_approver_email }
+    notify = [{ type: 'sk_verification', to: sub.pending_approver_email }]
   } else if (sub.status === 'pending' && sub.suite_key) {
     // Direct select would fail here — suite_keys' RLS only allows reading rows
     // you own (or as admin), and the requester is neither. get_suite_key_owner()
@@ -42,7 +68,9 @@ export async function requestSubscription({ licenseId, suiteKey, suggestedApprov
     const { data } = await supabase.rpc('get_suite_key_owner', { p_suite_key: sub.suite_key })
     const owner = data?.[0]
     const to = owner?.owner_group_email || owner?.owner_email
-    if (to) notify = { type: 'approval_request', to }
+    if (to) notify = [{ type: 'approval_request', to }]
+  } else if (sub.status === 'approved') {
+    notify = await buildProvisioningNotifications(sub)
   }
 
   return { id, status: sub.status, notify }

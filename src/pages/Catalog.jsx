@@ -10,6 +10,8 @@ import {
   sendEmail,
   skVerificationEmailSubject, skVerificationEmailHtml,
   approvalRequestEmailSubject, approvalRequestEmailHtml,
+  approvedPendingEmailSubject, approvedPendingEmailHtml,
+  provisioningRequiredEmailSubject, provisioningRequiredEmailHtml,
 } from '../lib/email'
 
 // Postgres numeric columns come through supabase-js as strings, hence the
@@ -113,32 +115,50 @@ export default function Catalog() {
   )
 }
 
-// Fires the right notification email for whatever request_subscription() decided,
-// mirroring Subscriptions.gs's inline _sendSkVerificationEmail/_sendApprovalRequestEmail
-// calls. Never lets a failed send block the request itself — same restraint GAS used
-// (try/catch + console.error around every MailApp.sendEmail call).
+// Fires the right notification email(s) for whatever request_subscription() decided,
+// mirroring Subscriptions.gs's inline _sendSkVerificationEmail/_sendApprovalRequestEmail/
+// _notifySubscriberApprovedPending/_notifyAdminsOfPendingActivation calls. Never lets one
+// failed send block the request or the others — same restraint GAS used (try/catch +
+// console.error around every MailApp.sendEmail call).
 async function notifyForRequest({ notify, id, suiteKey, licenseName, requesterEmail }) {
-  if (!notify) return
-  try {
-    if (notify.type === 'sk_verification') {
-      await sendEmail({
-        to: notify.to,
-        subject: skVerificationEmailSubject(suiteKey),
-        html: skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail }),
-        template: 'sk_verification',
-        subscriptionId: id,
-      })
-    } else if (notify.type === 'approval_request') {
-      await sendEmail({
-        to: notify.to,
-        subject: approvalRequestEmailSubject(suiteKey),
-        html: approvalRequestEmailHtml({ suiteKey, licenseName, userEmail: requesterEmail }),
-        template: 'approval_request',
-        subscriptionId: id,
-      })
+  for (const n of notify || []) {
+    try {
+      if (n.type === 'sk_verification') {
+        await sendEmail({
+          to: n.to,
+          subject: skVerificationEmailSubject(suiteKey),
+          html: skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail }),
+          template: 'sk_verification',
+          subscriptionId: id,
+        })
+      } else if (n.type === 'approval_request') {
+        await sendEmail({
+          to: n.to,
+          subject: approvalRequestEmailSubject(suiteKey),
+          html: approvalRequestEmailHtml({ suiteKey, licenseName, userEmail: requesterEmail }),
+          template: 'approval_request',
+          subscriptionId: id,
+        })
+      } else if (n.type === 'approved_pending') {
+        await sendEmail({
+          to: n.to,
+          subject: approvedPendingEmailSubject(n.licenseName),
+          html: approvedPendingEmailHtml({ sub: n.sub, licenseName: n.licenseName }),
+          template: 'approved_pending',
+          subscriptionId: id,
+        })
+      } else if (n.type === 'provisioning_required') {
+        await sendEmail({
+          to: n.to,
+          subject: provisioningRequiredEmailSubject({ licenseName: n.licenseName, userEmail: n.sub.user_email }),
+          html: provisioningRequiredEmailHtml({ sub: n.sub, licenseName: n.licenseName, activationUrl: n.activationUrl }),
+          template: 'provisioning_required',
+          subscriptionId: id,
+        })
+      }
+    } catch (err) {
+      console.error(`${n.type} email failed:`, err.message)
     }
-  } catch (err) {
-    console.error('notification email failed:', err.message)
   }
 }
 
