@@ -73,6 +73,19 @@ The big ones:
   one-time external Google Cloud/Workspace setup (domain-wide-delegated
   service account) before it can actually run on a schedule. Until then,
   group-owned SuiteKeys won't reflect current Google Group membership.
+- **External vendor provisioning** — a generalized adapter framework (the
+  `sync-provisioning` Edge Function, `licenses.provisioning_adapter`/
+  `provisioning_config`, `provisioning_log`) reconciles active subscriptions
+  against a vendor's own roster, same reconciliation model as
+  `sync-group-memberships`. First adapter is CubeBackup (Google Backup); to
+  turn it on for a license, set Admin → Catalog's Provisioning dropdown to
+  CubeBackup with `{"baseUrl": "...", "domain": "..."}`, and set the
+  `CUBEBACKUP_API_KEY` secret. Not scheduled yet (see
+  `supabase/functions/README.md`) — the fire-and-forget kick from
+  Approvals/My Subscriptions covers the common case in the meantime, but a
+  schedule is the correctness backstop for anything that misses. Adding the
+  next vendor is one adapter file (`supabase/functions/sync-provisioning/adapters/`)
+  + a dropdown entry, not a new schema/Edge Function.
 - **Historical data migration** — Admin → Import can now do this, but the
   actual one-time import of historical subscriptions/renewals/audit log from
   the old GAS sheet hasn't been run yet.

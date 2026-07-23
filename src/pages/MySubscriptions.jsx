@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import AppLayout from '../components/AppLayout'
 import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
+import { supabase } from '../lib/supabase'
 import { getMySubscriptions, cancelSubscription, optInRenewal, optOutRenewal } from '../lib/subscriptions'
 import { billingLabel, fyLabel, STATUS_LABEL, STATUS_COLOR } from '../lib/subscriptionDisplay'
 
@@ -23,6 +24,19 @@ export default function MySubscriptions() {
     try {
       await action(subscriptionId)
       reload()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function handleCancel(subscriptionId) {
+    try {
+      await cancelSubscription(subscriptionId)
+      reload()
+      // Nudges sync-provisioning to reconcile now instead of waiting for its
+      // next scheduled run — best effort, the schedule is the correctness
+      // backstop if this fails.
+      supabase.functions.invoke('sync-provisioning').catch(err => console.error('provisioning sync kick failed:', err.message))
     } catch (err) {
       setError(err.message)
     }
@@ -53,7 +67,7 @@ export default function MySubscriptions() {
                   </>
                 )}
                 {['pending', 'pending_sk_verification', 'approved', 'active'].includes(sub.status) && (
-                  <button onClick={() => handle(cancelSubscription, sub.id)} className="text-xs font-medium text-sil-red">Cancel</button>
+                  <button onClick={() => handleCancel(sub.id)} className="text-xs font-medium text-sil-red">Cancel</button>
                 )}
               </div>
             </div>

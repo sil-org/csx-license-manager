@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import AppLayout from '../components/AppLayout'
 import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
+import { supabase } from '../lib/supabase'
 import {
   getPendingSkVerifications, getPendingApprovals, getProvisioningQueue,
   confirmSkOwnership, denySkOwnership, approveSubscription, declineSubscription, activateSubscription,
@@ -137,6 +138,10 @@ export default function Approvals() {
       } catch (err) {
         console.error('activation email failed:', err.message)
       }
+      // Nudges sync-provisioning to reconcile now instead of waiting for its
+      // next scheduled run (see supabase/functions/sync-provisioning) — best
+      // effort, the schedule is the correctness backstop if this fails.
+      supabase.functions.invoke('sync-provisioning').catch(err => console.error('provisioning sync kick failed:', err.message))
     } catch (err) {
       setError(err.message)
     }
