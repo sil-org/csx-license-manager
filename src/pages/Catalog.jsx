@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { X } from 'lucide-react'
 import AppLayout from '../components/AppLayout'
 import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
@@ -20,6 +21,12 @@ import {
 function formatPrice(price) {
   const n = Number(price)
   return n % 1 === 0 ? `$${n}` : `$${n.toFixed(2)}`
+}
+
+function billingSummary(license) {
+  if (license.billing_cycle === 'monthly') return 'Monthly'
+  if (license.billing_cycle === 'one_time') return 'One-time'
+  return 'Annual'
 }
 
 export default function Catalog() {
@@ -127,14 +134,14 @@ export default function Catalog() {
 // _notifySubscriberApprovedPending/_notifyAdminsOfPendingActivation calls. Never lets one
 // failed send block the request or the others — same restraint GAS used (try/catch +
 // console.error around every MailApp.sendEmail call).
-async function notifyForRequest({ notify, id, suiteKey, licenseName, requesterEmail }) {
+async function notifyForRequest({ notify, id, suiteKey, licenseName, requesterEmail, recipientEmail }) {
   for (const n of notify || []) {
     try {
       if (n.type === 'sk_verification') {
         await sendEmail({
           to: n.to,
           subject: skVerificationEmailSubject(suiteKey),
-          html: skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail }),
+          html: skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail, recipientEmail }),
           template: 'sk_verification',
           subscriptionId: id,
         })
@@ -142,7 +149,7 @@ async function notifyForRequest({ notify, id, suiteKey, licenseName, requesterEm
         await sendEmail({
           to: n.to,
           subject: approvalRequestEmailSubject(suiteKey),
-          html: approvalRequestEmailHtml({ suiteKey, licenseName, userEmail: requesterEmail }),
+          html: approvalRequestEmailHtml({ suiteKey, licenseName, userEmail: requesterEmail, recipientEmail }),
           template: 'approval_request',
           subscriptionId: id,
         })
@@ -171,6 +178,7 @@ async function notifyForRequest({ notify, id, suiteKey, licenseName, requesterEm
 
 function RequestModal({ license, onClose }) {
   const { profile } = useAuth()
+  const [recipientEmail, setRecipientEmail] = useState(profile?.primary_email || '')
   const [mode, setMode] = useState('suite_key') // 'suite_key' | 'ministry_id'
   const [suiteKey, setSuiteKey] = useState('')
   const [suggestions, setSuggestions] = useState([])
@@ -182,6 +190,7 @@ function RequestModal({ license, onClose }) {
   const [done, setDone] = useState(false)
 
   const fy = new Date().getFullYear()
+  const forSomeoneElse = recipientEmail.trim().toLowerCase() !== (profile?.primary_email || '').toLowerCase()
 
   // Debounced typeahead — mirrors GAS's searchSuiteKeys(), which searched
   // every SuiteKey regardless of ownership so requesters don't accidentally
@@ -213,6 +222,7 @@ function RequestModal({ license, onClose }) {
         suggestedApproverEmail: mode === 'suite_key' ? suggestedApproverEmail : null,
         ministryId: mode === 'ministry_id' ? ministryId : null,
         fy,
+        recipientEmail: recipientEmail.trim(),
       })
       await notifyForRequest({
         notify: result.notify,
@@ -220,6 +230,7 @@ function RequestModal({ license, onClose }) {
         suiteKey,
         licenseName: license.name,
         requesterEmail: profile?.primary_email,
+        recipientEmail: recipientEmail.trim(),
       })
       setDone(true)
     } catch (err) {
@@ -230,105 +241,149 @@ function RequestModal({ license, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-lg p-8 max-w-md w-full">
-        <h2 className="font-display text-xl font-bold text-brand mb-1">Request {license.name}</h2>
-        <p className="text-sm text-gray-500 mb-6">Fiscal year {fy}</p>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-lg p-6 max-w-md w-full my-8">
+        <div className="flex items-start justify-between mb-4">
+          <h2 className="font-display text-xl font-bold text-brand">Request {license.name}</h2>
+          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400 hover:text-gray-600 -mt-1 -mr-1 p-1">
+            <X size={20} />
+          </button>
+        </div>
 
         {done ? (
           <>
-            <p className="text-gray-700 mb-6">Your request has been submitted.</p>
+            <p className="text-gray-700 mb-6">
+              {forSomeoneElse ? `Your request for ${recipientEmail.trim()} has been submitted.` : 'Your request has been submitted.'}
+            </p>
             <button onClick={onClose} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">Close</button>
           </>
-        ) : license.gtis_sponsored ? (
-          <form onSubmit={submit}>
-            <p className="text-sm text-gray-600 mb-6">This license is GTIS-sponsored — no approval needed.</p>
-            {error && <p className="text-sil-red text-sm mb-4">{error}</p>}
-            <div className="flex gap-3">
-              <button type="submit" disabled={submitting} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">
-                {submitting ? 'Submitting…' : 'Confirm request'}
-              </button>
-              <button type="button" onClick={onClose} className="text-sm font-medium text-gray-500">Cancel</button>
-            </div>
-          </form>
         ) : (
           <form onSubmit={submit} className="space-y-4">
-            <div className="flex gap-4 text-sm">
-              <label className="flex items-center gap-2">
-                <input type="radio" checked={mode === 'suite_key'} onChange={() => setMode('suite_key')} />
-                SuiteKey
+            {license.price != null && (
+              <div className="bg-gray-50 rounded-lg px-4 py-3">
+                <p className="text-lg font-semibold text-gray-900">{formatPrice(license.price)}</p>
+              </div>
+            )}
+            <p className="text-sm text-gray-500 -mt-2">Billing: {billingSummary(license)} &middot; Fiscal year {fy}</p>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                License for <span className="text-sil-red">*</span>
               </label>
-              <label className="flex items-center gap-2">
-                <input type="radio" checked={mode === 'ministry_id'} onChange={() => setMode('ministry_id')} />
-                Ministry ID
-              </label>
+              <input
+                type="email"
+                required
+                value={recipientEmail}
+                onChange={e => setRecipientEmail(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              />
+              <p className="text-xs text-gray-400 mt-1">Pre-filled with your email. Change this to request on behalf of someone else.</p>
             </div>
 
-            {mode === 'suite_key' ? (
-              <>
-                <div className="relative">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">SuiteKey</label>
-                  <input
-                    value={suiteKey}
-                    onChange={e => setSuiteKey(e.target.value)}
-                    onFocus={() => setShowSuggestions(true)}
-                    onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-                    required
-                    autoComplete="off"
-                    pattern="[^~]*"
-                    title='Cannot contain "~" — check for stray text pasted in after the real key'
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  />
-                  {showSuggestions && suggestions.length > 0 && (
-                    <ul className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-md max-h-48 overflow-y-auto">
-                      {suggestions.map(s => (
-                        <li key={s.suite_key}>
-                          <button
-                            type="button"
-                            onMouseDown={() => selectSuggestion(s)}
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between gap-2"
-                          >
-                            <span className="font-medium text-brand">{s.suite_key}</span>
-                            <span className="text-xs text-gray-400 truncate">
-                              {s.has_owner ? (s.description || 'Has an owner') : 'No owner yet'}
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Suggested approver email <span className="text-gray-400">(only needed if this is a new SuiteKey)</span>
-                  </label>
-                  <input type="email" value={suggestedApproverEmail} onChange={e => setSuggestedApproverEmail(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-                </div>
-              </>
+            {license.gtis_sponsored ? (
+              <p className="text-sm text-gray-600">This license is GTIS-sponsored — no approval needed.</p>
             ) : (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Ministry ID</label>
-                <input
-                  value={ministryId}
-                  onChange={e => setMinistryId(e.target.value)}
-                  inputMode="numeric"
-                  pattern="\d{6}"
-                  maxLength={6}
-                  placeholder="6 digits"
-                  required
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                />
-              </div>
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Bill to <span className="text-sil-red">*</span>
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMode('suite_key')}
+                      className={`flex-1 text-sm font-medium rounded-lg px-3 py-2 border transition ${
+                        mode === 'suite_key' ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      SuiteKey
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMode('ministry_id')}
+                      className={`flex-1 text-sm font-medium rounded-lg px-3 py-2 border transition ${
+                        mode === 'ministry_id' ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      Ministry Account
+                    </button>
+                  </div>
+                </div>
+
+                {mode === 'suite_key' ? (
+                  <>
+                    <div className="relative">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        SuiteKey <span className="text-sil-red">*</span>
+                      </label>
+                      <input
+                        value={suiteKey}
+                        onChange={e => setSuiteKey(e.target.value)}
+                        onFocus={() => setShowSuggestions(true)}
+                        onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                        required
+                        autoComplete="off"
+                        pattern="[^~]*"
+                        title='Cannot contain "~" — check for stray text pasted in after the real key'
+                        placeholder="Type at least 2 characters…"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                      {showSuggestions && suggestions.length > 0 && (
+                        <ul className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-md max-h-48 overflow-y-auto">
+                          {suggestions.map(s => (
+                            <li key={s.suite_key}>
+                              <button
+                                type="button"
+                                onMouseDown={() => selectSuggestion(s)}
+                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between gap-2"
+                              >
+                                <span className="font-medium text-brand">{s.suite_key}</span>
+                                <span className="text-xs text-gray-400 truncate">
+                                  {s.has_owner ? (s.description || 'Has an owner') : 'No owner yet'}
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Suggested approver email <span className="text-gray-400">(only needed if this is a new SuiteKey)</span>
+                      </label>
+                      <input type="email" value={suggestedApproverEmail} onChange={e => setSuggestedApproverEmail(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Ministry ID <span className="text-sil-red">*</span>
+                    </label>
+                    <input
+                      value={ministryId}
+                      onChange={e => setMinistryId(e.target.value)}
+                      inputMode="numeric"
+                      pattern="\d{6}"
+                      maxLength={6}
+                      placeholder="6 digits"
+                      required
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
+                )}
+              </>
             )}
 
             {error && <p className="text-sil-red text-sm">{error}</p>}
 
-            <div className="flex gap-3 pt-2">
-              <button type="submit" disabled={submitting} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">
-                {submitting ? 'Submitting…' : 'Submit request'}
+            <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+              <button type="button" onClick={onClose} className="text-sm font-medium text-gray-600 border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50">
+                Cancel
               </button>
-              <button type="button" onClick={onClose} className="text-sm font-medium text-gray-500">Cancel</button>
+              <button type="submit" disabled={submitting} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2 hover:bg-brand-dark transition disabled:opacity-60">
+                {submitting ? 'Submitting…' : license.gtis_sponsored ? 'Confirm request' : 'Submit request'}
+              </button>
             </div>
           </form>
         )}

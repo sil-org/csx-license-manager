@@ -336,16 +336,26 @@ create policy "email_log: admin read" on email_log for select using (is_admin())
 -- Mirrors Subscriptions.gs createSubscription(). Branches on GTIS-sponsored /
 -- ministry-ID / suite-key paths to decide the initial status.
 
+-- Adds a 6th parameter, so the old 5-arg overload must be dropped explicitly —
+-- CREATE OR REPLACE only replaces a function with an identical argument list.
+drop function if exists request_subscription(uuid, text, text, text, int);
+
 create or replace function request_subscription(
   p_license_id uuid,
   p_suite_key text,
   p_suggested_approver_email text,
   p_ministry_id text,
-  p_fy int
+  p_fy int,
+  p_recipient_email text default null
 ) returns uuid language plpgsql security definer as $$
 declare
   v_license licenses%rowtype;
-  v_email text := current_profile_email();
+  -- Mirrors GAS's requesterEmail/recipientEmail split (createSubscription()) —
+  -- ownership/auto-approval checks below key off the actor actually signed
+  -- in and submitting the request, never the recipient, so "request for
+  -- someone else" can't be used to forge approval you don't actually have.
+  v_actor_email text := current_profile_email();
+  v_recipient_email text := coalesce(nullif(trim(lower(p_recipient_email)), ''), current_profile_email());
   v_sub_id uuid;
   v_status subscription_status;
   v_billing_type subscription_billing_type;
@@ -357,14 +367,17 @@ declare
   v_owner_group text;
   v_pending_approver text := null;
 begin
-  if v_email is null then raise exception 'not authenticated'; end if;
+  if v_actor_email is null then raise exception 'not authenticated'; end if;
+  if v_recipient_email not like '%@sil.org' then
+    raise exception 'License requests are only available to SIL staff (sil.org accounts).';
+  end if;
 
   select * into v_license from licenses where id = p_license_id and active;
   if v_license.id is null then raise exception 'license not found or inactive'; end if;
 
   if exists (
     select 1 from subscriptions
-    where user_email = v_email and license_id = p_license_id and fy = p_fy
+    where user_email = v_recipient_email and license_id = p_license_id and fy = p_fy
       and status not in ('declined', 'revoked', 'cancelled')
   ) then
     raise exception 'a subscription for this license already exists for this fiscal year';
@@ -382,7 +395,7 @@ begin
     v_billing_type := 'ministry';
     v_ministry_id := p_ministry_id;
     v_audit_suite_key := 'MIN:' || p_ministry_id;
-    insert into ministry_ids (email, ministry_id) values (v_email, p_ministry_id)
+    insert into ministry_ids (email, ministry_id) values (v_recipient_email, p_ministry_id)
       on conflict (email) do update set ministry_id = excluded.ministry_id;
     v_status := case when v_license.activation_url is not null then 'approved' else 'active' end;
 
@@ -422,7 +435,7 @@ begin
       -- is already an authoritative claim, and current membership itself is
       -- the authorization check (is_suite_key_owner() below covers this).
       if exists (
-        select 1 from group_memberships where group_email = v_owner_group and member_email = v_email
+        select 1 from group_memberships where group_email = v_owner_group and member_email = v_actor_email
       ) then
         v_status := case when v_license.activation_url is not null then 'approved' else 'active' end;
       else
@@ -440,7 +453,7 @@ begin
       end if;
       v_status := 'pending_sk_verification';
       v_pending_approver := p_suggested_approver_email;
-    elsif v_owner = v_email then
+    elsif v_owner = v_actor_email then
       v_status := case when v_license.activation_url is not null then 'approved' else 'active' end;
     else
       v_status := 'pending';
@@ -451,14 +464,15 @@ begin
     user_email, license_id, suite_key, billing_type, ministry_id, fy, status, billing_cycle,
     renewal_month, renewal_reminder, price_at_signup, pending_approver_email, requested_by
   ) values (
-    v_email, p_license_id, v_suite_key, v_billing_type, v_ministry_id, p_fy, v_status, v_license.billing_cycle,
+    v_recipient_email, p_license_id, v_suite_key, v_billing_type, v_ministry_id, p_fy, v_status, v_license.billing_cycle,
     v_license.renewal_month, v_license.renewal_reminder, v_license.price, v_pending_approver, current_profile_id()
   ) returning id into v_sub_id;
 
-  insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by)
+  insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, notes)
   values (
     (case when v_status in ('active', 'approved') then 'auto_approved' else 'requested' end)::audit_action,
-    v_sub_id, v_license.name, v_email, v_audit_suite_key, v_email
+    v_sub_id, v_license.name, v_recipient_email, v_audit_suite_key, v_actor_email,
+    case when v_recipient_email <> v_actor_email then 'on behalf of ' || v_recipient_email else null end
   );
 
   return v_sub_id;
@@ -1071,7 +1085,9 @@ begin
     v_day := extract(day from p_start_date)::int;
     v_days_in_month := extract(day from (date_trunc('month', p_start_date) + interval '1 month - 1 day'))::int;
     v_days_left := v_days_in_month - v_day + 1;
-    return round(p_price * v_days_left / v_days_in_month, 2);
+    -- Monthly subscriptions always bill at least one full month, even for a
+    -- one- or two-day partial first month — no sub-month proration discount.
+    return greatest(round(p_price * v_days_left / v_days_in_month, 2), p_price);
   end if;
 
   v_renew_month := coalesce(nullif(p_renewal_month, 0), 10);

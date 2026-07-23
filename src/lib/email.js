@@ -54,7 +54,7 @@ export function skVerificationEmailSubject(suiteKey) {
   return `Action Required: SuiteKey Ownership Confirmation — ${suiteKey}`
 }
 
-export function skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail }) {
+export function skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail, recipientEmail }) {
   return wrapEmail(`
     <p>You've been identified as the potential owner of SuiteKey <strong>${suiteKey}</strong>.
        A license request has been submitted against it and needs your confirmation before it can proceed.</p>
@@ -62,6 +62,7 @@ export function skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail 
       ['SuiteKey', `<strong>${suiteKey}</strong>`],
       ['License', licenseName],
       ['Requested by', requesterEmail],
+      ...(recipientEmail && recipientEmail !== requesterEmail ? [['License is for', recipientEmail]] : []),
     ])}
     <p>Sign in to <a href="${appUrl('/approvals')}" style="color:#005CB9">License Manager &rarr; Approvals</a>
        to confirm or deny that you manage this SuiteKey.</p>
@@ -72,13 +73,14 @@ export function approvalRequestEmailSubject(suiteKey) {
   return `Action Required: License request for SuiteKey ${suiteKey}`
 }
 
-export function approvalRequestEmailHtml({ suiteKey, licenseName, userEmail }) {
+export function approvalRequestEmailHtml({ suiteKey, licenseName, userEmail, recipientEmail }) {
   return wrapEmail(`
     <p>A software license has been requested against your SuiteKey and needs your approval.</p>
     ${detailsTable([
       ['SuiteKey', `<strong>${suiteKey}</strong>`],
       ['License', licenseName],
       ['Requested by', userEmail],
+      ...(recipientEmail && recipientEmail !== userEmail ? [['License is for', recipientEmail]] : []),
     ])}
     <p>Sign in to <a href="${appUrl('/approvals')}" style="color:#005CB9">License Manager &rarr; Approvals</a>
        to approve or decline this request.</p>

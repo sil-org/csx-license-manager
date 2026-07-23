@@ -42,7 +42,7 @@ const COLUMNS = [
   { key: 'name', label: 'Name', sort: l => l.name.toLowerCase() },
   { key: 'vendor', label: 'Vendor', sort: l => (l.vendor || '').toLowerCase() },
   { key: 'category', label: 'Category', sort: l => (l.category || '').toLowerCase() },
-  { key: 'price', label: 'Price', sort: l => Number(l.price) || 0 },
+  { key: 'price', label: 'Price', sort: l => Number(l.price) || 0, align: 'right' },
   { key: 'billing', label: 'Billing', sort: l => (l.billing_cycle === 'monthly' ? 0 : l.renewal_month || 0) },
   { key: 'paid_by', label: 'Paid By', sort: l => (l.gtis_sponsored ? 'GTIS' : 'User') },
   { key: 'active', label: 'Active', sort: l => (l.active ? 1 : 0) },
@@ -190,10 +190,10 @@ export default function AdminCatalog() {
             <thead className="text-left text-gray-400 border-b">
               <tr>
                 {COLUMNS.map(col => (
-                  <th key={col.key} className="p-3">
+                  <th key={col.key} className={`p-3 ${col.align === 'right' ? 'text-right' : ''}`}>
                     <button
                       onClick={() => handleSort(col.key)}
-                      className="flex items-center gap-1 font-semibold uppercase text-xs tracking-wide hover:text-gray-600"
+                      className={`flex items-center gap-1 font-semibold uppercase text-xs tracking-wide hover:text-gray-600 ${col.align === 'right' ? 'ml-auto' : ''}`}
                     >
                       {col.label}
                       {sortKey === col.key
@@ -214,7 +214,7 @@ export default function AdminCatalog() {
                   <td className={`p-3 font-medium ${license.active ? 'text-brand' : 'text-gray-400 line-through'}`}>{license.name}</td>
                   <td className="p-3 text-gray-500">{license.vendor}</td>
                   <td className="p-3 text-gray-500">{license.category}</td>
-                  <td className="p-3 text-gray-700">{license.price != null ? `$${Number(license.price).toFixed(2)}` : '—'}</td>
+                  <td className="p-3 text-gray-700 text-right">{license.price != null ? `$${Number(license.price).toFixed(2)}` : '—'}</td>
                   <td className="p-3 text-gray-500 whitespace-nowrap">{billingLabel(license)}</td>
                   <td className="p-3 text-gray-500">{license.gtis_sponsored ? 'GTIS' : 'User'}</td>
                   <td className="p-3">
