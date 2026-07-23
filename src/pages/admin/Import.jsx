@@ -2,9 +2,7 @@ import { useState } from 'react'
 import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
-import { importSubscriptions } from '../../lib/admin'
-
-const EXPECTED_COLUMNS = ['user_email', 'license_name', 'suite_key', 'start_date', 'fy']
+import { importSubscriptions, importLicenses, importSubscriptionsFull, importAuditLog } from '../../lib/admin'
 
 // Minimal CSV parser — handles quoted fields (commas/newlines/escaped quotes
 // inside quotes), which a naive split(',') would break on.
@@ -38,15 +36,67 @@ function parseCsv(text) {
   return rows
 }
 
-// Bulk-imports already-active subscriptions from a legacy/historical CSV —
-// mirrors GAS's Admin Panel "Import" tab. Expected header row (order doesn't
-// matter, extra columns are ignored): user_email, license_name, suite_key,
-// start_date (optional), fy (optional). suite_key accepts a real SuiteKey, a
-// 6-digit Ministry ID, or blank for a GTIS-sponsored license.
-export default function AdminImport() {
+const EXPECTED_COLUMNS = ['user_email', 'license_name', 'suite_key', 'start_date', 'fy']
+
+// Header-name-based: fine for a hand-made CSV with clean headers.
+function parseQuickSubscriptions(text) {
+  const parsed = parseCsv(text)
+  if (parsed.length < 2) throw new Error('CSV has no data rows')
+  const header = parsed[0].map(h => h.trim().toLowerCase())
+  const missing = ['user_email', 'license_name', 'suite_key'].filter(c => !header.includes(c))
+  if (missing.length) throw new Error(`Missing required column(s): ${missing.join(', ')}`)
+  return parsed.slice(1).map(cols => {
+    const obj = {}
+    header.forEach((h, i) => { if (EXPECTED_COLUMNS.includes(h)) obj[h] = (cols[i] || '').trim() })
+    return obj
+  })
+}
+
+// GAS's Licenses sheet has a header-drift bug — initializeAppSheet() only ever
+// wrote 8 header cells, but saveLicense() has always written 20 columns of
+// data — so column 8 onward has no reliable header name to match against.
+// Positional mapping is the only option; see admin_import_licenses() in
+// supabase/pending/17_gas_historical_import.sql for what each field expects.
+function parseGasLicenses(text) {
+  const parsed = parseCsv(text)
+  if (parsed.length < 2) throw new Error('CSV has no data rows')
+  return parsed.slice(1).map(r => ({
+    legacy_id: r[0], name: r[1], vendor: r[2], category: r[3], price: r[4],
+    notes: r[6], active: r[7], gtis_sponsored: r[8], billing_cycle: r[9],
+    renewal_month: r[10], renewal_reminder: r[11], created_by_email: r[12],
+    logo_url: r[13], activation_url: r[14],
+    // r[15] ("activated") is intentionally dropped — see admin_import_licenses().
+    more_info_url: r[16], google_group_email: r[17], pro_rated: r[18], service_manager_email: r[19],
+  }))
+}
+
+// Same header-drift issue as Licenses — positional mapping.
+function parseGasSubscriptions(text) {
+  const parsed = parseCsv(text)
+  if (parsed.length < 2) throw new Error('CSV has no data rows')
+  return parsed.slice(1).map(r => ({
+    legacy_id: r[0], user_email: r[1], license_name: r[2], license_legacy_id: r[3],
+    suite_key: r[4], start_date: r[5], fy: r[6], status: r[7], renewal_status: r[8],
+    billing_cycle: r[9], renewal_month: r[10], renewal_reminder: r[11], price_at_signup: r[13],
+  }))
+}
+
+// GAS's AuditLog sheet has clean, complete headers — no drift.
+function parseGasAuditLog(text) {
+  const parsed = parseCsv(text)
+  if (parsed.length < 2) throw new Error('CSV has no data rows')
+  return parsed.slice(1).map(r => ({
+    legacy_id: r[0], timestamp: r[1], action: r[2], subscription_legacy_id: r[3],
+    license_name: r[4], user_email: r[5], suite_key: r[6], performed_by: r[7], notes: r[8],
+  }))
+}
+
+// Shared shape for every importer below: pick a file, see a preview + count,
+// import, see per-row ok/fail results. Never lets one bad row fail the batch.
+function ImportSection({ title, description, previewColumns, rowLabel, parse, doImport }) {
   const [fileName, setFileName] = useState('')
-  const [rows, setRows] = useState(null) // parsed rows, before import
-  const [results, setResults] = useState(null) // {ok, error?, row}[] after import
+  const [rows, setRows] = useState(null)
+  const [results, setResults] = useState(null)
   const [error, setError] = useState(null)
   const [importing, setImporting] = useState(false)
 
@@ -59,17 +109,7 @@ export default function AdminImport() {
     const reader = new FileReader()
     reader.onload = () => {
       try {
-        const parsed = parseCsv(String(reader.result))
-        if (parsed.length < 2) throw new Error('CSV has no data rows')
-        const header = parsed[0].map(h => h.trim().toLowerCase())
-        const missing = ['user_email', 'license_name', 'suite_key'].filter(c => !header.includes(c))
-        if (missing.length) throw new Error(`Missing required column(s): ${missing.join(', ')}`)
-        const parsedRows = parsed.slice(1).map(cols => {
-          const obj = {}
-          header.forEach((h, i) => { if (EXPECTED_COLUMNS.includes(h)) obj[h] = (cols[i] || '').trim() })
-          return obj
-        })
-        setRows(parsedRows)
+        setRows(parse(String(reader.result)))
       } catch (err) {
         setError(err.message)
         setRows(null)
@@ -82,7 +122,7 @@ export default function AdminImport() {
     setImporting(true)
     setError(null)
     try {
-      setResults(await importSubscriptions(rows))
+      setResults(await doImport(rows))
     } catch (err) {
       setError(err.message)
     } finally {
@@ -94,76 +134,116 @@ export default function AdminImport() {
   const failCount = results ? results.length - successCount : 0
 
   return (
+    <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+      <h2 className="font-display text-lg font-bold text-brand mb-1">{title}</h2>
+      <p className="text-xs text-gray-400 mb-4">{description}</p>
+
+      <input type="file" accept=".csv" onChange={handleFile} className="text-sm mb-4" />
+
+      {error && <p className="text-sil-red mb-4">{error}</p>}
+
+      {rows && !results && (
+        <>
+          <p className="text-sm text-gray-700 mb-3">
+            {fileName}: {rows.length} row{rows.length === 1 ? '' : 's'} parsed. Review, then import.
+          </p>
+          <div className="border border-gray-100 rounded-lg overflow-x-auto mb-4">
+            <table className="w-full text-sm">
+              <thead className="text-left text-gray-400 border-b">
+                <tr>{previewColumns.map(c => <th key={c} className="p-2">{c}</th>)}</tr>
+              </thead>
+              <tbody className="divide-y">
+                {rows.slice(0, 10).map((r, i) => (
+                  <tr key={i}>{previewColumns.map(c => <td key={c} className="p-2">{r[c] || ''}</td>)}</tr>
+                ))}
+              </tbody>
+            </table>
+            {rows.length > 10 && <p className="text-xs text-gray-400 p-2">…and {rows.length - 10} more</p>}
+          </div>
+          <button onClick={handleImport} disabled={importing} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2 hover:bg-brand-dark transition">
+            {importing ? 'Importing…' : `Import ${rows.length} row${rows.length === 1 ? '' : 's'}`}
+          </button>
+        </>
+      )}
+
+      {results && (
+        <>
+          <p className="text-sm mb-3">
+            <span className="text-sil-green font-medium">{successCount} imported</span>
+            {failCount > 0 && <span className="text-sil-red font-medium">, {failCount} skipped/failed</span>}
+          </p>
+          <div className="border border-gray-100 rounded-lg overflow-x-auto max-h-96 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-gray-400 border-b">
+                <tr>
+                  <th className="p-2">Row</th>
+                  <th className="p-2">Result</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {results.map((r, i) => (
+                  <tr key={i}>
+                    <td className="p-2 text-gray-500">{rowLabel(r.row)}</td>
+                    <td className={`p-2 ${r.ok ? 'text-sil-green' : 'text-sil-red'}`}>{r.ok ? 'Imported' : r.error}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+export default function AdminImport() {
+  return (
     <AppLayout appName="License Manager" links={getLinks()}>
       <div className="max-w-6xl mx-auto p-6">
         <AdminTabs />
         <h1 className="font-display text-2xl font-bold text-brand mb-2">Import</h1>
-        <p className="text-sm text-gray-500 mb-1">
-          Bulk-imports already-active subscriptions from a legacy/historical source — no approval
-          emails, no verification step. One row per subscription.
-        </p>
-        <p className="text-xs text-gray-400 mb-6">
-          Required columns: <code className="bg-gray-100 px-1 rounded">user_email</code>,{' '}
-          <code className="bg-gray-100 px-1 rounded">license_name</code>,{' '}
-          <code className="bg-gray-100 px-1 rounded">suite_key</code> (a real SuiteKey, a 6-digit Ministry
-          ID, or blank for GTIS-sponsored licenses). Optional: <code className="bg-gray-100 px-1 rounded">start_date</code>,{' '}
-          <code className="bg-gray-100 px-1 rounded">fy</code>.
+        <p className="text-sm text-gray-500 mb-6">
+          One-time historical backfill from the GAS project, plus a quick manual-entry importer. Run
+          the GAS sections in order — Licenses, then Subscriptions, then Audit Log — since each later
+          one depends on the previous. Every row is safe to re-import: already-imported rows (matched
+          by the GAS sheet's own ID) are skipped, not duplicated or overwritten.
         </p>
 
-        <input type="file" accept=".csv" onChange={handleFile} className="text-sm mb-4" />
+        <ImportSection
+          title="GAS: Licenses"
+          description={'Upload the GAS "Licenses" sheet export as-is (CSV). Column order matters — headers are ignored.'}
+          previewColumns={['legacy_id', 'name', 'vendor', 'billing_cycle', 'active']}
+          rowLabel={row => row.name}
+          parse={parseGasLicenses}
+          doImport={importLicenses}
+        />
 
-        {error && <p className="text-sil-red mb-4">{error}</p>}
+        <ImportSection
+          title="GAS: Subscriptions (full history)"
+          description={'Upload the GAS "Subscriptions" sheet export as-is (CSV). Preserves each row’s real historical status — run the Licenses import first.'}
+          previewColumns={['legacy_id', 'user_email', 'license_name', 'status', 'fy']}
+          rowLabel={row => `${row.user_email} · ${row.license_name}`}
+          parse={parseGasSubscriptions}
+          doImport={importSubscriptionsFull}
+        />
 
-        {rows && !results && (
-          <>
-            <p className="text-sm text-gray-700 mb-3">
-              {fileName}: {rows.length} row{rows.length === 1 ? '' : 's'} parsed. Review, then import.
-            </p>
-            <div className="bg-white rounded-xl shadow-sm overflow-x-auto mb-4">
-              <table className="w-full text-sm">
-                <thead className="text-left text-gray-400 border-b">
-                  <tr>{EXPECTED_COLUMNS.map(c => <th key={c} className="p-3">{c}</th>)}</tr>
-                </thead>
-                <tbody className="divide-y">
-                  {rows.slice(0, 20).map((r, i) => (
-                    <tr key={i}>{EXPECTED_COLUMNS.map(c => <td key={c} className="p-3">{r[c] || ''}</td>)}</tr>
-                  ))}
-                </tbody>
-              </table>
-              {rows.length > 20 && <p className="text-xs text-gray-400 p-3">…and {rows.length - 20} more</p>}
-            </div>
-            <button onClick={handleImport} disabled={importing} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2 hover:bg-brand-dark transition">
-              {importing ? 'Importing…' : `Import ${rows.length} row${rows.length === 1 ? '' : 's'}`}
-            </button>
-          </>
-        )}
+        <ImportSection
+          title="GAS: Audit Log"
+          description={'Upload the GAS "AuditLog" sheet export as-is (CSV). Run the Subscriptions import first so each row can link back to its subscription.'}
+          previewColumns={['legacy_id', 'timestamp', 'action', 'user_email', 'performed_by']}
+          rowLabel={row => `${row.timestamp} · ${row.action} · ${row.user_email}`}
+          parse={parseGasAuditLog}
+          doImport={importAuditLog}
+        />
 
-        {results && (
-          <>
-            <p className="text-sm mb-3">
-              <span className="text-sil-green font-medium">{successCount} imported</span>
-              {failCount > 0 && <span className="text-sil-red font-medium">, {failCount} failed</span>}
-            </p>
-            <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-left text-gray-400 border-b">
-                  <tr>
-                    <th className="p-3">Row</th>
-                    <th className="p-3">Result</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {results.map((r, i) => (
-                    <tr key={i}>
-                      <td className="p-3 text-gray-500">{r.row.user_email} · {r.row.license_name}</td>
-                      <td className={`p-3 ${r.ok ? 'text-sil-green' : 'text-sil-red'}`}>{r.ok ? 'Imported' : r.error}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
+        <ImportSection
+          title="Quick subscription import"
+          description={'Bulk-import already-active subscriptions from a hand-made CSV — no approval emails, no verification step, no history. Required columns: user_email, license_name, suite_key (a real SuiteKey, a 6-digit Ministry ID, or blank for GTIS-sponsored licenses). Optional: start_date, fy.'}
+          previewColumns={EXPECTED_COLUMNS}
+          rowLabel={row => `${row.user_email} · ${row.license_name}`}
+          parse={parseQuickSubscriptions}
+          doImport={importSubscriptions}
+        />
       </div>
     </AppLayout>
   )

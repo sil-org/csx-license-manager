@@ -14,6 +14,8 @@ import {
   activationEmailSubject, activationEmailHtml,
   approvedPendingEmailSubject, approvedPendingEmailHtml,
   provisioningRequiredEmailSubject, provisioningRequiredEmailHtml,
+  decisionApprovedEmailSubject, decisionApprovedEmailHtml,
+  declinedEmailSubject, declinedEmailHtml,
 } from '../lib/email'
 
 export default function Approvals() {
@@ -30,15 +32,6 @@ export default function Approvals() {
   }
 
   useEffect(reload, [])
-
-  async function handle(action, ...args) {
-    try {
-      await action(...args)
-      reload()
-    } catch (err) {
-      setError(err.message)
-    }
-  }
 
   // confirm_sk_ownership/deny_sk_ownership return the subscriptions they just
   // advanced — mirrors GAS's confirmSkOwnershipAll/denySkOwnershipAll, which
@@ -113,9 +106,43 @@ export default function Approvals() {
               template: 'provisioning_required',
               subscriptionId: sub.id,
             })
+          } else if (n.type === 'decision_approved') {
+            await sendEmail({
+              to: n.to,
+              subject: decisionApprovedEmailSubject(n.licenseName),
+              html: decisionApprovedEmailHtml({ sub: n.sub, licenseName: n.licenseName }),
+              template: 'decision_approved',
+              subscriptionId: sub.id,
+            })
           }
         } catch (err) {
           console.error(`${n.type} email failed:`, err.message)
+        }
+      }
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  // decline_subscription() takes an optional free-text reason, shown in the
+  // requester's email if given — mirrors GAS's declineSubscription(id, reason).
+  async function handleDecline(sub) {
+    const reason = window.prompt(`Decline ${sub.license?.name} for ${sub.user_email}? Optionally add a reason (shown to them):`)
+    if (reason === null) return
+    try {
+      const notify = await declineSubscription(sub.id, reason)
+      reload()
+      for (const n of notify || []) {
+        try {
+          await sendEmail({
+            to: n.to,
+            subject: declinedEmailSubject(n.licenseName),
+            html: declinedEmailHtml({ sub: n.sub, licenseName: n.licenseName, performedBy: profile?.primary_email, reason: n.reason }),
+            template: 'declined',
+            subscriptionId: sub.id,
+          })
+        } catch (err) {
+          console.error('declined email failed:', err.message)
         }
       }
     } catch (err) {
@@ -176,7 +203,7 @@ export default function Approvals() {
             {approvals.map(sub => (
               <Row key={sub.id} title={sub.license?.name} sub={`${sub.user_email} · ${sub.suite_key}`}>
                 <button onClick={() => handleApprove(sub)} className="text-xs font-medium text-sil-green">Approve</button>
-                <button onClick={() => handle(declineSubscription, sub.id)} className="text-xs font-medium text-sil-red">Decline</button>
+                <button onClick={() => handleDecline(sub)} className="text-xs font-medium text-sil-red">Decline</button>
               </Row>
             ))}
           </Section>

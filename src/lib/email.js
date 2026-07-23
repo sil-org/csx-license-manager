@@ -203,6 +203,78 @@ export function skOwnershipDeniedEmailHtml({ suiteKey, licenseName }) {
   `)
 }
 
+export function decisionApprovedEmailSubject(licenseName) {
+  return `License Request Approved: ${licenseName}`
+}
+
+// Mirrors Approvals.gs's _notifySubscriberOfDecision() for the 'approved'
+// case — sent when a SuiteKey owner approves a request that goes straight to
+// 'active' (no provisioning needed). The needs-provisioning case has its own
+// email — see approvedPendingEmailHtml above.
+export function decisionApprovedEmailHtml({ sub, licenseName }) {
+  const fy = fyLabel(sub)
+  return wrapEmail(`
+    <p>Your request for <strong>${licenseName}</strong> has been approved. Your subscription is now active.</p>
+    ${detailsTable([
+      ['License', licenseName],
+      ['Billing', billingLabel(sub)],
+      ...(fy ? [['Fiscal Year', fy]] : []),
+    ])}
+    <p style="font-size:13px;color:#666666">Questions? Contact the License Manager team.</p>
+  `, { text: 'View your subscriptions at', path: '/subscriptions', linkText: 'License Manager → My Subscriptions' })
+}
+
+export function declinedEmailSubject(licenseName) {
+  return `License Request Declined: ${licenseName}`
+}
+
+// Mirrors Approvals.gs's _notifySubscriberOfDecision() for the 'declined'
+// case — sent when a SuiteKey owner declines a pending request. `reason` is
+// the optional free-text notes decline_subscription() was called with.
+export function declinedEmailHtml({ sub, licenseName, performedBy, reason }) {
+  const fy = fyLabel(sub)
+  return wrapEmail(`
+    <p>Your request for <strong>${licenseName}</strong> has been declined.</p>
+    ${reason ? `
+    <div style="background:#fce8e6;border-left:4px solid #D52227;border-radius:4px;padding:10px 14px;margin:16px 0;font-size:14px">
+      <strong style="color:#D52227">Reason given:</strong><br>${reason}
+    </div>` : ''}
+    ${detailsTable([
+      ['License', licenseName],
+      ['Billing', billingLabel(sub)],
+      ...(fy ? [['Fiscal Year', fy]] : []),
+    ])}
+    <p style="font-size:13px;color:#666666">
+      Declined by SuiteKey owner: <a href="mailto:${performedBy}" style="color:#005CB9">${performedBy}</a>.
+      If you have questions, you can reply directly to them.
+    </p>
+  `)
+}
+
+export function revokedEmailSubject(licenseName) {
+  return `License Subscription Revoked: ${licenseName}`
+}
+
+// Mirrors Approvals.gs's _notifySubscriberOfDecision() for the 'revoked'
+// case — sent when a SuiteKey owner or admin revokes a previously-active
+// subscription.
+export function revokedEmailHtml({ sub, licenseName, performedBy, reason }) {
+  const fy = fyLabel(sub)
+  return wrapEmail(`
+    <p>Your subscription to <strong>${licenseName}</strong> has been revoked by <a href="mailto:${performedBy}" style="color:#005CB9">${performedBy}</a>.</p>
+    ${reason ? `
+    <div style="background:#fce8e6;border-left:4px solid #D52227;border-radius:4px;padding:10px 14px;margin:16px 0;font-size:14px">
+      <strong style="color:#D52227">Reason given:</strong><br>${reason}
+    </div>` : ''}
+    ${detailsTable([
+      ['License', licenseName],
+      ['Billing', billingLabel(sub)],
+      ...(fy ? [['Fiscal Year', fy]] : []),
+    ])}
+    <p style="font-size:13px;color:#666666">Questions? Contact <a href="mailto:${performedBy}" style="color:#005CB9">${performedBy}</a>.</p>
+  `)
+}
+
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 }

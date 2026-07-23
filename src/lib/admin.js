@@ -126,6 +126,29 @@ export async function importSubscriptions(rows) {
   return data || []
 }
 
+// One-time GAS historical backfill — see supabase/pending/17_gas_historical_import.sql.
+// Run in order: licenses, then subscriptions, then audit log (each depends on
+// the previous having been imported). Every row carries a `legacy_id` (the
+// GAS sheet's own ID column) so re-running any of these is safe — an
+// already-imported row is skipped, not duplicated or overwritten.
+export async function importLicenses(rows) {
+  const { data, error } = await supabase.rpc('admin_import_licenses', { p_rows: rows })
+  if (error) throw error
+  return data || []
+}
+
+export async function importSubscriptionsFull(rows) {
+  const { data, error } = await supabase.rpc('admin_import_subscriptions_full', { p_rows: rows })
+  if (error) throw error
+  return data || []
+}
+
+export async function importAuditLog(rows) {
+  const { data, error } = await supabase.rpc('admin_import_audit_log', { p_rows: rows })
+  if (error) throw error
+  return data || []
+}
+
 // Admin-only. Lists every profile (email, role) for the Admin Users page.
 export async function getProfiles() {
   const { data, error } = await supabase.from('profiles').select('id, display_name, primary_email, role').order('primary_email')

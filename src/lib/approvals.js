@@ -49,26 +49,41 @@ export async function denySkOwnership(suiteKey) {
   return data
 }
 
-// Returns the same shape as requestSubscription()'s notify — null unless the
-// subscription landed in 'approved' (still needs provisioning), in which case
-// an array of { type, to, ... } entries (see handleApprove() in Approvals.jsx).
+const SUB_EMAIL_FIELDS = 'user_email, fy, billing_cycle, billing_type, suite_key, ministry_id, license:licenses(name, activation_url, service_manager_email)'
+
+// Returns an array of { type, to, ... } entries — either the provisioning-needed
+// pair (see buildProvisioningNotifications) or a single 'decision_approved'
+// entry when the subscription went straight to 'active'. See handleApprove()
+// in Approvals.jsx.
 export async function approveSubscription(subscriptionId) {
   const { error } = await supabase.rpc('approve_subscription', { p_subscription_id: subscriptionId })
   if (error) throw error
 
   const { data: sub, error: subError } = await supabase
     .from('subscriptions')
-    .select('status, suite_key, user_email, fy, billing_cycle, billing_type, ministry_id, license:licenses(name, activation_url, service_manager_email)')
+    .select(`status, ${SUB_EMAIL_FIELDS}`)
     .eq('id', subscriptionId)
     .single()
   if (subError) throw subError
 
-  return sub.status === 'approved' ? buildProvisioningNotifications(sub) : null
+  if (sub.status === 'approved') return buildProvisioningNotifications(sub)
+  return [{ type: 'decision_approved', to: sub.user_email, sub, licenseName: sub.license.name }]
 }
 
+// Returns [{ type: 'declined', to, sub, licenseName, reason }] for the caller
+// to email — see handleDecline() in Approvals.jsx.
 export async function declineSubscription(subscriptionId, notes) {
   const { error } = await supabase.rpc('decline_subscription', { p_subscription_id: subscriptionId, p_notes: notes || null })
   if (error) throw error
+
+  const { data: sub, error: subError } = await supabase
+    .from('subscriptions')
+    .select(SUB_EMAIL_FIELDS)
+    .eq('id', subscriptionId)
+    .single()
+  if (subError) throw subError
+
+  return [{ type: 'declined', to: sub.user_email, sub, licenseName: sub.license.name, reason: notes || null }]
 }
 
 export async function activateSubscription(subscriptionId, price) {
@@ -76,7 +91,17 @@ export async function activateSubscription(subscriptionId, price) {
   if (error) throw error
 }
 
+// Returns [{ type: 'revoked', to, sub, licenseName }] for the caller to email.
 export async function revokeSubscription(subscriptionId) {
   const { error } = await supabase.rpc('revoke_subscription', { p_subscription_id: subscriptionId })
   if (error) throw error
+
+  const { data: sub, error: subError } = await supabase
+    .from('subscriptions')
+    .select(SUB_EMAIL_FIELDS)
+    .eq('id', subscriptionId)
+    .single()
+  if (subError) throw subError
+
+  return [{ type: 'revoked', to: sub.user_email, sub, licenseName: sub.license.name }]
 }
