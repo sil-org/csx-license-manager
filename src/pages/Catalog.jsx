@@ -67,7 +67,14 @@ export default function Catalog() {
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {visibleLicenses?.map(license => (
-            <div key={license.id} className="bg-white rounded-xl shadow-sm p-5 flex flex-col">
+            <div
+              key={license.id}
+              onClick={() => setRequesting(license)}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRequesting(license) } }}
+              role="button"
+              tabIndex={0}
+              className="bg-white rounded-xl shadow-sm p-5 flex flex-col cursor-pointer hover:shadow-md transition"
+            >
               <div className="flex items-start gap-3 mb-3">
                 {license.logo_url && (
                   <img src={license.logo_url} alt="" className="h-10 w-10 object-contain flex-shrink-0" />
@@ -81,7 +88,7 @@ export default function Catalog() {
                 </div>
               </div>
               <button
-                onClick={() => setRequesting(license)}
+                onClick={e => { e.stopPropagation(); setRequesting(license) }}
                 className="mt-auto text-sm font-medium bg-brand text-white rounded-lg px-4 py-2 hover:bg-brand-dark transition"
               >
                 Request
