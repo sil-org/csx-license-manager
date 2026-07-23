@@ -468,12 +468,19 @@ begin
     v_license.renewal_month, v_license.renewal_reminder, v_license.price, v_pending_approver, current_profile_id()
   ) returning id into v_sub_id;
 
+  -- Always log the request itself, even when it's about to be auto-approved
+  -- below — otherwise an auto-approved subscription's audit trail starts
+  -- with 'auto_approved' and never shows that a request happened at all.
   insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, notes)
   values (
-    (case when v_status in ('active', 'approved') then 'auto_approved' else 'requested' end)::audit_action,
-    v_sub_id, v_license.name, v_recipient_email, v_audit_suite_key, v_actor_email,
+    'requested', v_sub_id, v_license.name, v_recipient_email, v_audit_suite_key, v_actor_email,
     case when v_recipient_email <> v_actor_email then 'on behalf of ' || v_recipient_email else null end
   );
+
+  if v_status in ('active', 'approved') then
+    insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by)
+    values ('auto_approved', v_sub_id, v_license.name, v_recipient_email, v_audit_suite_key, v_actor_email);
+  end if;
 
   return v_sub_id;
 end;
