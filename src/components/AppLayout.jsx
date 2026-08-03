@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { signOut } from '../lib/auth'
 import { sendEmail, feedbackEmailSubject, feedbackEmailHtml } from '../lib/email'
 import FeedbackWidget from './FeedbackWidget'
+import InstallPrompt from './InstallPrompt'
 
 const FEEDBACK_TO = 'kate_brenner@sil.org'
 
@@ -138,6 +139,8 @@ export default function AppLayout({ appName, links, children }) {
         html: feedbackEmailHtml({ rating, message: comment, userEmail: profile?.primary_email, page: window.location.href }),
         template: 'feedback',
       })} />
+
+      <InstallPrompt />
     </div>
   )
 }

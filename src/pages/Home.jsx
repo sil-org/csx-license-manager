@@ -31,7 +31,7 @@ export default function Home() {
         </button>
 
         <p className="mt-6 text-xs text-gray-400">
-          Restricted to SIL staff. Sign in with your sil.org Google account.
+          Restricted to SIL staff.
         </p>
       </div>
     </div>

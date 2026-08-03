@@ -5,8 +5,9 @@ import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
 import { getAllSubscriptions } from '../../lib/admin'
 import { activateSubscription } from '../../lib/approvals'
+import { resendApprovalRequest } from '../../lib/subscriptions'
 import { supabase } from '../../lib/supabase'
-import { sendEmail, activationEmailSubject, activationEmailHtml } from '../../lib/email'
+import { sendEmail, activationEmailSubject, activationEmailHtml, approvalRequestEmailSubject, approvalRequestEmailHtml } from '../../lib/email'
 import { billingLabel, fyLabel, STATUS_LABEL, STATUS_COLOR } from '../../lib/subscriptionDisplay'
 
 // Each column's sort() returns a directly-comparable value — same pattern as
@@ -31,6 +32,7 @@ export default function AdminAllSubscriptions() {
   const [statusFilter, setStatusFilter] = useState('')
   const [sortKey, setSortKey] = useState('started')
   const [sortDir, setSortDir] = useState('desc')
+  const [resendState, setResendState] = useState({})
 
   function reload() {
     getAllSubscriptions().then(setSubs).catch(e => setError(e.message))
@@ -67,6 +69,28 @@ export default function AdminAllSubscriptions() {
       supabase.functions.invoke('sync-provisioning').catch(err => console.error('provisioning sync kick failed:', err.message))
     } catch (err) {
       setError(err.message)
+    }
+  }
+
+  // Covers the case where a pending request's original owner-notification
+  // email never went out (see request-for-others RLS gap in requestSubscription()).
+  async function handleResendApproval(sub) {
+    setResendState(s => ({ ...s, [sub.id]: 'sending' }))
+    try {
+      const notify = await resendApprovalRequest(sub)
+      if (!notify) throw new Error('SuiteKey has no owner on file')
+      await sendEmail({
+        to: notify.to,
+        bcc: notify.bcc,
+        subject: approvalRequestEmailSubject(notify.suiteKey),
+        html: approvalRequestEmailHtml(notify),
+        template: 'approval_request',
+        subscriptionId: sub.id,
+      })
+      setResendState(s => ({ ...s, [sub.id]: 'sent' }))
+    } catch (err) {
+      console.error('resend approval request failed:', err.message)
+      setResendState(s => ({ ...s, [sub.id]: 'failed' }))
     }
   }
 
@@ -161,6 +185,21 @@ export default function AdminAllSubscriptions() {
                         )}
                         <button onClick={() => handleActivate(sub)} className="text-xs font-medium text-sil-green">Mark active</button>
                       </div>
+                    )}
+                    {sub.status === 'pending' && sub.suite_key && (
+                      resendState[sub.id] === 'sent' ? (
+                        <span className="text-xs text-sil-green">Sent</span>
+                      ) : resendState[sub.id] === 'failed' ? (
+                        <span className="text-xs text-sil-red">Failed — check owner on file</span>
+                      ) : (
+                        <button
+                          onClick={() => handleResendApproval(sub)}
+                          disabled={resendState[sub.id] === 'sending'}
+                          className="text-xs font-medium text-brand disabled:opacity-50"
+                        >
+                          {resendState[sub.id] === 'sending' ? 'Sending…' : 'Resend owner notification'}
+                        </button>
+                      )
                     )}
                   </td>
                 </tr>

@@ -4,7 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>License Manager</title>
-    <link rel="icon" type="image/png" href="/favicon.png?v=2" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
+    <!-- iOS Safari ignores the web manifest for these — has to be explicit
+         HTML, or "Add to Home Screen" opens as a plain bookmark instead of
+         a standalone app. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="License Manager" />
+    <meta name="theme-color" content="#005CB9" />
     <!-- SIL brand font: Source Sans 3 (body/UI). Headlines use Roboto, matching
          the GAS License Manager's actual look — its CSS asked for 'Google Sans'
          first, but that font isn't available outside Google's own properties,

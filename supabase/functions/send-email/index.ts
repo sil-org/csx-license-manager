@@ -10,6 +10,7 @@ interface EmailRequest {
   html: string
   template: string
   subscription_id?: string
+  bcc?: string[]
 }
 
 Deno.serve(async (req) => {
@@ -29,7 +30,7 @@ Deno.serve(async (req) => {
     )
 
     const body: EmailRequest = await req.json()
-    const { to, subject, html, template, subscription_id } = body
+    const { to, subject, html, template, subscription_id, bcc } = body
 
     if (!to || !subject || !html || !template) {
       return json({ error: 'Missing required fields: to, subject, html, template' }, 400)
@@ -42,7 +43,7 @@ Deno.serve(async (req) => {
         'Authorization': `Bearer ${Deno.env.get('RESEND_API_KEY')}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ from: FROM, to, subject, html, reply_to: REPLY_TO }),
+      body: JSON.stringify({ from: FROM, to, subject, html, reply_to: REPLY_TO, ...(bcc?.length ? { bcc } : {}) }),
     })
 
     const resendData = await resendRes.json()

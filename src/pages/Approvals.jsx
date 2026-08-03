@@ -7,6 +7,7 @@ import {
   getPendingSkVerifications, getPendingApprovals, getProvisioningQueue,
   confirmSkOwnership, denySkOwnership, approveSubscription, declineSubscription, activateSubscription,
 } from '../lib/approvals'
+import { getAdminEmails } from '../lib/subscriptions'
 import {
   sendEmail,
   approvalRequestEmailSubject, approvalRequestEmailHtml,
@@ -40,10 +41,12 @@ export default function Approvals() {
     try {
       const advanced = await confirmSkOwnership(suiteKey)
       reload()
+      const bcc = await getAdminEmails()
       for (const sub of advanced || []) {
         try {
           await sendEmail({
             to: profile?.primary_email,
+            bcc,
             subject: approvalRequestEmailSubject(suiteKey),
             html: approvalRequestEmailHtml({ suiteKey, licenseName: sub.license_name, userEmail: sub.user_email }),
             template: 'approval_request',

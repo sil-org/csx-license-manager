@@ -8,7 +8,7 @@ import { billingLabel, fyLabel } from './subscriptionDisplay'
 // on), so emails just point people there instead of carrying a bearer-token
 // link per subscription.
 
-export async function sendEmail({ to, subject, html, template, subscriptionId }) {
+export async function sendEmail({ to, subject, html, template, subscriptionId, bcc }) {
   const { error } = await supabase.functions.invoke('send-email', {
     body: {
       to,
@@ -16,6 +16,7 @@ export async function sendEmail({ to, subject, html, template, subscriptionId })
       html,
       template,
       subscription_id: subscriptionId || null,
+      bcc: bcc?.length ? bcc : undefined,
     },
   })
   if (error) throw error
@@ -25,14 +26,18 @@ function appUrl(path) {
   return `${window.location.origin}${path}`
 }
 
-function wrapEmail(bodyHtml, footer = {
+// `heading` is topic-specific ("SuiteKey Ownership Confirmation", "Seat
+// Provisioning Required", ...) rather than a generic "License Manager"
+// brand line — every template names its own heading now, and "License
+// Manager" only shows up as an inline link where the body text needs it.
+function wrapEmail(heading, bodyHtml, footer = {
   text: 'You can also act on this from',
   path: '/approvals',
   linkText: 'License Manager → Approvals',
 }) {
   return `
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #202124;">
-  <h3 style="color: #005CB9; margin: 0 0 12px;">License Manager</h3>
+  <h2 style="color: #005CB9; margin: 0 0 16px; font-size: 20px;">${heading}</h2>
   ${bodyHtml}
   <p style="color: #666666; font-size: 12px; margin-top: 24px;">
     ${footer.text}
@@ -50,22 +55,44 @@ function detailsTable(rows) {
   return `<table style="border-collapse:collapse;width:100%;font-size:14px;margin:16px 0">${trs}</table>`
 }
 
+// Big pill-style call-to-action link(s), styled like buttons — every href
+// still routes through the app's own sign-in (see the module comment up
+// top), so these are a visual affordance, not a bearer-token shortcut.
+// `color`: 'green' | 'red' | 'blue' (default).
+function ctaButtons(buttons) {
+  const colors = { green: '#1e8e3e', red: '#D52227', blue: '#005CB9' }
+  const items = buttons.map(b => `
+    <a href="${b.href}" style="background:${colors[b.color] || colors.blue};color:#ffffff;padding:12px 22px;
+       border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block;margin:4px 10px 4px 0;
+       font-size:14px">${b.label}</a>`).join('')
+  return `<div style="margin:20px 0">${items}</div>`
+}
+
 export function skVerificationEmailSubject(suiteKey) {
   return `Action Required: SuiteKey Ownership Confirmation — ${suiteKey}`
 }
 
 export function skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail, recipientEmail }) {
-  return wrapEmail(`
-    <p>You've been identified as the potential owner of SuiteKey <strong>${suiteKey}</strong>.
-       A license request has been submitted against it and needs your confirmation before it can proceed.</p>
+  return wrapEmail('SuiteKey Ownership Confirmation', `
+    <p>You've been identified as the potential owner of SuiteKey <strong>${suiteKey}</strong> in
+       <a href="${appUrl('/')}" style="color:#005CB9">License Manager</a>. A license request has been
+       submitted against this SuiteKey and requires your confirmation before it can proceed.</p>
     ${detailsTable([
       ['SuiteKey', `<strong>${suiteKey}</strong>`],
       ['License', licenseName],
-      ['Requested by', requesterEmail],
+      ['Requested by', `<a href="mailto:${requesterEmail}" style="color:#005CB9">${requesterEmail}</a>`],
       ...(recipientEmail && recipientEmail !== requesterEmail ? [['License is for', recipientEmail]] : []),
     ])}
-    <p>Sign in to <a href="${appUrl('/approvals')}" style="color:#005CB9">License Manager &rarr; Approvals</a>
-       to confirm or deny that you manage this SuiteKey.</p>
+    <p>Are you the budget manager for SuiteKey <strong>${suiteKey}</strong>?</p>
+    ${ctaButtons([
+      { label: '✓ Yes, I manage this SuiteKey', href: appUrl('/approvals'), color: 'green' },
+      { label: '✗ No, I don’t manage it', href: appUrl('/approvals'), color: 'red' },
+    ])}
+    <p style="font-size:13px;color:#666666">
+      Sign in to confirm either way — if you confirm ownership, you'll be registered as the SuiteKey
+      owner and immediately asked to approve or decline this specific license request. If you're not
+      the right person, choose "No" and the requester will be notified to resubmit with the correct approver.
+    </p>
   `)
 }
 
@@ -74,16 +101,19 @@ export function approvalRequestEmailSubject(suiteKey) {
 }
 
 export function approvalRequestEmailHtml({ suiteKey, licenseName, userEmail, recipientEmail }) {
-  return wrapEmail(`
+  return wrapEmail('License Request Needs Your Approval', `
     <p>A software license has been requested against your SuiteKey and needs your approval.</p>
     ${detailsTable([
       ['SuiteKey', `<strong>${suiteKey}</strong>`],
       ['License', licenseName],
-      ['Requested by', userEmail],
+      ['Requested by', `<a href="mailto:${userEmail}" style="color:#005CB9">${userEmail}</a>`],
       ...(recipientEmail && recipientEmail !== userEmail ? [['License is for', recipientEmail]] : []),
     ])}
-    <p>Sign in to <a href="${appUrl('/approvals')}" style="color:#005CB9">License Manager &rarr; Approvals</a>
-       to approve or decline this request.</p>
+    ${ctaButtons([
+      { label: '✓ Approve', href: appUrl('/approvals'), color: 'green' },
+      { label: '✗ Decline', href: appUrl('/approvals'), color: 'red' },
+    ])}
+    <p style="font-size:13px;color:#666666">Sign in to complete either action on the Approvals page.</p>
   `)
 }
 
@@ -92,13 +122,15 @@ export function suiteKeyAssignedEmailSubject(suiteKey) {
 }
 
 export function suiteKeyAssignedEmailHtml({ suiteKey, pendingCount }) {
-  return wrapEmail(`
-    <p>An admin has registered you as the budget owner for SuiteKey <strong>${suiteKey}</strong> in License Manager.</p>
+  return wrapEmail('You’re Now a SuiteKey Owner', `
+    <p>An admin has registered you as the budget owner for SuiteKey <strong>${suiteKey}</strong> in
+       <a href="${appUrl('/')}" style="color:#005CB9">License Manager</a>.</p>
     ${pendingCount > 0 ? `
     <p>${pendingCount} request${pendingCount === 1 ? ' is' : 's are'} already waiting on your approval.</p>
-    ` : ''}
-    <p>Sign in to <a href="${appUrl('/approvals')}" style="color:#005CB9">License Manager &rarr; Approvals</a>
-       any time you have requests to review.</p>
+    ${ctaButtons([{ label: 'Review Requests', href: appUrl('/approvals'), color: 'blue' }])}
+    ` : `
+    <p style="font-size:13px;color:#666666">Sign in any time you have requests to review.</p>
+    `}
   `)
 }
 
@@ -118,13 +150,14 @@ export function activationEmailHtml({ sub, licenseName, onboardingMessage }) {
     ? onboardingMessage
     : `Your <strong>${licenseName}</strong> account has been set up and is ready to use.`
   const fy = fyLabel(sub)
-  return wrapEmail(`
+  return wrapEmail('Your License Is Ready', `
     <p>${intro}</p>
     ${detailsTable([
       ['License', licenseName],
       ['Billing', billingLabel(sub)],
       ...(fy ? [['Fiscal Year', fy]] : []),
     ])}
+    ${ctaButtons([{ label: 'View My Subscriptions', href: appUrl('/subscriptions'), color: 'blue' }])}
     <p style="font-size:13px;color:#666666">Questions? Contact the License Manager team.</p>
   `, { text: 'View your subscriptions at', path: '/subscriptions', linkText: 'License Manager → My Subscriptions' })
 }
@@ -139,7 +172,7 @@ export function approvedPendingEmailSubject(licenseName) {
 // they don't have access yet.
 export function approvedPendingEmailHtml({ sub, licenseName }) {
   const fy = fyLabel(sub)
-  return wrapEmail(`
+  return wrapEmail('Request Approved — Setup in Progress', `
     <p>Your request for <strong>${licenseName}</strong> has been approved.</p>
     <p>The License Manager team is now setting up your account. You'll receive another email
        once your access is ready — this may take a few business days.</p>
@@ -171,8 +204,7 @@ export function provisioningRequiredEmailHtml({ sub, licenseName, activationUrl,
            Automatic API provisioning failed for this seat — please provision it manually.
          </div>`
       : `<p>A subscription has been approved and is waiting for you to provision the seat on the vendor side.</p>`
-  return wrapEmail(`
-    <h3 style="color:#005CB9;margin:0 0 12px">Seat Provisioning Required</h3>
+  return wrapEmail('Seat Provisioning Required', `
     ${status}
     ${detailsTable([
       ['User', sub.user_email],
@@ -180,11 +212,10 @@ export function provisioningRequiredEmailHtml({ sub, licenseName, activationUrl,
       ['Billing', billingLabel(sub)],
       ...(fy ? [['Fiscal Year', fy]] : []),
     ])}
-    ${activationUrl ? `
-    <p style="margin:20px 0">
-      <a href="${activationUrl}" style="background:#005CB9;color:#fff;padding:12px 24px;border-radius:4px;
-         text-decoration:none;font-weight:bold;display:inline-block">Open Vendor Portal &rarr;</a>
-    </p>` : ''}
+    ${ctaButtons([
+      ...(activationUrl ? [{ label: 'Open Vendor Portal →', href: activationUrl, color: 'blue' }] : []),
+      { label: 'Mark Active', href: appUrl('/approvals'), color: 'green' },
+    ])}
     <p style="color:#666666;font-size:13px">Once the seat is provisioned, mark it as activated from Approvals — the user will be notified automatically.</p>
   `)
 }
@@ -194,7 +225,7 @@ export function skOwnershipDeniedEmailSubject(licenseName) {
 }
 
 export function skOwnershipDeniedEmailHtml({ suiteKey, licenseName }) {
-  return wrapEmail(`
+  return wrapEmail('License Request Declined', `
     <p>Your request for <strong>${licenseName}</strong> has been declined.</p>
     <div style="background:#fce8e6;border-left:4px solid #D52227;border-radius:4px;padding:10px 14px;margin:16px 0;font-size:14px">
       The person we asked to confirm ownership of SuiteKey <strong>${suiteKey}</strong> indicated they don't manage it.
@@ -213,7 +244,7 @@ export function decisionApprovedEmailSubject(licenseName) {
 // email — see approvedPendingEmailHtml above.
 export function decisionApprovedEmailHtml({ sub, licenseName }) {
   const fy = fyLabel(sub)
-  return wrapEmail(`
+  return wrapEmail('License Request Approved', `
     <p>Your request for <strong>${licenseName}</strong> has been approved. Your subscription is now active.</p>
     ${detailsTable([
       ['License', licenseName],
@@ -233,7 +264,7 @@ export function declinedEmailSubject(licenseName) {
 // the optional free-text notes decline_subscription() was called with.
 export function declinedEmailHtml({ sub, licenseName, performedBy, reason }) {
   const fy = fyLabel(sub)
-  return wrapEmail(`
+  return wrapEmail('License Request Declined', `
     <p>Your request for <strong>${licenseName}</strong> has been declined.</p>
     ${reason ? `
     <div style="background:#fce8e6;border-left:4px solid #D52227;border-radius:4px;padding:10px 14px;margin:16px 0;font-size:14px">
@@ -260,7 +291,7 @@ export function revokedEmailSubject(licenseName) {
 // subscription.
 export function revokedEmailHtml({ sub, licenseName, performedBy, reason }) {
   const fy = fyLabel(sub)
-  return wrapEmail(`
+  return wrapEmail('License Subscription Revoked', `
     <p>Your subscription to <strong>${licenseName}</strong> has been revoked by <a href="mailto:${performedBy}" style="color:#005CB9">${performedBy}</a>.</p>
     ${reason ? `
     <div style="background:#fce8e6;border-left:4px solid #D52227;border-radius:4px;padding:10px 14px;margin:16px 0;font-size:14px">
@@ -289,7 +320,7 @@ const RATING_LABELS = { 1: 'Very unhappy', 2: 'Unhappy', 3: 'Neutral', 4: 'Happy
 // escaped so a pasted `<` or stray quote can't break the layout (or worse)
 // in the recipient's inbox.
 export function feedbackEmailHtml({ rating, message, userEmail, page }) {
-  return wrapEmail(`
+  return wrapEmail('License Manager Feedback', `
     ${message ? `<p style="white-space:pre-wrap">${escapeHtml(message)}</p>` : ''}
     ${detailsTable([
       ['Rating', rating ? `${rating}/5 (${RATING_LABELS[rating]})` : 'not given'],

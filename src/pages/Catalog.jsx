@@ -148,6 +148,7 @@ async function notifyForRequest({ notify, id, suiteKey, licenseName, requesterEm
       } else if (n.type === 'approval_request') {
         await sendEmail({
           to: n.to,
+          bcc: n.bcc,
           subject: approvalRequestEmailSubject(suiteKey),
           html: approvalRequestEmailHtml({ suiteKey, licenseName, userEmail: requesterEmail, recipientEmail }),
           template: 'approval_request',

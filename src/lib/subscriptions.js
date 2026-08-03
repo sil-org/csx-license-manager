@@ -1,5 +1,10 @@
 import { supabase } from './supabase'
 
+export async function getAdminEmails() {
+  const { data } = await supabase.rpc('get_admin_emails')
+  return data || []
+}
+
 export async function getMySubscriptions(email) {
   const { data, error } = await supabase
     .from('subscriptions')
@@ -21,8 +26,7 @@ export async function buildProvisioningNotifications(sub) {
 
   let recipients = sub.license.service_manager_email ? [sub.license.service_manager_email] : []
   if (!recipients.length) {
-    const { data } = await supabase.rpc('get_admin_emails')
-    recipients = data || []
+    recipients = await getAdminEmails()
   }
   // send-email only accepts a single address per call (and logs one email_log
   // row per send) — one notification per recipient rather than joining into
@@ -69,12 +73,42 @@ export async function requestSubscription({ licenseId, suiteKey, suggestedApprov
     const { data } = await supabase.rpc('get_suite_key_owner', { p_suite_key: sub.suite_key })
     const owner = data?.[0]
     const to = owner?.owner_group_email || owner?.owner_email
-    if (to) notify = [{ type: 'approval_request', to }]
+    // BCC admins so a request never goes unseen just because the owner's copy
+    // bounced/was missed (e.g. out of office) — see the request-for-others
+    // RLS gap that made this happen silently in the first place.
+    if (to) notify = [{ type: 'approval_request', to, bcc: await getAdminEmails() }]
   } else if (sub.status === 'approved') {
     notify = await buildProvisioningNotifications(sub)
   }
 
   return { id, status: sub.status, notify }
+}
+
+// Re-sends the 'approval_request' owner email for an already-pending
+// subscription — use when the original request-time notification never went
+// out (e.g. the requester's session couldn't read back the row they'd just
+// created to figure out who to email — see request-for-others RLS gap).
+// Admin callers already have full row access, so this only needs the owner
+// lookup and the original requester's email off the audit trail.
+export async function resendApprovalRequest(sub) {
+  const { data: ownerRows } = await supabase.rpc('get_suite_key_owner', { p_suite_key: sub.suite_key })
+  const owner = ownerRows?.[0]
+  const to = owner?.owner_group_email || owner?.owner_email
+  if (!to) return null
+
+  const { data: auditRows } = await supabase
+    .from('audit_log')
+    .select('performed_by')
+    .eq('subscription_id', sub.id)
+    .eq('action', 'requested')
+    .order('created_at', { ascending: false })
+    .limit(1)
+  const requesterEmail = auditRows?.[0]?.performed_by || sub.user_email
+
+  return {
+    type: 'approval_request', to, bcc: await getAdminEmails(), suiteKey: sub.suite_key,
+    licenseName: sub.license?.name, requesterEmail, recipientEmail: sub.user_email,
+  }
 }
 
 export async function cancelSubscription(subscriptionId) {
