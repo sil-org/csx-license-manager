@@ -62,6 +62,7 @@ export default function Approvals() {
   }
 
   async function handleDenySk(suiteKey) {
+    if (!confirm(`Deny ownership of SuiteKey ${suiteKey}? Every pending request against it will be declined and the requesters notified.`)) return
     try {
       const declined = await denySkOwnership(suiteKey)
       reload()

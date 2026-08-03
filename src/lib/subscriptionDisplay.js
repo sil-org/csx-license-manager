@@ -22,6 +22,18 @@ export const STATUS_COLOR = {
   cancelled: 'text-gray-400',
 }
 
+// Same palette as STATUS_COLOR, as a pill background+text combo for cards
+// (e.g. My Subscriptions) instead of plain colored text.
+export const STATUS_BADGE = {
+  pending_sk_verification: 'bg-sil-yellow/10 text-sil-yellow',
+  pending: 'bg-sil-yellow/10 text-sil-yellow',
+  approved: 'bg-sil-light-blue/10 text-sil-light-blue',
+  active: 'bg-sil-green/10 text-sil-green',
+  declined: 'bg-sil-red/10 text-sil-red',
+  revoked: 'bg-sil-red/10 text-sil-red',
+  cancelled: 'bg-gray-100 text-gray-400',
+}
+
 export function billingLabel(sub) {
   if (sub.billing_type === 'gtis') return 'GTIS'
   if (sub.billing_type === 'ministry') return `Ministry ID ${sub.ministry_id}`

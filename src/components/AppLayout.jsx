@@ -66,7 +66,10 @@ export default function AppLayout({ appName, links, children }) {
       >
         <div className="px-4 py-4 flex items-center gap-2 border-b border-gray-100">
           <img src="/sil-logo.png" alt="" className="h-6" />
-          <span className="font-display font-bold text-brand text-sm leading-tight">{appName}</span>
+          <div className="leading-tight">
+            <span className="font-display font-bold text-brand text-sm block">{appName}</span>
+            <span className="text-[10px] font-bold text-sil-red uppercase tracking-wide">Beta</span>
+          </div>
         </div>
 
         <div className="flex-1 py-2 flex flex-col overflow-y-auto">
