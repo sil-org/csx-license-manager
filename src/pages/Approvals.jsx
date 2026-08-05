@@ -46,7 +46,7 @@ export default function Approvals() {
           await sendEmail({
             to: profile?.primary_email,
             subject: approvalRequestEmailSubject(suiteKey),
-            html: approvalRequestEmailHtml({ suiteKey, licenseName: sub.license_name, userEmail: sub.user_email }),
+            html: approvalRequestEmailHtml({ suiteKey, licenseName: sub.license_name, userEmail: sub.user_email, moreInfoUrl: sub.more_info_url }),
             template: 'approval_request',
             subscriptionId: sub.id,
           })
@@ -162,7 +162,7 @@ export default function Approvals() {
         await sendEmail({
           to: sub.user_email,
           subject: activationEmailSubject(sub.license?.name),
-          html: activationEmailHtml({ sub, licenseName: sub.license?.name, onboardingMessage: sub.license?.onboarding_message }),
+          html: activationEmailHtml({ sub, licenseName: sub.license?.name, onboardingMessage: sub.license?.onboarding_message, moreInfoUrl: sub.license?.more_info_url }),
           template: 'activation',
           subscriptionId: sub.id,
         })

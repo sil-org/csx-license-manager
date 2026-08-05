@@ -1,5 +1,6 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { cubebackupSync } from './adapters/cubebackup.ts'
+import { googleGroupSync } from './adapters/google-group.ts'
 
 // Reconciles active subscriptions against whatever external vendor system a
 // license is configured to provision (licenses.provisioning_adapter). Same
@@ -27,6 +28,10 @@ import { cubebackupSync } from './adapters/cubebackup.ts'
 // Required secrets (Supabase Edge Function secrets):
 //   CUBEBACKUP_API_KEY   CubeBackup server instance API key (scoped to the
 //                        whole instance, not per-domain)
+//   GOOGLE_SERVICE_ACCOUNT_EMAIL / GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY /
+//   GOOGLE_ADMIN_IMPERSONATE_EMAIL   for the google_group_email pass below
+//                        (see adapters/google-group.ts) — same three secrets
+//                        sync-group-memberships already uses.
 //
 // Scheduling: not automated by this deploy — same posture as
 // sync-group-memberships. See supabase/functions/README.md for how to wire
@@ -57,13 +62,12 @@ Deno.serve(async (req) => {
       .not('provisioning_adapter', 'is', null)
     if (licensesError) throw licensesError
 
-    if (!licenses?.length) {
-      return json({ ok: true, licensesProcessed: 0, message: 'No licenses currently have a provisioning_adapter set.' })
-    }
-
     const summary = []
 
-    for (const license of licenses) {
+    // Below: two independent passes (provisioning_adapter dispatch, then the
+    // google_group_email pass) — neither short-circuits on the other being
+    // empty, since a deployment might only ever use one of the two.
+    for (const license of licenses || []) {
       const adapter = ADAPTERS[license.provisioning_adapter!]
       if (!adapter) {
         summary.push({ license: license.name, error: `Unknown adapter '${license.provisioning_adapter}'` })
@@ -116,6 +120,56 @@ Deno.serve(async (req) => {
       } catch (err) {
         console.error(`Provisioning sync failed for ${license.name}: ${err.message}`)
         summary.push({ license: license.name, error: err.message })
+      }
+    }
+
+    // Second, independent pass: licenses.google_group_email membership sync.
+    // Conceptually separate from the provisioning_adapter dispatch above, not
+    // just mechanically — see adapters/google-group.ts's header comment. This
+    // isn't "how the license gets provisioned," it's an independent group-
+    // membership sync that happens to share this function because it wants
+    // the same trigger cadence (recomputed from active subscriptions, kicked
+    // immediately on activate/cancel). google_group_email is its own
+    // dedicated column (Admin -> Catalog), not one of the dropdown adapters,
+    // and a license can have both set at once (e.g. an adapter-provisioned
+    // vendor seat *and* a Google Group for something unrelated to that seat).
+    // No claim-lock here, unlike the loop above: Google's Members insert/delete
+    // calls are idempotent per-member (a duplicate insert 409s, a duplicate
+    // delete 404s, both treated as success in adapters/google-group.ts), so
+    // two overlapping runs double-hitting one license is harmless — nothing
+    // like CubeBackup's non-idempotent batch endpoint.
+    const { data: groupLicenses, error: groupLicensesError } = await supabase
+      .from('licenses')
+      .select('id, name, google_group_email')
+      .not('google_group_email', 'is', null)
+    if (groupLicensesError) throw groupLicensesError
+
+    for (const license of groupLicenses || []) {
+      try {
+        const { data: subs, error: subsError } = await supabase
+          .from('subscriptions')
+          .select('user_email')
+          .eq('license_id', license.id)
+          .eq('status', 'active')
+        if (subsError) throw subsError
+        const desiredEmails = [...new Set((subs || []).map(s => s.user_email))]
+
+        const result = await googleGroupSync(license.google_group_email!, desiredEmails)
+
+        const logRows = [
+          ...result.enabled.map(email => ({ license_id: license.id, adapter: 'google_group', email, action: 'enabled', status: 'ok' })),
+          ...result.disabled.map(email => ({ license_id: license.id, adapter: 'google_group', email, action: 'disabled', status: 'ok' })),
+          ...result.errors.map(e => ({ license_id: license.id, adapter: 'google_group', email: e.email, action: 'enabled', status: 'failed', error: e.message })),
+        ]
+        if (logRows.length) {
+          const { error: logError } = await supabase.from('provisioning_log').insert(logRows)
+          if (logError) throw logError
+        }
+
+        summary.push({ license: license.name, adapter: 'google_group', enabled: result.enabled.length, disabled: result.disabled.length, errors: result.errors.length })
+      } catch (err) {
+        console.error(`Google Group sync failed for ${license.name}: ${err.message}`)
+        summary.push({ license: license.name, adapter: 'google_group', error: err.message })
       }
     }
 

@@ -97,7 +97,7 @@ export default function AdminSuiteKeys() {
           await sendEmail({
             to: k.pendingApproverEmail,
             subject: approvalRequestEmailSubject(k.suite_key),
-            html: approvalRequestEmailHtml({ suiteKey: k.suite_key, licenseName: sub.license_name, userEmail: sub.user_email }),
+            html: approvalRequestEmailHtml({ suiteKey: k.suite_key, licenseName: sub.license_name, userEmail: sub.user_email, moreInfoUrl: sub.more_info_url }),
             template: 'approval_request',
             subscriptionId: sub.id,
           })

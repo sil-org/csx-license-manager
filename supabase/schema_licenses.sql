@@ -575,7 +575,7 @@ $$;
 drop function if exists confirm_sk_ownership(text);
 
 create or replace function confirm_sk_ownership(p_suite_key text)
-returns table(id uuid, user_email text, license_name text)
+returns table(id uuid, user_email text, license_name text, more_info_url text)
 language plpgsql security definer as $$
 declare v_email text := current_profile_email();
 begin
@@ -596,7 +596,7 @@ begin
     from licenses l
     where s.suite_key = p_suite_key and s.status = 'pending_sk_verification'
       and s.pending_approver_email = v_email and l.id = s.license_id
-    returning s.id, s.user_email, l.name;
+    returning s.id, s.user_email, l.name, l.more_info_url;
 end;
 $$;
 
@@ -618,8 +618,10 @@ $$;
 -- request that happened to share the same suite_key with a different
 -- suggested approver.
 
+drop function if exists admin_confirm_sk_ownership(text, text);
+
 create or replace function admin_confirm_sk_ownership(p_suite_key text, p_owner_email text)
-returns table(id uuid, user_email text, license_name text)
+returns table(id uuid, user_email text, license_name text, more_info_url text)
 language plpgsql security definer as $$
 declare
   v_owner text := nullif(lower(trim(p_owner_email)), '');
@@ -642,7 +644,7 @@ begin
     from licenses l
     where s.suite_key = p_suite_key and s.status = 'pending_sk_verification'
       and s.pending_approver_email = v_owner and l.id = s.license_id
-    returning s.id, s.user_email, l.name;
+    returning s.id, s.user_email, l.name, l.more_info_url;
 end;
 $$;
 
@@ -989,14 +991,13 @@ begin
   set status = 'active', price_at_signup = coalesce(p_price, price_at_signup)
   where id = p_subscription_id;
 
-  insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, notes, ip_address)
-  values (
-    'activated', p_subscription_id, v_license.name, v_sub.user_email, v_sub.suite_key, v_email,
-    case when v_license.google_group_email is not null
-      then 'TODO: add ' || v_sub.user_email || ' to ' || v_license.google_group_email || ' (not automated yet)'
-      else null end,
-    current_client_ip()
-  );
+  -- Google Group membership (when licenses.google_group_email is set) is
+  -- handled asynchronously by sync-provisioning's google_group pass, kicked
+  -- from the same UI action that calls this RPC — see
+  -- supabase/functions/sync-provisioning/adapters/google-group.ts. No
+  -- special note needed here, same as every other automated adapter.
+  insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, ip_address)
+  values ('activated', p_subscription_id, v_license.name, v_sub.user_email, v_sub.suite_key, v_email, current_client_ip());
 end;
 $$;
 

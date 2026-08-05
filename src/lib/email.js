@@ -31,8 +31,13 @@ export async function sendEmail({ to, subject, html, template, subscriptionId, b
   if (error) throw error
 }
 
+// Always the production host, regardless of where the email was actually
+// sent from (e.g. a dev's localhost) — a recipient clicking a link in their
+// inbox should never land on someone's local dev server.
+const APP_ORIGIN = 'https://licensemanager.sil.org'
+
 function appUrl(path) {
-  return `${window.location.origin}${path}`
+  return `${APP_ORIGIN}${path}`
 }
 
 // `heading` is topic-specific ("SuiteKey Ownership Confirmation", "Seat
@@ -109,7 +114,7 @@ export function approvalRequestEmailSubject(suiteKey) {
   return `Action Required: License request for SuiteKey ${suiteKey}`
 }
 
-export function approvalRequestEmailHtml({ suiteKey, licenseName, userEmail, recipientEmail }) {
+export function approvalRequestEmailHtml({ suiteKey, licenseName, userEmail, recipientEmail, moreInfoUrl }) {
   return wrapEmail('License Request Needs Your Approval', `
     <p>A software license has been requested against your SuiteKey and needs your approval.</p>
     ${detailsTable([
@@ -117,6 +122,7 @@ export function approvalRequestEmailHtml({ suiteKey, licenseName, userEmail, rec
       ['License', licenseName],
       ['Requested by', `<a href="mailto:${userEmail}" style="color:#005CB9">${userEmail}</a>`],
       ...(recipientEmail && recipientEmail !== userEmail ? [['License is for', recipientEmail]] : []),
+      ...(moreInfoUrl ? [['More info', `<a href="${moreInfoUrl}" style="color:#005CB9">${moreInfoUrl}</a>`]] : []),
     ])}
     ${ctaButtons([
       { label: '✓ Approve', href: appUrl('/approvals'), color: 'green' },
@@ -154,7 +160,7 @@ export function activationEmailSubject(licenseName) {
 // falls back to a generic default if the license doesn't have one set. FY is
 // only shown when it's a meaningful concept for this subscription — see
 // src/lib/subscriptionDisplay.js.
-export function activationEmailHtml({ sub, licenseName, onboardingMessage }) {
+export function activationEmailHtml({ sub, licenseName, onboardingMessage, moreInfoUrl }) {
   const intro = onboardingMessage
     ? onboardingMessage
     : `Your <strong>${licenseName}</strong> account has been set up and is ready to use.`
@@ -165,6 +171,7 @@ export function activationEmailHtml({ sub, licenseName, onboardingMessage }) {
       ['License', licenseName],
       ['Billing', billingLabel(sub)],
       ...(fy ? [['Fiscal Year', fy]] : []),
+      ...(moreInfoUrl ? [['More info', `<a href="${moreInfoUrl}" style="color:#005CB9">${moreInfoUrl}</a>`]] : []),
     ])}
     ${ctaButtons([{ label: 'View My Subscriptions', href: appUrl('/subscriptions'), color: 'blue' }])}
     <p style="font-size:13px;color:#666666">Questions? Contact the License Manager team.</p>

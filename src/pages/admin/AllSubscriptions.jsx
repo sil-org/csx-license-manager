@@ -62,7 +62,7 @@ export default function AdminAllSubscriptions() {
         await sendEmail({
           to: sub.user_email,
           subject: activationEmailSubject(sub.license?.name),
-          html: activationEmailHtml({ sub, licenseName: sub.license?.name, onboardingMessage: sub.license?.onboarding_message }),
+          html: activationEmailHtml({ sub, licenseName: sub.license?.name, onboardingMessage: sub.license?.onboarding_message, moreInfoUrl: sub.license?.more_info_url }),
           template: 'activation',
           subscriptionId: sub.id,
         })
