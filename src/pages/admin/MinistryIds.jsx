@@ -76,25 +76,38 @@ export default function AdminMinistryIds() {
           <p className="text-gray-400 mb-4">No Ministry IDs match "{search}".</p>
         )}
 
-        <div className="bg-white rounded-xl shadow-sm divide-y">
-          {visibleIds?.map(m => (
-            <div key={m.email} className="p-4 flex items-center justify-between">
-              <div>
-                <p className="font-medium text-brand">{m.email}</p>
-                <p className="text-xs text-gray-400">Ministry ID {m.ministry_id}</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setEditing({ ...m, isNew: false, _originalEmail: m.email })}
-                  className="text-xs font-medium text-brand"
-                >
-                  Edit
-                </button>
-                <button onClick={() => handleRemove(m.email)} className="text-xs font-medium text-sil-red">Remove</button>
-              </div>
-            </div>
-          ))}
-        </div>
+        {visibleIds?.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-gray-400 border-b">
+                <tr>
+                  <th className="p-3 font-semibold uppercase text-xs tracking-wide">Email</th>
+                  <th className="p-3 font-semibold uppercase text-xs tracking-wide">Ministry ID</th>
+                  <th className="p-3"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {visibleIds.map(m => (
+                  <tr key={m.email}>
+                    <td className="p-3 font-medium text-brand">{m.email}</td>
+                    <td className="p-3 text-gray-500">{m.ministry_id}</td>
+                    <td className="p-3">
+                      <div className="flex items-center justify-end gap-3 whitespace-nowrap">
+                        <button
+                          onClick={() => setEditing({ ...m, isNew: false, _originalEmail: m.email })}
+                          className="text-xs font-medium text-brand"
+                        >
+                          Edit
+                        </button>
+                        <button onClick={() => handleRemove(m.email)} className="text-xs font-medium text-sil-red">Remove</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {editing && (

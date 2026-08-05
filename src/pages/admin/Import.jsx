@@ -196,6 +196,12 @@ function ImportSection({ title, description, previewColumns, rowLabel, parse, do
   )
 }
 
+// The GAS historical backfill (Licenses -> Subscriptions -> Audit Log) has
+// already been run to completion — flip this back on if a one-off historical
+// correction ever needs it again, rather than re-adding the sections from
+// scratch.
+const SHOW_GAS_IMPORT = false
+
 export default function AdminImport() {
   return (
     <AppLayout appName="License Manager" links={getLinks()}>
@@ -203,38 +209,41 @@ export default function AdminImport() {
         <AdminTabs />
         <h1 className="font-display text-2xl font-bold text-brand mb-2">Import</h1>
         <p className="text-sm text-gray-500 mb-6">
-          One-time historical backfill from the GAS project, plus a quick manual-entry importer. Run
-          the GAS sections in order — Licenses, then Subscriptions, then Audit Log — since each later
-          one depends on the previous. Every row is safe to re-import: already-imported rows (matched
-          by the GAS sheet's own ID) are skipped, not duplicated or overwritten.
+          {SHOW_GAS_IMPORT
+            ? "One-time historical backfill from the GAS project, plus a quick manual-entry importer. Run the GAS sections in order — Licenses, then Subscriptions, then Audit Log — since each later one depends on the previous. Every row is safe to re-import: already-imported rows (matched by the GAS sheet's own ID) are skipped, not duplicated or overwritten."
+            : 'Quick manual-entry importer for already-active subscriptions.'}
         </p>
 
-        <ImportSection
-          title="GAS: Licenses"
-          description={'Upload the GAS "Licenses" sheet export as-is (CSV). Column order matters — headers are ignored.'}
-          previewColumns={['legacy_id', 'name', 'vendor', 'billing_cycle', 'active']}
-          rowLabel={row => row.name}
-          parse={parseGasLicenses}
-          doImport={importLicenses}
-        />
+        {SHOW_GAS_IMPORT && (
+          <>
+            <ImportSection
+              title="GAS: Licenses"
+              description={'Upload the GAS "Licenses" sheet export as-is (CSV). Column order matters — headers are ignored.'}
+              previewColumns={['legacy_id', 'name', 'vendor', 'billing_cycle', 'active']}
+              rowLabel={row => row.name}
+              parse={parseGasLicenses}
+              doImport={importLicenses}
+            />
 
-        <ImportSection
-          title="GAS: Subscriptions (full history)"
-          description={'Upload the GAS "Subscriptions" sheet export as-is (CSV). Preserves each row’s real historical status — run the Licenses import first.'}
-          previewColumns={['legacy_id', 'user_email', 'license_name', 'status', 'fy']}
-          rowLabel={row => `${row.user_email} · ${row.license_name}`}
-          parse={parseGasSubscriptions}
-          doImport={importSubscriptionsFull}
-        />
+            <ImportSection
+              title="GAS: Subscriptions (full history)"
+              description={'Upload the GAS "Subscriptions" sheet export as-is (CSV). Preserves each row’s real historical status — run the Licenses import first.'}
+              previewColumns={['legacy_id', 'user_email', 'license_name', 'status', 'fy']}
+              rowLabel={row => `${row.user_email} · ${row.license_name}`}
+              parse={parseGasSubscriptions}
+              doImport={importSubscriptionsFull}
+            />
 
-        <ImportSection
-          title="GAS: Audit Log"
-          description={'Upload the GAS "AuditLog" sheet export as-is (CSV). Run the Subscriptions import first so each row can link back to its subscription.'}
-          previewColumns={['legacy_id', 'timestamp', 'action', 'user_email', 'performed_by']}
-          rowLabel={row => `${row.timestamp} · ${row.action} · ${row.user_email}`}
-          parse={parseGasAuditLog}
-          doImport={importAuditLog}
-        />
+            <ImportSection
+              title="GAS: Audit Log"
+              description={'Upload the GAS "AuditLog" sheet export as-is (CSV). Run the Subscriptions import first so each row can link back to its subscription.'}
+              previewColumns={['legacy_id', 'timestamp', 'action', 'user_email', 'performed_by']}
+              rowLabel={row => `${row.timestamp} · ${row.action} · ${row.user_email}`}
+              parse={parseGasAuditLog}
+              doImport={importAuditLog}
+            />
+          </>
+        )}
 
         <ImportSection
           title="Quick subscription import"

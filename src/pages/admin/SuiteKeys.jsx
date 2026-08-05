@@ -12,7 +12,11 @@ import {
 const BLANK = { suite_key: '', owner_email: '', owner_group_email: '', description: '' }
 
 const STATUS_LABEL = { unassigned: 'Unassigned', pending: 'Pending verification', confirmed: 'Confirmed' }
-const STATUS_COLOR = { unassigned: 'text-gray-400', pending: 'text-sil-yellow', confirmed: 'text-sil-green' }
+const STATUS_PILL = {
+  unassigned: 'bg-gray-100 text-gray-400',
+  pending: 'bg-sil-yellow/10 text-sil-yellow',
+  confirmed: 'bg-sil-green/10 text-sil-green',
+}
 
 export default function AdminSuiteKeys() {
   const [keys, setKeys] = useState(null)
@@ -159,7 +163,7 @@ export default function AdminSuiteKeys() {
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search by SuiteKey, description, or owner…"
+            placeholder="Filter by SuiteKey, owner, or description…"
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
           />
         )}
@@ -167,41 +171,60 @@ export default function AdminSuiteKeys() {
           <p className="text-gray-400 mb-4">No SuiteKeys match "{search}".</p>
         )}
 
-        <div className="bg-white rounded-xl shadow-sm divide-y">
-          {visibleKeys?.map(k => (
-            <div key={k.suite_key} className="p-4 flex items-center justify-between">
-              <div>
-                <p className="font-medium text-brand">{k.suite_key}</p>
-                <p className="text-xs text-gray-400">{k.description || 'No description'}</p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {k.owner_group_email ? `Group: ${k.owner_group_email}` : k.owner_email || 'No owner assigned'}
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className={`text-xs font-medium ${STATUS_COLOR[k.status]}`}>{STATUS_LABEL[k.status]}</span>
-                {k.status === 'pending' && k.pendingApproverEmail && (
-                  <button
-                    onClick={() => handleQuickConfirm(k)}
-                    className="text-xs font-medium text-sil-green"
-                    title={`Confirm ${k.pendingApproverEmail} as owner without opening the edit form`}
-                  >
-                    Confirm as {k.pendingApproverEmail}
-                  </button>
-                )}
-                <button onClick={() => openEdit(k)} className="text-xs font-medium text-brand">Edit</button>
-                {!k.owner_email && !k.owner_group_email && (
-                  <button
-                    onClick={() => handleMerge(k)}
-                    className="text-xs font-medium text-gray-400"
-                    title="Fix a typo — repoint this key's requests onto the correct SuiteKey and remove this one"
-                  >
-                    Merge into…
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+        {visibleKeys?.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-gray-400 border-b">
+                <tr>
+                  <th className="p-3 font-semibold uppercase text-xs tracking-wide">SuiteKey</th>
+                  <th className="p-3 font-semibold uppercase text-xs tracking-wide">Ownership</th>
+                  <th className="p-3 font-semibold uppercase text-xs tracking-wide">Description</th>
+                  <th className="p-3 font-semibold uppercase text-xs tracking-wide">Owner</th>
+                  <th className="p-3"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {visibleKeys.map(k => (
+                  <tr key={k.suite_key}>
+                    <td className="p-3 font-medium text-brand whitespace-nowrap">{k.suite_key}</td>
+                    <td className="p-3">
+                      <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_PILL[k.status]}`}>
+                        {STATUS_LABEL[k.status]}
+                      </span>
+                    </td>
+                    <td className="p-3 text-gray-500">{k.description || '—'}</td>
+                    <td className="p-3 text-gray-500">
+                      {k.owner_group_email ? `Group: ${k.owner_group_email}` : k.owner_email || '—'}
+                    </td>
+                    <td className="p-3">
+                      <div className="flex items-center justify-end gap-3 whitespace-nowrap">
+                        {k.status === 'pending' && k.pendingApproverEmail && (
+                          <button
+                            onClick={() => handleQuickConfirm(k)}
+                            className="text-xs font-medium text-sil-green"
+                            title={`Confirm ${k.pendingApproverEmail} as owner without opening the edit form`}
+                          >
+                            Confirm as {k.pendingApproverEmail}
+                          </button>
+                        )}
+                        {!k.owner_email && !k.owner_group_email && (
+                          <button
+                            onClick={() => handleMerge(k)}
+                            className="text-xs font-medium text-gray-400"
+                            title="Fix a typo — repoint this key's requests onto the correct SuiteKey and remove this one"
+                          >
+                            Merge into…
+                          </button>
+                        )}
+                        <button onClick={() => openEdit(k)} className="text-xs font-medium text-brand">Edit</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {editing && (
