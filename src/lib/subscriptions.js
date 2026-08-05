@@ -73,10 +73,7 @@ export async function requestSubscription({ licenseId, suiteKey, suggestedApprov
     const { data } = await supabase.rpc('get_suite_key_owner', { p_suite_key: sub.suite_key })
     const owner = data?.[0]
     const to = owner?.owner_group_email || owner?.owner_email
-    // BCC admins so a request never goes unseen just because the owner's copy
-    // bounced/was missed (e.g. out of office) — see the request-for-others
-    // RLS gap that made this happen silently in the first place.
-    if (to) notify = [{ type: 'approval_request', to, bcc: await getAdminEmails() }]
+    if (to) notify = [{ type: 'approval_request', to }]
   } else if (sub.status === 'approved') {
     notify = await buildProvisioningNotifications(sub)
   }
@@ -106,7 +103,7 @@ export async function resendApprovalRequest(sub) {
   const requesterEmail = auditRows?.[0]?.performed_by || sub.user_email
 
   return {
-    type: 'approval_request', to, bcc: await getAdminEmails(), suiteKey: sub.suite_key,
+    type: 'approval_request', to, suiteKey: sub.suite_key,
     licenseName: sub.license?.name, requesterEmail, recipientEmail: sub.user_email,
   }
 }

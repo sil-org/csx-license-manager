@@ -7,7 +7,6 @@ import {
   getPendingSkVerifications, getPendingApprovals, getProvisioningQueue,
   confirmSkOwnership, denySkOwnership, approveSubscription, declineSubscription, activateSubscription,
 } from '../lib/approvals'
-import { getAdminEmails } from '../lib/subscriptions'
 import {
   sendEmail,
   approvalRequestEmailSubject, approvalRequestEmailHtml,
@@ -25,6 +24,7 @@ export default function Approvals() {
   const [approvals, setApprovals] = useState(null)
   const [provisioning, setProvisioning] = useState(null)
   const [error, setError] = useState(null)
+  const [priceInputs, setPriceInputs] = useState({})
 
   function reload() {
     getPendingSkVerifications().then(setVerifications).catch(e => setError(e.message))
@@ -41,12 +41,10 @@ export default function Approvals() {
     try {
       const advanced = await confirmSkOwnership(suiteKey)
       reload()
-      const bcc = await getAdminEmails()
       for (const sub of advanced || []) {
         try {
           await sendEmail({
             to: profile?.primary_email,
-            bcc,
             subject: approvalRequestEmailSubject(suiteKey),
             html: approvalRequestEmailHtml({ suiteKey, licenseName: sub.license_name, userEmail: sub.user_email }),
             template: 'approval_request',
@@ -131,7 +129,7 @@ export default function Approvals() {
   // decline_subscription() takes an optional free-text reason, shown in the
   // requester's email if given — mirrors GAS's declineSubscription(id, reason).
   async function handleDecline(sub) {
-    const reason = window.prompt(`Decline ${sub.license?.name} for ${sub.user_email}? Optionally add a reason (shown to them):`)
+    const reason = window.prompt(`Decline ${sub.license_name} for ${sub.user_email}? Optionally add a reason (shown to them):`)
     if (reason === null) return
     try {
       const notify = await declineSubscription(sub.id, reason)
@@ -155,8 +153,10 @@ export default function Approvals() {
   }
 
   async function handleActivate(sub) {
+    const priceInput = priceInputs[sub.id]
+    const price = priceInput?.trim() ? Number(priceInput) : null
     try {
-      await activateSubscription(sub.id)
+      await activateSubscription(sub.id, price)
       reload()
       try {
         await sendEmail({
@@ -194,7 +194,7 @@ export default function Approvals() {
         {verifications?.length > 0 && (
           <Section title="SuiteKey verification needed">
             {verifications.map(sub => (
-              <Row key={sub.id} title={sub.license?.name} sub={`SuiteKey ${sub.suite_key} · ${sub.user_email}`}>
+              <Row key={sub.id} title={sub.license_name} sub={`SuiteKey ${sub.suite_key} · ${sub.user_email}`}>
                 <button onClick={() => handleConfirmSk(sub.suite_key)} className="text-xs font-medium text-sil-green">Confirm ownership</button>
                 <button onClick={() => handleDenySk(sub.suite_key)} className="text-xs font-medium text-sil-red">Deny</button>
               </Row>
@@ -205,7 +205,7 @@ export default function Approvals() {
         {approvals?.length > 0 && (
           <Section title="Pending approvals">
             {approvals.map(sub => (
-              <Row key={sub.id} title={sub.license?.name} sub={`${sub.user_email} · ${sub.suite_key}`}>
+              <Row key={sub.id} title={sub.license_name} sub={`${sub.user_email} · ${sub.suite_key}`}>
                 <button onClick={() => handleApprove(sub)} className="text-xs font-medium text-sil-green">Approve</button>
                 <button onClick={() => handleDecline(sub)} className="text-xs font-medium text-sil-red">Decline</button>
               </Row>
@@ -218,6 +218,12 @@ export default function Approvals() {
             {provisioning.map(sub => (
               <Row key={sub.id} title={sub.license?.name} sub={sub.user_email}>
                 <a href={sub.license?.activation_url} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand">Open vendor portal</a>
+                <input
+                  type="number" step="0.01" min="0" placeholder="Price paid"
+                  value={priceInputs[sub.id] ?? ''}
+                  onChange={e => setPriceInputs(p => ({ ...p, [sub.id]: e.target.value }))}
+                  className="w-24 border border-gray-300 rounded-lg px-2 py-1 text-xs"
+                />
                 <button onClick={() => handleActivate(sub)} className="text-xs font-medium text-sil-green">Mark active</button>
               </Row>
             ))}

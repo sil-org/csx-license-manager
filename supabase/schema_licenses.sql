@@ -25,28 +25,47 @@
 
 -- ─── ENUMS ───────────────────────────────────────────────────────────────────
 
-create type subscription_status as enum (
-  'pending_sk_verification', 'pending', 'approved', 'active',
-  'declined', 'revoked', 'cancelled'
-);
-create type renewal_status as enum ('none', 'opted_in', 'opted_out');
+-- Postgres has no CREATE TYPE IF NOT EXISTS, and this whole file is meant to
+-- be safely re-runnable (it's the living source of truth, re-applied as new
+-- pending/*.sql migrations get folded in) — so each enum is guarded with a
+-- do-block that swallows "already exists" instead of erroring. On a fresh
+-- database these all just create the type normally.
+do $$ begin
+  create type subscription_status as enum (
+    'pending_sk_verification', 'pending', 'approved', 'active',
+    'declined', 'revoked', 'cancelled'
+  );
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type renewal_status as enum ('none', 'opted_in', 'opted_out');
+exception when duplicate_object then null; end $$;
+
 -- renewal_month/renewal_reminder are only meaningful for 'annual' billing.
 -- 'one_time' is for non-recurring purchases (e.g. an OS license bought
 -- outright) and never renews; 'monthly' prorates by day-of-month instead
 -- (see calc_prorated_cost() below) rather than renewing on a calendar month.
 -- Both should be left null/false — nothing enforces that at the DB level,
 -- the admin UI just hides those fields unless 'annual' is selected.
-create type billing_cycle as enum ('annual', 'monthly', 'one_time');
-create type audit_action as enum (
-  'requested', 'auto_approved', 'approved', 'declined',
-  'activated', 'revoked', 'cancelled', 'sk_verified', 'imported', 'sk_merged'
-);
+do $$ begin
+  create type billing_cycle as enum ('annual', 'monthly', 'one_time');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type audit_action as enum (
+    'requested', 'auto_approved', 'approved', 'declined',
+    'activated', 'revoked', 'cancelled', 'sk_verified', 'imported', 'sk_merged'
+  );
+exception when duplicate_object then null; end $$;
+
 -- Which billing path a subscription used. Replaces the original GAS-ported
 -- design of overloading suite_key with the literal strings 'GTIS' /
 -- 'MIN:XXXXXX' — that broke the suite_key FK below, since neither value is
 -- ever a real row in suite_keys. suite_key/ministry_id are only populated
 -- for their matching billing_type; both are null for 'gtis'.
-create type subscription_billing_type as enum ('suite_key', 'gtis', 'ministry');
+do $$ begin
+  create type subscription_billing_type as enum ('suite_key', 'gtis', 'ministry');
+exception when duplicate_object then null; end $$;
 
 -- ─── PROFILE EXTENSIONS ──────────────────────────────────────────────────────
 -- Needed so RPCs below can join subscriptions/licenses (keyed by email) back
@@ -124,6 +143,7 @@ create table if not exists licenses (
   pro_rated            boolean not null default false,
   service_manager_email text,
   onboarding_message   text,   -- overrides the default "your license is ready" activation email body for this license
+  reminder_message     text,   -- overrides the default renewal-reminder card body for this license (weekly digest sender not built yet — see README)
   legacy_id            text,   -- GAS Licenses sheet's ID (e.g. "LIC-XXXXXXXX"), set only by admin_import_licenses()
   created_at           timestamptz not null default now()
 );
@@ -322,23 +342,35 @@ end;
 $$;
 
 -- Policies
+--
+-- Postgres has no CREATE POLICY IF NOT EXISTS either, so each is preceded by
+-- a matching DROP POLICY IF EXISTS (which Postgres does support) — same
+-- re-runnability goal as the enum guards above.
 
+drop policy if exists "suite_keys: owner or admin read" on suite_keys;
 create policy "suite_keys: owner or admin read" on suite_keys for select
   using (is_suite_key_owner(suite_key) or is_admin());
+drop policy if exists "suite_keys: admin write" on suite_keys;
 create policy "suite_keys: admin write" on suite_keys for insert with check (is_admin());
+drop policy if exists "suite_keys: admin update" on suite_keys;
 create policy "suite_keys: admin update" on suite_keys for update using (is_admin());
 
+drop policy if exists "group_memberships: admin read" on group_memberships;
 create policy "group_memberships: admin read" on group_memberships for select using (is_admin());
 -- No client write policy — only sync-group-memberships (service-role key) writes here.
 
+drop policy if exists "ministry_ids: own or admin read" on ministry_ids;
 create policy "ministry_ids: own or admin read" on ministry_ids for select
   using (email = current_profile_email() or is_admin());
 
+drop policy if exists "licenses: read active, or own scope" on licenses;
 create policy "licenses: read active, or own scope" on licenses for select
   using (active or is_admin() or service_manager_email = current_profile_email());
+drop policy if exists "licenses: admin write" on licenses;
 create policy "licenses: admin write" on licenses for all
   using (is_admin()) with check (is_admin());
 
+drop policy if exists "subscriptions: read own or authority" on subscriptions;
 create policy "subscriptions: read own or authority" on subscriptions for select
   using (
     user_email = current_profile_email()
@@ -350,9 +382,11 @@ create policy "subscriptions: read own or authority" on subscriptions for select
 -- All writes go through the security-definer RPCs below, which enforce
 -- status-transition and authority checks themselves; no direct write
 -- policies are needed for non-admins.
+drop policy if exists "subscriptions: admin write" on subscriptions;
 create policy "subscriptions: admin write" on subscriptions for all
   using (is_admin()) with check (is_admin());
 
+drop policy if exists "renewals: read via subscription" on renewals;
 create policy "renewals: read via subscription" on renewals for select
   using (
     exists (
@@ -362,12 +396,16 @@ create policy "renewals: read via subscription" on renewals for select
     )
   );
 
+drop policy if exists "audit_log: admin read all" on audit_log;
 create policy "audit_log: admin read all" on audit_log for select using (is_admin());
+drop policy if exists "audit_log: suite key owner read own" on audit_log;
 create policy "audit_log: suite key owner read own" on audit_log for select
   using (suite_key is not null and is_suite_key_owner(suite_key));
+drop policy if exists "audit_log: user read own" on audit_log;
 create policy "audit_log: user read own" on audit_log for select
   using (user_email = current_profile_email());
 
+drop policy if exists "email_log: admin read" on email_log;
 create policy "email_log: admin read" on email_log for select using (is_admin());
 -- No insert/update policies for authenticated — only the send-email Edge
 -- Function writes here, via the service-role key (which bypasses RLS).
@@ -691,6 +729,35 @@ create or replace function get_admin_emails()
 returns setof text
 language sql stable security definer as $$
   select primary_email from profiles where role = 'admin' and primary_email is not null;
+$$;
+
+-- ─── RPC: get_my_pending_sk_verifications / get_my_pending_approvals ───────────
+-- The Approvals page's "here's what needs MY attention" lists. Deliberately
+-- NOT is_admin()-inclusive, unlike subscriptions' own RLS policy — scoped to
+-- exactly what the next click (confirm_sk_ownership, approve_subscription/
+-- decline_subscription) would actually authorize for a non-admin, so an
+-- admin viewing their own Approvals page doesn't see every pending row
+-- company-wide, only their own. Admins acting on someone else's key have
+-- dedicated tools elsewhere (Admin -> SuiteKeys' quick-confirm, sk-merge).
+
+create or replace function get_my_pending_sk_verifications()
+returns table(id uuid, user_email text, suite_key text, license_name text)
+language sql stable security definer as $$
+  select s.id, s.user_email, s.suite_key, l.name
+  from subscriptions s join licenses l on l.id = s.license_id
+  where s.status = 'pending_sk_verification'
+    and s.pending_approver_email = current_profile_email()
+  order by s.created_at
+$$;
+
+create or replace function get_my_pending_approvals()
+returns table(id uuid, user_email text, suite_key text, license_name text)
+language sql stable security definer as $$
+  select s.id, s.user_email, s.suite_key, l.name
+  from subscriptions s join licenses l on l.id = s.license_id
+  where s.status = 'pending'
+    and is_suite_key_owner(s.suite_key)
+  order by s.created_at
 $$;
 
 -- ─── RPC: admin_update_suite_key_owner ─────────────────────────────────────────
@@ -1050,7 +1117,7 @@ begin
       name, vendor, category, price, price_unit, notes, gtis_sponsored,
       billing_cycle, renewal_month, renewal_reminder, logo_url, activation_url,
       more_info_url, google_group_email, pro_rated, service_manager_email,
-      onboarding_message, created_by
+      onboarding_message, reminder_message, created_by
     ) values (
       p_license->>'name', p_license->>'vendor', p_license->>'category',
       (p_license->>'price')::numeric, p_license->>'price_unit', p_license->>'notes',
@@ -1060,7 +1127,8 @@ begin
       coalesce((p_license->>'renewal_reminder')::boolean, true),
       p_license->>'logo_url', p_license->>'activation_url', p_license->>'more_info_url',
       p_license->>'google_group_email', coalesce((p_license->>'pro_rated')::boolean, false),
-      p_license->>'service_manager_email', nullif(p_license->>'onboarding_message', ''), current_profile_id()
+      p_license->>'service_manager_email', nullif(p_license->>'onboarding_message', ''),
+      nullif(p_license->>'reminder_message', ''), current_profile_id()
     ) returning id into v_id;
   else
     update licenses set
@@ -1074,7 +1142,8 @@ begin
       more_info_url = p_license->>'more_info_url', google_group_email = p_license->>'google_group_email',
       pro_rated = coalesce((p_license->>'pro_rated')::boolean, false),
       service_manager_email = p_license->>'service_manager_email',
-      onboarding_message = nullif(p_license->>'onboarding_message', '')
+      onboarding_message = nullif(p_license->>'onboarding_message', ''),
+      reminder_message = nullif(p_license->>'reminder_message', '')
     where id = v_id;
   end if;
 

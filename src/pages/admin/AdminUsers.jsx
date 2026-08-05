@@ -31,10 +31,13 @@ export default function AdminUsers() {
     }
   }
 
+  // Default view is admins only — this page is for managing who has admin
+  // access, not a staff directory. Searching looks across everyone, though,
+  // so a non-admin can still be found and promoted.
   const q = search.trim().toLowerCase()
-  const visibleProfiles = !q ? profiles : profiles?.filter(p =>
-    p.primary_email.toLowerCase().includes(q) || (p.display_name || '').toLowerCase().includes(q)
-  )
+  const visibleProfiles = !q
+    ? profiles?.filter(p => p.role === 'admin')
+    : profiles?.filter(p => p.primary_email.toLowerCase().includes(q) || (p.display_name || '').toLowerCase().includes(q))
 
   return (
     <AppLayout appName="License Manager" links={getLinks()}>
@@ -62,7 +65,7 @@ export default function AdminUsers() {
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Filter by name or email…"
+            placeholder="Showing admins only — search anyone by name or email to promote them…"
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
           />
         )}

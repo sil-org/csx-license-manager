@@ -4,22 +4,20 @@ import { buildProvisioningNotifications } from './subscriptions'
 // Everything a suite-key owner or service manager might need to act on.
 // RLS already scopes these selects to rows the caller is authorized to see.
 
+// Scoped to what the caller can personally act on next — see
+// get_my_pending_sk_verifications()/get_my_pending_approvals() in
+// supabase/pending/19_scope_approvals_to_owned_keys.sql for why this isn't
+// a plain table select (RLS's own admin bypass would show every pending
+// row company-wide instead of just the caller's own).
+
 export async function getPendingSkVerifications() {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .select('*, license:licenses(name)')
-    .eq('status', 'pending_sk_verification')
-    .order('created_at')
+  const { data, error } = await supabase.rpc('get_my_pending_sk_verifications')
   if (error) throw error
   return data
 }
 
 export async function getPendingApprovals() {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .select('*, license:licenses(name, activation_url)')
-    .eq('status', 'pending')
-    .order('created_at')
+  const { data, error } = await supabase.rpc('get_my_pending_approvals')
   if (error) throw error
   return data
 }

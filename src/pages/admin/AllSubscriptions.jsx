@@ -33,6 +33,7 @@ export default function AdminAllSubscriptions() {
   const [sortKey, setSortKey] = useState('started')
   const [sortDir, setSortDir] = useState('desc')
   const [resendState, setResendState] = useState({})
+  const [priceInputs, setPriceInputs] = useState({})
 
   function reload() {
     getAllSubscriptions().then(setSubs).catch(e => setError(e.message))
@@ -52,8 +53,10 @@ export default function AdminAllSubscriptions() {
   // Mirrors handleActivate() in Approvals.jsx — duplicated rather than shared
   // since that page's version is tied to its own provisioning-queue reload.
   async function handleActivate(sub) {
+    const priceInput = priceInputs[sub.id]
+    const price = priceInput?.trim() ? Number(priceInput) : null
     try {
-      await activateSubscription(sub.id)
+      await activateSubscription(sub.id, price)
       reload()
       try {
         await sendEmail({
@@ -183,6 +186,12 @@ export default function AdminAllSubscriptions() {
                             Open vendor portal
                           </a>
                         )}
+                        <input
+                          type="number" step="0.01" min="0" placeholder="Price paid"
+                          value={priceInputs[sub.id] ?? ''}
+                          onChange={e => setPriceInputs(p => ({ ...p, [sub.id]: e.target.value }))}
+                          className="w-20 border border-gray-300 rounded-lg px-2 py-1 text-xs"
+                        />
                         <button onClick={() => handleActivate(sub)} className="text-xs font-medium text-sil-green">Mark active</button>
                       </div>
                     )}

@@ -178,10 +178,14 @@ async function notifyForRequest({ notify, id, suiteKey, licenseName, requesterEm
 }
 
 function RequestModal({ license, onClose }) {
-  const { profile } = useAuth()
-  const [recipientEmail, setRecipientEmail] = useState(profile?.primary_email || '')
+  const { profile, session } = useAuth()
+  // Falls back to the auth session's email if the profile row hasn't
+  // resolved yet — better than silently emailing "undefined" as the requester.
+  const myEmail = profile?.primary_email || session?.user?.email || ''
+  const [recipientEmail, setRecipientEmail] = useState(myEmail)
   const [mode, setMode] = useState('suite_key') // 'suite_key' | 'ministry_id'
   const [suiteKey, setSuiteKey] = useState('')
+  const [suiteKeyHasOwner, setSuiteKeyHasOwner] = useState(false)
   const [suggestions, setSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestedApproverEmail, setSuggestedApproverEmail] = useState('')
@@ -191,7 +195,7 @@ function RequestModal({ license, onClose }) {
   const [done, setDone] = useState(false)
 
   const fy = new Date().getFullYear()
-  const forSomeoneElse = recipientEmail.trim().toLowerCase() !== (profile?.primary_email || '').toLowerCase()
+  const forSomeoneElse = recipientEmail.trim().toLowerCase() !== myEmail.toLowerCase()
 
   // Debounced typeahead — mirrors GAS's searchSuiteKeys(), which searched
   // every SuiteKey regardless of ownership so requesters don't accidentally
@@ -209,6 +213,8 @@ function RequestModal({ license, onClose }) {
 
   function selectSuggestion(s) {
     setSuiteKey(s.suite_key)
+    setSuiteKeyHasOwner(s.has_owner)
+    if (s.has_owner) setSuggestedApproverEmail('')
     setShowSuggestions(false)
   }
 
@@ -230,7 +236,7 @@ function RequestModal({ license, onClose }) {
         id: result.id,
         suiteKey,
         licenseName: license.name,
-        requesterEmail: profile?.primary_email,
+        requesterEmail: myEmail,
         recipientEmail: recipientEmail.trim(),
       })
       setDone(true)
@@ -319,7 +325,7 @@ function RequestModal({ license, onClose }) {
                       </label>
                       <input
                         value={suiteKey}
-                        onChange={e => setSuiteKey(e.target.value)}
+                        onChange={e => { setSuiteKey(e.target.value); setSuiteKeyHasOwner(false) }}
                         onFocus={() => setShowSuggestions(true)}
                         onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                         required
@@ -348,13 +354,15 @@ function RequestModal({ license, onClose }) {
                         </ul>
                       )}
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Suggested approver email <span className="text-gray-400">(only needed if this is a new SuiteKey)</span>
-                      </label>
-                      <input type="email" value={suggestedApproverEmail} onChange={e => setSuggestedApproverEmail(e.target.value)}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-                    </div>
+                    {!suiteKeyHasOwner && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Suggested approver email <span className="text-gray-400">(only needed if this is a new SuiteKey)</span>
+                        </label>
+                        <input type="email" value={suggestedApproverEmail} onChange={e => setSuggestedApproverEmail(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div>

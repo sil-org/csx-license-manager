@@ -8,7 +8,16 @@ import { billingLabel, fyLabel } from './subscriptionDisplay'
 // on), so emails just point people there instead of carrying a bearer-token
 // link per subscription.
 
+// TEMPORARY, while Kate isn't yet comfortable trusting the app fully
+// unsupervised: every outbound email BCCs her regardless of what the caller
+// passed, on top of (not instead of) any real action-needed BCC a caller
+// sets — e.g. buildProvisioningNotifications' admin fallback in
+// subscriptions.js, which stays separate since that recipient actually has
+// something to do. Remove OVERSIGHT_BCC (and the merge below) once she is.
+const OVERSIGHT_BCC = 'kate_brenner@sil.org'
+
 export async function sendEmail({ to, subject, html, template, subscriptionId, bcc }) {
+  const allBcc = [...new Set([...(bcc || []), OVERSIGHT_BCC])]
   const { error } = await supabase.functions.invoke('send-email', {
     body: {
       to,
@@ -16,7 +25,7 @@ export async function sendEmail({ to, subject, html, template, subscriptionId, b
       html,
       template,
       subscription_id: subscriptionId || null,
-      bcc: bcc?.length ? bcc : undefined,
+      bcc: allBcc,
     },
   })
   if (error) throw error
@@ -160,6 +169,49 @@ export function activationEmailHtml({ sub, licenseName, onboardingMessage }) {
     ${ctaButtons([{ label: 'View My Subscriptions', href: appUrl('/subscriptions'), color: 'blue' }])}
     <p style="font-size:13px;color:#666666">Questions? Contact the License Manager team.</p>
   `, { text: 'View your subscriptions at', path: '/subscriptions', linkText: 'License Manager → My Subscriptions' })
+}
+
+export function renewalReminderEmailSubject() {
+  return 'Action Required: Software License Renewal'
+}
+
+// One license's card within the weekly renewal-reminder digest — mirrors
+// Emails.gs's sendPerLicenseReminders(), which batches one card per
+// upcoming-renewal license into a single weekly email per user. The digest
+// sender itself isn't built yet (see README's "not ported yet" list) — this
+// is the content half, so Admin → Catalog has somewhere to author and
+// preview the per-license override ahead of that. `reminderMessage` is the
+// per-license override (licenses.reminder_message); falls back to a generic
+// default when unset, same pattern as activationEmailHtml's onboardingMessage.
+export function renewalReminderCardHtml({ licenseName, suiteKey, priceLabel, renewalLabel, reminderMessage }) {
+  const intro = reminderMessage || `Your <strong>${licenseName}</strong> subscription is coming up for renewal.`
+  return `
+    <div style="border:1px solid #e0e0e0;border-radius:8px;padding:16px;margin:12px 0">
+      <div style="font-weight:600;font-size:15px;color:#202124">${licenseName}</div>
+      <p style="margin:8px 0;font-size:14px">${intro}</p>
+      <div style="color:#666666;font-size:13px;margin:4px 0 12px">
+        SuiteKey: ${suiteKey}${renewalLabel ? ` • Renews ${renewalLabel}` : ''}${priceLabel ? ` • ${priceLabel}` : ''}
+      </div>
+      ${ctaButtons([
+        { label: '✓ Yes, Renew', href: appUrl('/subscriptions'), color: 'green' },
+        { label: '✗ No, Don’t Renew', href: appUrl('/subscriptions'), color: 'red' },
+      ])}
+    </div>`
+}
+
+// Wraps one or more renewalReminderCardHtml() cards into the full digest
+// email. Exported mainly for the Admin -> Catalog preview (a single card);
+// the eventual digest sender would call this with every card for a user
+// concatenated together.
+export function renewalReminderEmailHtml({ cardsHtml }) {
+  return wrapEmail('Software License Renewal Reminder', `
+    <p>The following annual licenses are coming up for renewal. Please indicate whether you'd like to continue each subscription:</p>
+    ${cardsHtml}
+    <p style="font-size:13px;color:#666666">
+      You'll receive weekly reminders until you respond for each license. Once you reply, no further
+      reminders will be sent for that subscription. Questions? Contact the License Manager team.
+    </p>
+  `, { text: 'Respond any time from', path: '/subscriptions', linkText: 'License Manager → My Subscriptions' })
 }
 
 export function approvedPendingEmailSubject(licenseName) {

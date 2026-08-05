@@ -1,17 +1,23 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
+import { ChevronUp, ChevronDown, ChevronsUpDown, X } from 'lucide-react'
 import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
 import { getAllLicenses, saveLicense, deactivateLicense, reactivateLicense } from '../../lib/licenses'
+import { activationEmailHtml, renewalReminderCardHtml, renewalReminderEmailHtml } from '../../lib/email'
 
 const BLANK = {
   id: null, name: '', vendor: '', category: '', price: '',
   gtis_sponsored: false, billing_cycle: 'annual', renewal_month: 10, renewal_reminder: true,
   activation_url: '', more_info_url: '', logo_url: '', google_group_email: '',
-  pro_rated: false, service_manager_email: '', onboarding_message: '',
+  pro_rated: false, service_manager_email: '', onboarding_message: '', reminder_message: '',
   provisioning_adapter: '', provisioning_config: '',
 }
+
+// Sample data for the Preview buttons in the email-overrides section — no
+// real subscription exists yet while editing a license, so this stands in
+// for one closely enough to render what the real thing would look like.
+const PREVIEW_SUB = { billing_type: 'suite_key', suite_key: 'SAMPLE-001', billing_cycle: 'annual', fy: new Date().getFullYear() }
 
 // Known sync-provisioning adapters (see supabase/functions/sync-provisioning/adapters/).
 // Adding a new one is just another entry here + an adapter file — no other
@@ -53,6 +59,7 @@ export default function AdminCatalog() {
   const [error, setError] = useState(null)
   const [editing, setEditing] = useState(null) // license object, or BLANK for "new"
   const [showLogoInput, setShowLogoInput] = useState(false)
+  const [preview, setPreview] = useState(null) // { title, html } | null
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState('name')
   const [sortDir, setSortDir] = useState('asc')
@@ -141,6 +148,28 @@ export default function AdminCatalog() {
     } catch (err) {
       setError(err.message)
     }
+  }
+
+  function previewOnboarding() {
+    setPreview({
+      title: 'Onboarding email preview',
+      html: activationEmailHtml({
+        sub: PREVIEW_SUB,
+        licenseName: editing.name || 'Sample License',
+        onboardingMessage: editing.onboarding_message || null,
+      }),
+    })
+  }
+
+  function previewReminder() {
+    const card = renewalReminderCardHtml({
+      licenseName: editing.name || 'Sample License',
+      suiteKey: PREVIEW_SUB.suite_key,
+      priceLabel: editing.price ? `$${Number(editing.price).toFixed(2)}/${editing.billing_cycle === 'monthly' ? 'mo' : 'yr'}` : null,
+      renewalLabel: 'October 1, 2026',
+      reminderMessage: editing.reminder_message || null,
+    })
+    setPreview({ title: 'Renewal reminder preview', html: renewalReminderEmailHtml({ cardsHtml: card }) })
   }
 
   const q = search.trim().toLowerCase()
@@ -322,19 +351,41 @@ export default function AdminCatalog() {
                 </label>
               )}
 
-              <label className="block text-sm text-gray-700 col-span-2">
-                Onboarding email override
-                <textarea
-                  value={editing.onboarding_message ?? ''}
-                  onChange={e => setEditing({ ...editing, onboarding_message: e.target.value })}
-                  rows={2}
-                  placeholder="Leave blank to use the default &quot;your license is ready&quot; message"
-                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                />
-                <span className="block text-xs text-gray-400 mt-0.5">
-                  Replaces the default activation email body for this license — e.g. setup steps a generic message wouldn't cover.
-                </span>
-              </label>
+              <details className="col-span-2 border border-gray-200 rounded-lg px-3 py-2">
+                <summary className="text-sm font-medium text-gray-700 cursor-pointer select-none">Email overrides</summary>
+                <div className="mt-3 space-y-4">
+                  <label className="block text-sm text-gray-700">
+                    Onboarding email override
+                    <textarea
+                      value={editing.onboarding_message ?? ''}
+                      onChange={e => setEditing({ ...editing, onboarding_message: e.target.value })}
+                      rows={2}
+                      placeholder="Leave blank to use the default &quot;your license is ready&quot; message"
+                      className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                    <span className="block text-xs text-gray-400 mt-0.5">
+                      Replaces the default activation email body for this license — e.g. setup steps a generic message wouldn't cover.
+                    </span>
+                    <button type="button" onClick={previewOnboarding} className="mt-1 text-xs font-medium text-brand">Preview</button>
+                  </label>
+
+                  <label className="block text-sm text-gray-700">
+                    Renewal reminder override
+                    <textarea
+                      value={editing.reminder_message ?? ''}
+                      onChange={e => setEditing({ ...editing, reminder_message: e.target.value })}
+                      rows={2}
+                      placeholder="Leave blank to use the default renewal-reminder message"
+                      className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                    <span className="block text-xs text-gray-400 mt-0.5">
+                      Replaces the default text in this license's card within the renewal-reminder digest. Content only for
+                      now — the weekly digest itself isn't automated yet (see supabase/schema_licenses.sql notes).
+                    </span>
+                    <button type="button" onClick={previewReminder} className="mt-1 text-xs font-medium text-brand">Preview</button>
+                  </label>
+                </div>
+              </details>
             </div>
 
             <div className="flex items-center justify-between pt-4">
@@ -349,6 +400,20 @@ export default function AdminCatalog() {
               )}
             </div>
           </form>
+        </div>
+      )}
+
+      {preview && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setPreview(null)}>
+          <div className="bg-white rounded-2xl shadow-lg w-full max-w-3xl h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
+              <h3 className="font-semibold text-gray-900 text-sm">{preview.title}</h3>
+              <button type="button" onClick={() => setPreview(null)} aria-label="Close" className="text-gray-400 hover:text-gray-600">
+                <X size={18} />
+              </button>
+            </div>
+            <iframe title="Email preview" srcDoc={preview.html} className="w-full flex-1 rounded-b-2xl" />
+          </div>
         </div>
       )}
     </AppLayout>
