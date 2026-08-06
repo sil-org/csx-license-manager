@@ -273,9 +273,9 @@ export function provisioningRequiredEmailHtml({ sub, licenseName, activationUrl,
     ])}
     ${ctaButtons([
       ...(activationUrl ? [{ label: 'Open Vendor Portal →', href: activationUrl, color: 'blue' }] : []),
-      { label: 'Mark Active', href: appUrl('/approvals'), color: 'green' },
+      { label: 'Mark Active', href: appUrl('/admin/all-subscriptions'), color: 'green' },
     ])}
-    <p style="color:#666666;font-size:13px">Once the seat is provisioned, mark it as activated from Approvals — the user will be notified automatically.</p>
+    <p style="color:#666666;font-size:13px">Once the seat is provisioned, mark it as activated from Subscriptions — the user will be notified automatically.</p>
   `)
 }
 
@@ -369,22 +369,3 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 }
 
-export function feedbackEmailSubject() {
-  return 'License Manager feedback'
-}
-
-const RATING_LABELS = { 1: 'Very unhappy', 2: 'Unhappy', 3: 'Neutral', 4: 'Happy', 5: 'Very happy' }
-
-// Free-text user input, unlike every other field this module emails —
-// escaped so a pasted `<` or stray quote can't break the layout (or worse)
-// in the recipient's inbox.
-export function feedbackEmailHtml({ rating, message, userEmail, page }) {
-  return wrapEmail('License Manager Feedback', `
-    ${message ? `<p style="white-space:pre-wrap">${escapeHtml(message)}</p>` : ''}
-    ${detailsTable([
-      ['Rating', rating ? `${rating}/5 (${RATING_LABELS[rating]})` : 'not given'],
-      ['From', escapeHtml(userEmail || 'unknown')],
-      ['Page', escapeHtml(page)],
-    ])}
-  `, { text: 'Sign in to', path: '/', linkText: 'License Manager' })
-}

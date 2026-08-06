@@ -3,11 +3,9 @@ import { useState } from 'react'
 import { Menu, X, LogOut, ChevronDown } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { signOut } from '../lib/auth'
-import { sendEmail, feedbackEmailSubject, feedbackEmailHtml } from '../lib/email'
+import { supabase } from '../lib/supabase'
 import FeedbackWidget from './FeedbackWidget'
 import InstallPrompt from './InstallPrompt'
-
-const FEEDBACK_TO = 'kate_brenner@sil.org'
 
 // Left sidebar shell. `links` is:
 //   [{ to?, label, icon: LucideIcon, adminOnly?, badge?, children?: [{to,label}] }]
@@ -136,12 +134,18 @@ export default function AppLayout({ appName, links, children }) {
 
       <main className="flex-1 min-w-0">{children}</main>
 
-      <FeedbackWidget onSend={({ rating, comment }) => sendEmail({
-        to: FEEDBACK_TO,
-        subject: feedbackEmailSubject(),
-        html: feedbackEmailHtml({ rating, message: comment, userEmail: profile?.primary_email, page: window.location.href }),
-        template: 'feedback',
-      })} />
+      <FeedbackWidget onSubmit={async ({ type, githubLabel, title, description }) => {
+        const { error } = await supabase.functions.invoke('feedback', {
+          body: {
+            type,
+            githubLabel,
+            title,
+            description,
+            context: { userId: profile?.primary_email, page: window.location.href },
+          },
+        })
+        if (error) throw error
+      }} />
 
       <InstallPrompt />
     </div>
