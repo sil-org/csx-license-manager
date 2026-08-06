@@ -447,8 +447,8 @@ declare
   v_pending_approver text := null;
 begin
   if v_actor_email is null then raise exception 'not authenticated'; end if;
-  if v_recipient_email not like '%@sil.org' then
-    raise exception 'License requests are only available to SIL staff (sil.org accounts).';
+  if not is_eligible_staff_email(v_recipient_email) then
+    raise exception 'License requests are only available to SIL staff.';
   end if;
 
   select * into v_license from licenses where id = p_license_id and active;
