@@ -19,7 +19,7 @@ const COLUMNS = [
   { key: 'billing', label: 'Billing', sort: s => billingLabel(s).toLowerCase() },
   { key: 'fy', label: 'FY', sort: s => s.fy || 0 },
   { key: 'status', label: 'Status', sort: s => STATUS_LABEL[s.status] || s.status },
-  { key: 'started', label: 'Started', sort: s => s.start_date || '' },
+  { key: 'started', label: 'Provisioned', sort: s => s.activated_at || '' },
 ]
 
 // Mirrors GAS's Admin Panel "All Subscriptions" tab — every subscription,
@@ -177,7 +177,7 @@ export default function AdminAllSubscriptions() {
                   <td className="p-3 text-gray-500">{billingLabel(sub)}</td>
                   <td className="p-3 text-gray-500">{fyLabel(sub) || '—'}</td>
                   <td className={`p-3 ${STATUS_COLOR[sub.status]}`}>{STATUS_LABEL[sub.status]}</td>
-                  <td className="p-3 text-gray-500 whitespace-nowrap">{sub.start_date}</td>
+                  <td className="p-3 text-gray-500 whitespace-nowrap">{sub.activated_at || '—'}</td>
                   <td className="p-3">
                     {sub.status === 'approved' && (
                       <div className="flex items-center gap-3 whitespace-nowrap">

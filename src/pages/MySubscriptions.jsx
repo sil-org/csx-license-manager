@@ -96,7 +96,7 @@ export default function MySubscriptions() {
               <div>
                 <p className="font-semibold text-gray-900">{sub.license?.name}</p>
                 <p className="text-sm text-gray-500">
-                  {billingDescription(sub)}{fyLabel(sub) && ` • ${fyLabel(sub)}`} • Started {sub.start_date}
+                  {billingDescription(sub)}{fyLabel(sub) && ` • ${fyLabel(sub)}`} • {sub.activated_at ? `Started ${sub.activated_at}` : `Requested ${sub.start_date}`}
                   {sub.price_at_signup != null && ` • ${formatPrice(sub.price_at_signup)}${sub.license?.price_unit ? ` ${sub.license.price_unit}` : ''}`}
                 </p>
                 {sub.status === 'active' && sub.renewal_status === 'none' && sub.billing_cycle === 'annual' && (

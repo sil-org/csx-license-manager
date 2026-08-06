@@ -159,6 +159,7 @@ create table if not exists subscriptions (
   billing_type          subscription_billing_type not null default 'suite_key',
   ministry_id           text references ministry_ids(ministry_id),
   start_date            date not null default current_date,
+  activated_at          date,   -- when the subscription actually went active (seat provisioned) — distinct from start_date, which is the request date and drives billing/proration
   fy                    int not null,
   status                subscription_status not null default 'pending',
   renewal_status        renewal_status not null default 'none',
@@ -539,10 +540,11 @@ begin
   end if;
 
   insert into subscriptions (
-    user_email, license_id, suite_key, billing_type, ministry_id, fy, status, billing_cycle,
+    user_email, license_id, suite_key, billing_type, ministry_id, fy, status, activated_at, billing_cycle,
     renewal_month, renewal_reminder, price_at_signup, pending_approver_email, requested_by
   ) values (
-    v_recipient_email, p_license_id, v_suite_key, v_billing_type, v_ministry_id, p_fy, v_status, v_license.billing_cycle,
+    v_recipient_email, p_license_id, v_suite_key, v_billing_type, v_ministry_id, p_fy, v_status,
+    case when v_status = 'active' then current_date else null end, v_license.billing_cycle,
     v_license.renewal_month, v_license.renewal_reminder, v_license.price, v_pending_approver, current_profile_id()
   ) returning id into v_sub_id;
 
@@ -892,13 +894,15 @@ begin
   loop
     if v_owner_group is not null then
       if exists (select 1 from group_memberships where group_email = v_owner_group and member_email = r.user_email) then
-        update subscriptions set status = (case when r.activation_url is not null then 'approved' else 'active' end)::subscription_status, pending_approver_email = null where id = r.id;
+        update subscriptions set status = (case when r.activation_url is not null then 'approved' else 'active' end)::subscription_status,
+          activated_at = (case when r.activation_url is null then current_date else null end), pending_approver_email = null where id = r.id;
       else
         update subscriptions set status = 'pending', pending_approver_email = null where id = r.id;
       end if;
     elsif v_owner is not null then
       if v_owner = r.user_email then
-        update subscriptions set status = (case when r.activation_url is not null then 'approved' else 'active' end)::subscription_status, pending_approver_email = null where id = r.id;
+        update subscriptions set status = (case when r.activation_url is not null then 'approved' else 'active' end)::subscription_status,
+          activated_at = (case when r.activation_url is null then current_date else null end), pending_approver_email = null where id = r.id;
       else
         update subscriptions set status = 'pending', pending_approver_email = null where id = r.id;
       end if;
@@ -934,7 +938,8 @@ begin
   select * into v_license from licenses where id = v_sub.license_id;
   v_new_status := case when v_license.activation_url is not null then 'approved' else 'active' end;
 
-  update subscriptions set status = v_new_status where id = p_subscription_id;
+  update subscriptions set status = v_new_status, activated_at = (case when v_new_status = 'active' then current_date else null end)
+  where id = p_subscription_id;
 
   insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, ip_address)
   values ('approved', p_subscription_id, v_license.name, v_sub.user_email, v_sub.suite_key, v_email, current_client_ip());
@@ -988,7 +993,7 @@ begin
   end if;
 
   update subscriptions
-  set status = 'active', price_at_signup = coalesce(p_price, price_at_signup)
+  set status = 'active', activated_at = current_date, price_at_signup = coalesce(p_price, price_at_signup)
   where id = p_subscription_id;
 
   -- Google Group membership (when licenses.google_group_email is set) is
@@ -1354,10 +1359,10 @@ begin
       end if;
 
       insert into subscriptions (
-        user_email, license_id, suite_key, billing_type, ministry_id, fy, status,
+        user_email, license_id, suite_key, billing_type, ministry_id, fy, status, activated_at,
         billing_cycle, renewal_month, renewal_reminder, price_at_signup, requested_by
       ) values (
-        v_user_email, v_license.id, v_suite_key, v_billing_type, v_ministry_id, v_fy, 'active',
+        v_user_email, v_license.id, v_suite_key, v_billing_type, v_ministry_id, v_fy, 'active', v_start_date,
         v_license.billing_cycle, v_license.renewal_month, v_license.renewal_reminder, v_license.price, current_profile_id()
       ) returning id into v_sub_id;
 
@@ -1583,10 +1588,11 @@ begin
       end if;
 
       insert into subscriptions (
-        legacy_id, user_email, license_id, suite_key, billing_type, ministry_id, start_date, fy, status,
+        legacy_id, user_email, license_id, suite_key, billing_type, ministry_id, start_date, activated_at, fy, status,
         renewal_status, billing_cycle, renewal_month, renewal_reminder, price_at_signup
       ) values (
-        v_legacy_id, v_user_email, v_license.id, v_suite_key, v_billing_type, v_ministry_id, v_start_date, v_fy, v_status,
+        v_legacy_id, v_user_email, v_license.id, v_suite_key, v_billing_type, v_ministry_id, v_start_date,
+        (case when v_status = 'active' then v_start_date else null end), v_fy, v_status,
         v_renewal_status, v_billing_cycle, v_renewal_month, v_renewal_reminder, v_price_at_signup
       ) returning id into v_sub_id;
 
