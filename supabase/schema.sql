@@ -94,6 +94,7 @@ returns boolean language sql immutable as $$
 $$;
 
 -- profiles: users can read and update their own; admins can read all
+drop policy if exists "profiles: own read" on profiles;
 create policy "profiles: own read"
   on profiles for select
   using (id = current_profile_id() or get_profile_role() = 'admin');
@@ -103,27 +104,33 @@ create policy "profiles: own read"
 -- 'admin' via a direct client-side call. Role changes now only happen
 -- through a security-definer RPC (e.g. admin_set_role() in the domain
 -- schema), which bypasses RLS as the table owner and is unaffected by this.
+drop policy if exists "profiles: own update" on profiles;
 create policy "profiles: own update"
   on profiles for update
   using (id = current_profile_id())
   with check (id = current_profile_id() and role = get_profile_role());
 
 -- linked_accounts: users can read their own; admins can read/insert all
+drop policy if exists "linked_accounts: own read" on linked_accounts;
 create policy "linked_accounts: own read"
   on linked_accounts for select
   using (profile_id = current_profile_id() or get_profile_role() = 'admin');
 
+drop policy if exists "linked_accounts: insert own" on linked_accounts;
 create policy "linked_accounts: insert own"
   on linked_accounts for insert
   with check (true);  -- enforced inside resolve_profile(), a security definer RPC
 
+drop policy if exists "linked_accounts: admin update" on linked_accounts;
 create policy "linked_accounts: admin update"
   on linked_accounts for update
   using (get_profile_role() = 'admin');
 
 -- profile_link_tokens: users can read/insert their own
+drop policy if exists "link_tokens: own read" on profile_link_tokens;
 create policy "link_tokens: own read" on profile_link_tokens for select
   using (profile_id = current_profile_id());
+drop policy if exists "link_tokens: own insert" on profile_link_tokens;
 create policy "link_tokens: own insert" on profile_link_tokens for insert
   with check (profile_id = current_profile_id());
 
