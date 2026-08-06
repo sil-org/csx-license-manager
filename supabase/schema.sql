@@ -7,7 +7,12 @@
 -- and reference profiles(id) as the source of truth for "who is this".
 
 -- Roles: extend this enum with whatever roles your app needs (e.g. 'reviewer').
-create type user_role as enum ('member', 'admin');
+-- Postgres has no CREATE TYPE IF NOT EXISTS, so this is guarded with a
+-- do-block that swallows "already exists" — same pattern as the enums in
+-- schema_licenses.sql — to keep this file's "safe to re-run" claim true.
+do $$ begin
+  create type user_role as enum ('member', 'admin');
+exception when duplicate_object then null; end $$;
 
 -- ─── PROFILES ────────────────────────────────────────────────────────────────
 -- One row per real human. Everything in the system references this table,
