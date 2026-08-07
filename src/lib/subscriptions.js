@@ -28,12 +28,11 @@ export async function buildProvisioningNotifications(sub) {
   if (!recipients.length) {
     recipients = await getAdminEmails()
   }
-  // send-email only accepts a single address per call (and logs one email_log
-  // row per send) — one notification per recipient rather than joining into
-  // a comma-separated `to`, which Resend wouldn't treat as multiple addresses.
-  for (const to of recipients) {
+  // One email with every recipient in the To field, not one send per
+  // recipient — send-email/Resend accepts an array for `to`.
+  if (recipients.length) {
     notifications.push({
-      type: 'provisioning_required', to, sub,
+      type: 'provisioning_required', to: recipients, sub,
       licenseName: sub.license.name, activationUrl: sub.license.activation_url,
     })
   }

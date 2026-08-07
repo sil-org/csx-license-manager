@@ -5,7 +5,7 @@ const FROM = 'License Manager <license_manager@em.sil.org>'
 const REPLY_TO = 'helpdesk+licenses@sil.org'
 
 interface EmailRequest {
-  to: string
+  to: string | string[]
   subject: string
   html: string
   template: string
@@ -32,9 +32,14 @@ Deno.serve(async (req) => {
     const body: EmailRequest = await req.json()
     const { to, subject, html, template, subscription_id, bcc } = body
 
-    if (!to || !subject || !html || !template) {
+    if (!to || (Array.isArray(to) && !to.length) || !subject || !html || !template) {
       return json({ error: 'Missing required fields: to, subject, html, template' }, 400)
     }
+    // Resend accepts either a single address or an array (up to 50) in `to` —
+    // one real email with every recipient in the To field, not one send per
+    // recipient (which would also mean each recipient sees only themselves,
+    // not who else was notified).
+    const toEmail = Array.isArray(to) ? to.join(', ') : to
 
     // Send via Resend
     const resendRes = await fetch(RESEND_API_URL, {
@@ -52,7 +57,7 @@ Deno.serve(async (req) => {
 
     // Log to database regardless of send success/failure
     await supabase.from('email_log').insert({
-      to_email: to,
+      to_email: toEmail,
       subject,
       template,
       subscription_id: subscription_id || null,
