@@ -465,7 +465,7 @@ begin
   if v_license.gtis_sponsored then
     v_billing_type := 'gtis';
     v_audit_suite_key := 'GTIS';
-    v_status := case when v_license.activation_url is not null then 'approved' else 'active' end;
+    v_status := 'approved';
 
   elsif p_ministry_id is not null then
     if p_ministry_id !~ '^\d{6}$' then
@@ -485,10 +485,12 @@ begin
     -- suite_keys upsert — a stray leading/trailing space on this insert
     -- would otherwise create a row that upsert can never match again later,
     -- since Postgres treats "key" and "key " as distinct primary key text.
-    v_suite_key := trim(p_suite_key);
-    if v_suite_key like '%~%' then
-      raise exception 'SuiteKey cannot contain "~" — check for stray text pasted in after the real key';
-    end if;
+    -- Anything from "~" onward is stray pasted text, not part of the real
+    -- key (e.g. "Relations-U_SIL~5407") — ignore it rather than rejecting
+    -- the whole entry, same as admin_import_subscriptions_full() already
+    -- does for legacy data.
+    v_suite_key := regexp_replace(trim(p_suite_key), '~.*$', '');
+    if v_suite_key = '' then raise exception 'a suite key is required'; end if;
 
     -- Match case-insensitively, but if a row already exists, normalize to
     -- its actual stored casing (not whatever case the requester happened to
@@ -792,11 +794,11 @@ declare
   v_canonical_key text;
 begin
   if not is_admin() then raise exception 'admin only'; end if;
-  p_suite_key := trim(p_suite_key);
+  -- Anything from "~" onward is stray pasted text, not part of the real key
+  -- (e.g. "Relations-U_SIL~5407") — ignore it rather than rejecting the
+  -- whole entry, same as request_subscription().
+  p_suite_key := regexp_replace(trim(p_suite_key), '~.*$', '');
   if p_suite_key = '' then raise exception 'suite key is required'; end if;
-  if p_suite_key like '%~%' then
-    raise exception 'SuiteKey cannot contain "~" — check for stray text pasted in after the real key';
-  end if;
   if v_owner is not null and v_group is not null then
     raise exception 'a suite key can have an individual owner or a group owner, not both';
   end if;
@@ -836,14 +838,14 @@ end;
 $$;
 
 -- ─── RPC: admin_merge_suite_key ────────────────────────────────────────────────
--- For data-entry mistakes: someone types e.g. "Relations-U_SIL~5407" (garbage
--- appended, a paste artifact, a typo) instead of the real "Relations-U_SIL".
--- That's a genuinely different suite_keys row from request_subscription()'s
--- perspective — not a case/whitespace variant the earlier fixes catch — so it
--- creates a real, separate, unowned key. There was previously no way to
--- delete it: subscriptions.suite_key's FK blocks a plain delete while any
--- subscription still points at it. This repoints those subscriptions to the
--- correct key first, then deletes the bad row.
+-- For data-entry typos, e.g. someone fat-fingers "Relatoins-U_SIL" instead of
+-- the real "Relations-U_SIL" — not a case/whitespace variant the earlier
+-- fixes catch, nor tilde-appended garbage (now stripped automatically at
+-- entry — see request_subscription()), so it creates a real, separate,
+-- unowned key. There was previously no way to delete it: subscriptions.
+-- suite_key's FK blocks a plain delete while any subscription still points
+-- at it. This repoints those subscriptions to the correct key first, then
+-- deletes the bad row.
 --
 -- Refuses to merge away a key that has a real owner on file — that's very
 -- unlikely to be a typo, and merging would silently destroy real ownership
@@ -1257,7 +1259,7 @@ $$;
 -- p_rows is a JSON array of {user_email, license_name, suite_key, start_date,
 -- fy}: suite_key accepts a real SuiteKey, a 6-digit Ministry ID (bare or
 -- "MIN:XXXXXX"), or blank for a GTIS-sponsored license. Applies the same
--- SuiteKey trim/tilde-block/case-insensitive-match rules as
+-- SuiteKey trim/tilde-strip/case-insensitive-match rules as
 -- request_subscription(), for the same reasons — and the same FY rollover
 -- rule as GAS's getCurrentFiscalYear() when fy isn't given (October start).
 --
@@ -1293,7 +1295,10 @@ begin
       v_error := null;
       v_user_email := lower(trim(v_row->>'user_email'));
       v_license_name := trim(v_row->>'license_name');
-      v_raw_suite_key := trim(coalesce(v_row->>'suite_key', ''));
+      -- Anything from "~" onward is stray pasted text, not part of the real
+      -- key (e.g. "Relations-U_SIL~5407") — ignore it rather than rejecting
+      -- the row, same as admin_import_subscriptions_full() already does.
+      v_raw_suite_key := regexp_replace(trim(coalesce(v_row->>'suite_key', '')), '~.*$', '');
       v_billing_type := null;
       v_suite_key := null;
       v_ministry_id := null;
@@ -1333,14 +1338,10 @@ begin
           v_error := 'Missing SuiteKey or Ministry ID';
         else
           v_billing_type := 'suite_key';
-          if v_raw_suite_key like '%~%' then
-            v_error := 'SuiteKey cannot contain "~"';
-          else
-            select suite_key into v_canonical_key from suite_keys where lower(suite_key) = lower(v_raw_suite_key);
-            v_suite_key := coalesce(v_canonical_key, v_raw_suite_key);
-            if v_canonical_key is null then
-              insert into suite_keys (suite_key, owner_email) values (v_suite_key, null);
-            end if;
+          select suite_key into v_canonical_key from suite_keys where lower(suite_key) = lower(v_raw_suite_key);
+          v_suite_key := coalesce(v_canonical_key, v_raw_suite_key);
+          if v_canonical_key is null then
+            insert into suite_keys (suite_key, owner_email) values (v_suite_key, null);
           end if;
         end if;
       end if;

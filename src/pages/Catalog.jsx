@@ -331,8 +331,6 @@ function RequestModal({ license, onClose }) {
                         onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                         required
                         autoComplete="off"
-                        pattern="[^~]*"
-                        title='Cannot contain "~" — check for stray text pasted in after the real key'
                         placeholder="Type at least 2 characters…"
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       />
