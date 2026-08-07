@@ -320,7 +320,7 @@ export default function AdminCatalog() {
               </div>
 
               <Field label="Activation URL" value={editing.activation_url} onChange={v => setEditing({ ...editing, activation_url: v })}
-                hint="Set this if activation needs manual admin/service-manager provisioning after approval." />
+                hint="Vendor admin portal link, shown to whoever provisions this license once it's approved — every subscription needs an explicit 'Mark active' regardless of whether this is set." />
               <Field label="Service manager email" value={editing.service_manager_email} onChange={v => setEditing({ ...editing, service_manager_email: v })} />
 
               <Field label="More info URL" value={editing.more_info_url} onChange={v => setEditing({ ...editing, more_info_url: v })} />

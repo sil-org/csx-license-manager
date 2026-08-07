@@ -476,7 +476,7 @@ begin
     v_audit_suite_key := 'MIN:' || p_ministry_id;
     insert into ministry_ids (email, ministry_id) values (v_recipient_email, p_ministry_id)
       on conflict (email) do update set ministry_id = excluded.ministry_id;
-    v_status := case when v_license.activation_url is not null then 'approved' else 'active' end;
+    v_status := 'approved';
 
   else
     v_billing_type := 'suite_key';
@@ -518,7 +518,7 @@ begin
       if exists (
         select 1 from group_memberships where group_email = v_owner_group and member_email = v_actor_email
       ) then
-        v_status := case when v_license.activation_url is not null then 'approved' else 'active' end;
+        v_status := 'approved';
       else
         v_status := 'pending';
       end if;
@@ -535,18 +535,22 @@ begin
       v_status := 'pending_sk_verification';
       v_pending_approver := p_suggested_approver_email;
     elsif v_owner = v_actor_email then
-      v_status := case when v_license.activation_url is not null then 'approved' else 'active' end;
+      v_status := 'approved';
     else
       v_status := 'pending';
     end if;
   end if;
 
+  -- activated_at is never set here — every path above lands on 'approved'
+  -- at most, never 'active'. No license is auto-provisioned today (see
+  -- activate_subscription()), so becoming active always requires an
+  -- explicit "Mark active" from an admin/service manager, which is also
+  -- what triggers the provisioning-required notification below.
   insert into subscriptions (
-    user_email, license_id, suite_key, billing_type, ministry_id, fy, status, activated_at, billing_cycle,
+    user_email, license_id, suite_key, billing_type, ministry_id, fy, status, billing_cycle,
     renewal_month, renewal_reminder, price_at_signup, pending_approver_email, requested_by
   ) values (
-    v_recipient_email, p_license_id, v_suite_key, v_billing_type, v_ministry_id, p_fy, v_status,
-    case when v_status = 'active' then current_date else null end, v_license.billing_cycle,
+    v_recipient_email, p_license_id, v_suite_key, v_billing_type, v_ministry_id, p_fy, v_status, v_license.billing_cycle,
     v_license.renewal_month, v_license.renewal_reminder, v_license.price, v_pending_approver, current_profile_id()
   ) returning id into v_sub_id;
 
@@ -560,7 +564,7 @@ begin
     current_client_ip()
   );
 
-  if v_status in ('active', 'approved') then
+  if v_status = 'approved' then
     insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, ip_address)
     values ('auto_approved', v_sub_id, v_license.name, v_recipient_email, v_audit_suite_key, v_actor_email, current_client_ip());
   end if;
@@ -890,21 +894,19 @@ begin
   -- to begin with, instead of leaving them stuck awaiting a confirmation
   -- that's no longer needed.
   for r in
-    select s.id, s.user_email, l.activation_url
-    from subscriptions s join licenses l on l.id = s.license_id
+    select s.id, s.user_email
+    from subscriptions s
     where s.suite_key = v_correct and s.status = 'pending_sk_verification'
   loop
     if v_owner_group is not null then
       if exists (select 1 from group_memberships where group_email = v_owner_group and member_email = r.user_email) then
-        update subscriptions set status = (case when r.activation_url is not null then 'approved' else 'active' end)::subscription_status,
-          activated_at = (case when r.activation_url is null then current_date else null end), pending_approver_email = null where id = r.id;
+        update subscriptions set status = 'approved', pending_approver_email = null where id = r.id;
       else
         update subscriptions set status = 'pending', pending_approver_email = null where id = r.id;
       end if;
     elsif v_owner is not null then
       if v_owner = r.user_email then
-        update subscriptions set status = (case when r.activation_url is not null then 'approved' else 'active' end)::subscription_status,
-          activated_at = (case when r.activation_url is null then current_date else null end), pending_approver_email = null where id = r.id;
+        update subscriptions set status = 'approved', pending_approver_email = null where id = r.id;
       else
         update subscriptions set status = 'pending', pending_approver_email = null where id = r.id;
       end if;
@@ -928,7 +930,6 @@ declare
   v_email text := current_profile_email();
   v_sub subscriptions%rowtype;
   v_license licenses%rowtype;
-  v_new_status subscription_status;
 begin
   select * into v_sub from subscriptions where id = p_subscription_id;
   if v_sub.id is null then raise exception 'subscription not found'; end if;
@@ -938,10 +939,13 @@ begin
   end if;
 
   select * into v_license from licenses where id = v_sub.license_id;
-  v_new_status := case when v_license.activation_url is not null then 'approved' else 'active' end;
 
-  update subscriptions set status = v_new_status, activated_at = (case when v_new_status = 'active' then current_date else null end)
-  where id = p_subscription_id;
+  -- Owner approval only clears the SuiteKey-ownership gate — it never skips
+  -- provisioning. No license is auto-provisioned today, so this always lands
+  -- on 'approved' and relies on buildProvisioningNotifications() (see
+  -- src/lib/subscriptions.js) firing off the "someone needs to provision
+  -- this" email, same as request_subscription()'s auto-approved paths.
+  update subscriptions set status = 'approved' where id = p_subscription_id;
 
   insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, ip_address)
   values ('approved', p_subscription_id, v_license.name, v_sub.user_email, v_sub.suite_key, v_email, current_client_ip());

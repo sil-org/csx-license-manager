@@ -23,9 +23,9 @@ const SECTIONS = [
             <br /><br />
             What happens next depends on the license:
             <ul className="list-disc pl-5 mt-2 space-y-1">
-              <li>If you own the SuiteKey, or it's GTIS-funded with no manual setup required, the subscription becomes <strong>Active</strong> immediately.</li>
+              <li>If you own the SuiteKey, or it's GTIS-funded, no approval is needed — it moves straight to <strong>Approved &mdash; being provisioned</strong> while GTIS sets up your seat.</li>
               <li>If approval is needed, the budget manager is notified and your subscription shows as <strong>Awaiting approval</strong>.</li>
-              <li>If the vendor side requires a seat to be provisioned first, it shows as <strong>Approved &mdash; being provisioned</strong> until GTIS sets it up.</li>
+              <li>Either way, your subscription only becomes <strong>Active</strong> once GTIS marks it as provisioned &mdash; there's no license today that skips this step.</li>
             </ul>
           </>
         ),
@@ -74,7 +74,7 @@ const SECTIONS = [
       },
       {
         q: 'What does "GTIS-sponsored" mean?',
-        a: 'GTIS centrally covers the cost of certain licenses. If a license is marked GTIS-sponsored, no SuiteKey or Ministry ID is required — just request it. Some GTIS licenses activate immediately; others still require a seat to be provisioned first.',
+        a: 'GTIS centrally covers the cost of certain licenses. If a license is marked GTIS-sponsored, no SuiteKey or Ministry ID is required — just request it. It still goes through the same provisioning step as everything else, though — GTIS-sponsored only skips the budget-manager approval.',
       },
       {
         q: 'Are subscriptions refundable?',
