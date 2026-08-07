@@ -5,9 +5,12 @@ import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
 import { getAllSubscriptions } from '../../lib/admin'
 import { activateSubscription } from '../../lib/approvals'
-import { resendApprovalRequest } from '../../lib/subscriptions'
+import { resendApprovalRequest, resendProvisioningRequest } from '../../lib/subscriptions'
 import { supabase } from '../../lib/supabase'
-import { sendEmail, activationEmailSubject, activationEmailHtml, approvalRequestEmailSubject, approvalRequestEmailHtml } from '../../lib/email'
+import {
+  sendEmail, activationEmailSubject, activationEmailHtml, approvalRequestEmailSubject, approvalRequestEmailHtml,
+  provisioningRequiredEmailSubject, provisioningRequiredEmailHtml,
+} from '../../lib/email'
 import { billingLabel, fyLabel, STATUS_LABEL, STATUS_COLOR } from '../../lib/subscriptionDisplay'
 
 // Each column's sort() returns a directly-comparable value — same pattern as
@@ -93,6 +96,29 @@ export default function AdminAllSubscriptions() {
       setResendState(s => ({ ...s, [sub.id]: 'sent' }))
     } catch (err) {
       console.error('resend approval request failed:', err.message)
+      setResendState(s => ({ ...s, [sub.id]: 'failed' }))
+    }
+  }
+
+  // Covers a service manager who missed (or never got, e.g. this went
+  // active without ever notifying anyone — see the "no license is
+  // auto-provisioned yet" fix) the original provisioning-required email.
+  async function handleResendProvisioning(sub) {
+    setResendState(s => ({ ...s, [sub.id]: 'sending' }))
+    try {
+      const notifications = await resendProvisioningRequest(sub)
+      for (const n of notifications) {
+        await sendEmail({
+          to: n.to,
+          subject: provisioningRequiredEmailSubject({ licenseName: n.licenseName, userEmail: n.sub.user_email }),
+          html: provisioningRequiredEmailHtml({ sub: n.sub, licenseName: n.licenseName, activationUrl: n.activationUrl }),
+          template: 'provisioning_required',
+          subscriptionId: sub.id,
+        })
+      }
+      setResendState(s => ({ ...s, [sub.id]: 'sent' }))
+    } catch (err) {
+      console.error('resend provisioning request failed:', err.message)
       setResendState(s => ({ ...s, [sub.id]: 'failed' }))
     }
   }
@@ -193,6 +219,19 @@ export default function AdminAllSubscriptions() {
                           className="w-20 border border-gray-300 rounded-lg px-2 py-1 text-xs"
                         />
                         <button onClick={() => handleActivate(sub)} className="text-xs font-medium text-sil-green">Mark active</button>
+                        {resendState[sub.id] === 'sent' ? (
+                          <span className="text-xs text-sil-green">Sent</span>
+                        ) : resendState[sub.id] === 'failed' ? (
+                          <span className="text-xs text-sil-red">Failed</span>
+                        ) : (
+                          <button
+                            onClick={() => handleResendProvisioning(sub)}
+                            disabled={resendState[sub.id] === 'sending'}
+                            className="text-xs font-medium text-brand disabled:opacity-50"
+                          >
+                            {resendState[sub.id] === 'sending' ? 'Sending…' : 'Re-request provisioning'}
+                          </button>
+                        )}
                       </div>
                     )}
                     {sub.status === 'pending' && sub.suite_key && (

@@ -108,6 +108,16 @@ export async function resendApprovalRequest(sub) {
   }
 }
 
+// Re-sends the "someone needs to provision this" notification for an
+// already-'approved' subscription — same service-manager-or-admins routing
+// as the original request-time email (buildProvisioningNotifications
+// above), minus the 'approved_pending' copy to the requester, who already
+// knows their subscription is pending setup.
+export async function resendProvisioningRequest(sub) {
+  const notifications = await buildProvisioningNotifications(sub)
+  return notifications.filter(n => n.type === 'provisioning_required')
+}
+
 export async function cancelSubscription(subscriptionId) {
   const { error } = await supabase.rpc('cancel_subscription', { p_subscription_id: subscriptionId })
   if (error) throw error
