@@ -15,6 +15,21 @@ export async function getMySubscriptions(email) {
   return data
 }
 
+// Shared re-select shape for RPCs (here and in lib/approvals.js) that need to
+// build a notification descriptor after a status-changing RPC call.
+export const SUB_EMAIL_FIELDS = 'user_email, fy, billing_cycle, billing_type, suite_key, ministry_id, license:licenses(name, activation_url, service_manager_email)'
+
+// Every subscription (any status) for a license the caller service-manages —
+// backs the "Subscriptions you manage" section on the Action Center page.
+// Scoped server-side by get_my_service_managed_subscriptions(), not RLS's
+// admin bypass — see that RPC's comment in
+// supabase/pending/27_service_manager_cancel.sql.
+export async function getServiceManagedSubscriptions() {
+  const { data, error } = await supabase.rpc('get_my_service_managed_subscriptions')
+  if (error) throw error
+  return data
+}
+
 // Both request_subscription and approve_subscription (src/lib/approvals.js)
 // can land a subscription straight in 'approved' (auto-approved or manually
 // approved, but the license needs provisioning before it's active) — same
@@ -118,9 +133,24 @@ export async function resendProvisioningRequest(sub) {
   return notifications.filter(n => n.type === 'provisioning_required')
 }
 
-export async function cancelSubscription(subscriptionId) {
-  const { error } = await supabase.rpc('cancel_subscription', { p_subscription_id: subscriptionId })
+// Returns [{ type: 'cancelled', to, sub, licenseName, reason }] for the
+// caller to email — unless { silent: true }, which skips the re-select and
+// returns null. Use silent for self-cancel (see handleCancel() in
+// MySubscriptions.jsx): a user cancelling their own subscription doesn't
+// need to be emailed about it.
+export async function cancelSubscription(subscriptionId, reason, { silent = false } = {}) {
+  const { error } = await supabase.rpc('cancel_subscription', { p_subscription_id: subscriptionId, p_reason: reason || null })
   if (error) throw error
+  if (silent) return null
+
+  const { data: sub, error: subError } = await supabase
+    .from('subscriptions')
+    .select(SUB_EMAIL_FIELDS)
+    .eq('id', subscriptionId)
+    .single()
+  if (subError) throw subError
+
+  return [{ type: 'cancelled', to: sub.user_email, sub, licenseName: sub.license.name, reason: reason || null }]
 }
 
 export async function optInRenewal(subscriptionId) {

@@ -379,6 +379,13 @@ create policy "subscriptions: read own or authority" on subscriptions for select
     or (suite_key is not null and is_suite_key_owner(suite_key))
     or is_service_manager_for(license_id)
     or lower(user_email) in (select get_report_emails())
+    -- Lets the actor who requested a license for someone else read back the
+    -- row they just created via the security-definer request_subscription()
+    -- RPC, even when the recipient isn't their direct report. Without this,
+    -- requestSubscription()'s post-insert re-select (subscriptions.js) hits
+    -- 0 rows under RLS and .single() throws PGRST116, even though the
+    -- subscription itself was created successfully.
+    or requested_by = current_profile_id()
   );
 -- All writes go through the security-definer RPCs below, which enforce
 -- status-transition and authority checks themselves; no direct write
@@ -532,8 +539,24 @@ begin
       if p_suggested_approver_email is null then
         raise exception 'suite key % has no owner on file — provide a suggested approver email', v_suite_key;
       end if;
-      v_status := 'pending_sk_verification';
-      v_pending_approver := p_suggested_approver_email;
+      v_pending_approver := nullif(lower(trim(p_suggested_approver_email)), '');
+      if v_pending_approver = v_actor_email then
+        -- The signed-in requester is suggesting themselves as this
+        -- unclaimed key's owner — no point parking this in
+        -- pending_sk_verification and emailing them a link to confirm a
+        -- claim they're already making right now as the authenticated
+        -- actor. Register them as owner immediately and fall through to
+        -- the same outcome as the "already-owns-it" branch below, instead
+        -- of a self-addressed confirmation email that's easy to miss (see
+        -- request-for-others RLS gap notes elsewhere in this file).
+        update suite_keys set owner_email = v_actor_email where suite_key = v_suite_key;
+        insert into audit_log (action, suite_key, performed_by, ip_address)
+        values ('sk_verified', v_suite_key, v_actor_email, current_client_ip());
+        v_status := 'approved';
+        v_pending_approver := null;
+      else
+        v_status := 'pending_sk_verification';
+      end if;
     elsif v_owner = v_actor_email then
       v_status := 'approved';
     else
@@ -742,11 +765,11 @@ language sql stable security definer as $$
 $$;
 
 -- ─── RPC: get_my_pending_sk_verifications / get_my_pending_approvals ───────────
--- The Approvals page's "here's what needs MY attention" lists. Deliberately
+-- The Action Center page's "here's what needs MY attention" lists. Deliberately
 -- NOT is_admin()-inclusive, unlike subscriptions' own RLS policy — scoped to
 -- exactly what the next click (confirm_sk_ownership, approve_subscription/
 -- decline_subscription) would actually authorize for a non-admin, so an
--- admin viewing their own Approvals page doesn't see every pending row
+-- admin viewing their own Action Center page doesn't see every pending row
 -- company-wide, only their own. Admins acting on someone else's key have
 -- dedicated tools elsewhere (Admin -> SuiteKeys' quick-confirm, sk-merge).
 
@@ -1012,7 +1035,7 @@ begin
 end;
 $$;
 
-create or replace function cancel_subscription(p_subscription_id uuid)
+create or replace function cancel_subscription(p_subscription_id uuid, p_reason text default null)
 returns void language plpgsql security definer as $$
 declare
   v_email text := current_profile_email();
@@ -1024,16 +1047,39 @@ begin
   if v_sub.status not in ('pending', 'pending_sk_verification', 'approved', 'active') then
     raise exception 'subscription cannot be cancelled from its current status';
   end if;
-  if not (is_admin() or v_sub.user_email = v_email) then
+  if not (is_admin() or v_sub.user_email = v_email or is_service_manager_for(v_sub.license_id)) then
     raise exception 'not authorized to cancel this subscription';
   end if;
 
   select name into v_license_name from licenses where id = v_sub.license_id;
   update subscriptions set status = 'cancelled' where id = p_subscription_id;
 
-  insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, ip_address)
-  values ('cancelled', p_subscription_id, v_license_name, v_sub.user_email, v_sub.suite_key, v_email, current_client_ip());
+  insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, notes, ip_address)
+  values ('cancelled', p_subscription_id, v_license_name, v_sub.user_email, v_sub.suite_key, v_email, p_reason, current_client_ip());
 end;
+$$;
+
+-- Backs a new "Subscriptions you manage" section on the Action Center page —
+-- every subscription (any status, not just ones awaiting the caller's next
+-- action) for a license the caller service-manages. Deliberately does NOT
+-- also check is_admin(), same reasoning as get_my_pending_approvals()/
+-- get_my_pending_sk_verifications() (see supabase/pending/19_scope_approvals_to_owned_keys.sql)
+-- — an admin who manages no licenses should see an empty list here, not
+-- every subscription company-wide via RLS's admin bypass.
+create or replace function get_my_service_managed_subscriptions()
+returns table(
+  id uuid, user_email text, suite_key text, ministry_id text, status subscription_status,
+  fy int, billing_cycle billing_cycle, billing_type subscription_billing_type,
+  activated_at date, created_at timestamptz, license_id uuid, license_name text
+)
+language sql stable security definer as $$
+  select s.id, s.user_email, s.suite_key, s.ministry_id, s.status,
+         s.fy, s.billing_cycle, s.billing_type,
+         s.activated_at, s.created_at, s.license_id, l.name
+  from subscriptions s
+  join licenses l on l.id = s.license_id
+  where is_service_manager_for(s.license_id)
+  order by s.created_at desc
 $$;
 
 create or replace function revoke_subscription(p_subscription_id uuid)

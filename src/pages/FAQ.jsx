@@ -66,7 +66,7 @@ const SECTIONS = [
       },
       {
         q: 'What if my SuiteKey is not listed, or has no manager?',
-        a: 'You’ll be asked for the email of the person who manages that budget. They’ll be notified to confirm or deny ownership on the Approvals page. If they confirm, they’re registered as the manager and your request moves into the normal approval queue. If they deny it, you’ll need to resubmit with the correct contact.',
+        a: 'You’ll be asked for the email of the person who manages that budget. They’ll be notified to confirm or deny ownership on the Action Center page. If they confirm, they’re registered as the manager and your request moves into the normal approval queue. If they deny it, you’ll need to resubmit with the correct contact.',
       },
       {
         q: 'What is a Ministry ID?',
@@ -100,11 +100,11 @@ const SECTIONS = [
     items: [
       {
         q: 'I own a SuiteKey — how do I manage approval requests?',
-        a: 'The Approvals page shows any SuiteKey ownership verifications and subscription approvals waiting on you — it’s empty unless something needs your attention. For a full view of every charge to your SuiteKey(s), not just the pending ones, see SuiteKey Charges in the sidebar.',
+        a: 'The Action Center page shows any SuiteKey ownership verifications and subscription approvals waiting on you — it’s empty unless something needs your attention. For a full view of every charge to your SuiteKey(s), not just the pending ones, see SuiteKey Charges in the sidebar.',
       },
       {
         q: 'I manage a license’s vendor setup — where do I provision seats?',
-        a: 'The Approvals page’s "Approved — needs provisioning" section lists subscriptions waiting on you, with a link to the vendor portal and a button to mark the seat active once it’s set up.',
+        a: 'The Action Center page’s "Approved — needs provisioning" section lists subscriptions waiting on you, with a link to the vendor portal and a button to mark the seat active once it’s set up. Its "Subscriptions you manage" section lists every subscription to that license, including a Cancel action for any that haven’t already been cancelled or revoked.',
       },
       {
         q: 'I’m a people manager — where can I see my team’s subscriptions?',

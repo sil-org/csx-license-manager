@@ -6,7 +6,7 @@ import { fyLabel, STATUS_LABEL, STATUS_COLOR } from '../lib/subscriptionDisplay'
 
 // Mirrors Managers.gs's "SuiteKey Charges" tab — every charge to any SuiteKey
 // you own, not just the ones currently awaiting your approval (that's what
-// /approvals is for). Not role-gated, same convention as Approvals/My Team:
+// /action-center is for). Not role-gated, same convention as Action Center/My Team:
 // empty unless you own at least one SuiteKey.
 export default function SuiteKeyCharges() {
   const [charges, setCharges] = useState(null)

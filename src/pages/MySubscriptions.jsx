@@ -55,7 +55,7 @@ export default function MySubscriptions() {
   async function handleCancel(sub) {
     if (!confirm(`Cancel your subscription to ${sub.license?.name}? This can't be undone — you'd need to request it again from the Catalog.`)) return
     try {
-      await cancelSubscription(sub.id)
+      await cancelSubscription(sub.id, null, { silent: true })
       reload()
       // Nudges sync-provisioning to reconcile now instead of waiting for its
       // next scheduled run — best effort, the schedule is the correctness

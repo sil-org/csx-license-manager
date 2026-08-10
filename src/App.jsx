@@ -3,7 +3,7 @@ import Home from './pages/Home'
 import AuthCallback from './pages/AuthCallback'
 import Catalog from './pages/Catalog'
 import MySubscriptions from './pages/MySubscriptions'
-import Approvals from './pages/Approvals'
+import ActionCenter from './pages/ActionCenter'
 import MyTeam from './pages/MyTeam'
 import SuiteKeyCharges from './pages/SuiteKeyCharges'
 import FAQ from './pages/FAQ'
@@ -34,11 +34,11 @@ export default function App() {
       {/* Not role-gated: any signed-in user can view it, but it's only ever
           non-empty for SuiteKey owners / service managers (see RLS in
           supabase/schema_licenses.sql). */}
-      <Route path="/approvals" element={
-        <RequireAuth><Approvals /></RequireAuth>
+      <Route path="/action-center" element={
+        <RequireAuth><ActionCenter /></RequireAuth>
       } />
 
-      {/* Not role-gated — same convention as /approvals: empty unless the
+      {/* Not role-gated — same convention as /action-center: empty unless the
           signed-in user has direct/indirect reports (profiles.manager_email). */}
       <Route path="/my-team" element={
         <RequireAuth><MyTeam /></RequireAuth>

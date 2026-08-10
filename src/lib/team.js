@@ -2,7 +2,7 @@ import { supabase } from './supabase'
 
 // Mirrors Managers.gs's getTeamSubscriptions(): direct + indirect reports'
 // non-cancelled subscriptions. Not role-gated — same "just show it, it's
-// empty if nothing applies" convention as Approvals — since whether someone
+// empty if nothing applies" convention as Action Center — since whether someone
 // has reports is derived from profiles.manager_email, not a stored role.
 export async function getTeamSubscriptions() {
   const { data: rows, error: reportsError } = await supabase.rpc('get_report_emails')

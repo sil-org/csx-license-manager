@@ -1,8 +1,9 @@
 import { supabase } from './supabase'
-import { buildProvisioningNotifications } from './subscriptions'
+import { buildProvisioningNotifications, SUB_EMAIL_FIELDS } from './subscriptions'
 
-// Everything a suite-key owner or service manager might need to act on.
-// RLS already scopes these selects to rows the caller is authorized to see.
+// Everything a suite-key owner or service manager might need to act on —
+// backs the Action Center page (src/pages/ActionCenter.jsx). RLS already
+// scopes these selects to rows the caller is authorized to see.
 
 // Scoped to what the caller can personally act on next — see
 // get_my_pending_sk_verifications()/get_my_pending_approvals() in
@@ -47,12 +48,10 @@ export async function denySkOwnership(suiteKey) {
   return data
 }
 
-const SUB_EMAIL_FIELDS = 'user_email, fy, billing_cycle, billing_type, suite_key, ministry_id, license:licenses(name, activation_url, service_manager_email)'
-
 // Returns an array of { type, to, ... } entries — either the provisioning-needed
 // pair (see buildProvisioningNotifications) or a single 'decision_approved'
 // entry when the subscription went straight to 'active'. See handleApprove()
-// in Approvals.jsx.
+// in ActionCenter.jsx.
 export async function approveSubscription(subscriptionId) {
   const { error } = await supabase.rpc('approve_subscription', { p_subscription_id: subscriptionId })
   if (error) throw error
@@ -69,7 +68,7 @@ export async function approveSubscription(subscriptionId) {
 }
 
 // Returns [{ type: 'declined', to, sub, licenseName, reason }] for the caller
-// to email — see handleDecline() in Approvals.jsx.
+// to email — see handleDecline() in ActionCenter.jsx.
 export async function declineSubscription(subscriptionId, notes) {
   const { error } = await supabase.rpc('decline_subscription', { p_subscription_id: subscriptionId, p_notes: notes || null })
   if (error) throw error

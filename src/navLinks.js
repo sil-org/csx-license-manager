@@ -11,7 +11,7 @@ export function getLinks({ categories = [] } = {}) {
       to: '/catalog', label: 'Catalog', icon: LayoutGrid,
       children: categories.map(c => ({ to: `/catalog?category=${encodeURIComponent(c)}`, label: c })),
     },
-    { to: '/approvals', label: 'Approvals', icon: ShieldCheck },
+    { to: '/action-center', label: 'Action Center', icon: ShieldCheck },
     { to: '/my-team', label: 'My Team', icon: Users },
     { to: '/suite-key-charges', label: 'SuiteKey Charges', icon: KeyRound },
     { to: '/faq', label: 'FAQ', icon: HelpCircle },

@@ -3,15 +3,20 @@ import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
 import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
+import { useAuth } from '../../context/AuthContext'
 import { getAllSubscriptions } from '../../lib/admin'
 import { activateSubscription } from '../../lib/approvals'
-import { resendApprovalRequest, resendProvisioningRequest } from '../../lib/subscriptions'
+import { resendApprovalRequest, resendProvisioningRequest, cancelSubscription } from '../../lib/subscriptions'
 import { supabase } from '../../lib/supabase'
 import {
   sendEmail, activationEmailSubject, activationEmailHtml, approvalRequestEmailSubject, approvalRequestEmailHtml,
-  provisioningRequiredEmailSubject, provisioningRequiredEmailHtml,
+  provisioningRequiredEmailSubject, provisioningRequiredEmailHtml, cancelledEmailSubject, cancelledEmailHtml,
 } from '../../lib/email'
 import { billingLabel, fyLabel, STATUS_LABEL, STATUS_COLOR } from '../../lib/subscriptionDisplay'
+
+// Statuses cancel_subscription() will actually accept — mirrors the same
+// list in MySubscriptions.jsx/ActionCenter.jsx.
+const CANCELLABLE = ['pending', 'pending_sk_verification', 'approved', 'active']
 
 // Each column's sort() returns a directly-comparable value — same pattern as
 // Admin -> Catalog's COLUMNS, so the header-click handler stays generic
@@ -29,6 +34,7 @@ const COLUMNS = [
 // every user, every status, unfiltered. Admin: SuiteKey Charges/My Team are
 // scoped to what you own/manage; this is the one place to see everything.
 export default function AdminAllSubscriptions() {
+  const { profile } = useAuth()
   const [subs, setSubs] = useState(null)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
@@ -53,7 +59,7 @@ export default function AdminAllSubscriptions() {
     }
   }
 
-  // Mirrors handleActivate() in Approvals.jsx — duplicated rather than shared
+  // Mirrors handleActivate() in ActionCenter.jsx — duplicated rather than shared
   // since that page's version is tied to its own provisioning-queue reload.
   async function handleActivate(sub) {
     const priceInput = priceInputs[sub.id]
@@ -120,6 +126,34 @@ export default function AdminAllSubscriptions() {
     } catch (err) {
       console.error('resend provisioning request failed:', err.message)
       setResendState(s => ({ ...s, [sub.id]: 'failed' }))
+    }
+  }
+
+  // Admins can cancel any request from any non-terminal status here — mirrors
+  // the "Subscriptions you manage" section's handleCancelManaged() in
+  // ActionCenter.jsx. Always non-silent: an admin acting from this table is
+  // never cancelling their own subscription in the self-serve sense.
+  async function handleCancel(sub) {
+    const reason = window.prompt(`Cancel ${sub.license?.name} for ${sub.user_email}? Optionally add a reason (shown to them):`)
+    if (reason === null) return
+    try {
+      const notify = await cancelSubscription(sub.id, reason)
+      reload()
+      for (const n of notify || []) {
+        try {
+          await sendEmail({
+            to: n.to,
+            subject: cancelledEmailSubject(n.licenseName),
+            html: cancelledEmailHtml({ sub: n.sub, licenseName: n.licenseName, performedBy: profile?.primary_email, reason: n.reason }),
+            template: 'cancelled',
+            subscriptionId: sub.id,
+          })
+        } catch (err) {
+          console.error('cancelled email failed:', err.message)
+        }
+      }
+    } catch (err) {
+      setError(err.message)
     }
   }
 
@@ -205,50 +239,55 @@ export default function AdminAllSubscriptions() {
                   <td className={`p-3 ${STATUS_COLOR[sub.status]}`}>{STATUS_LABEL[sub.status]}</td>
                   <td className="p-3 text-gray-500 whitespace-nowrap">{sub.activated_at || '—'}</td>
                   <td className="p-3">
-                    {sub.status === 'approved' && (
-                      <div className="flex items-center gap-3 whitespace-nowrap">
-                        {sub.license?.activation_url && (
-                          <a href={sub.license.activation_url} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand">
-                            Open vendor portal
-                          </a>
-                        )}
-                        <input
-                          type="number" step="0.01" min="0" placeholder="Price paid"
-                          value={priceInputs[sub.id] ?? ''}
-                          onChange={e => setPriceInputs(p => ({ ...p, [sub.id]: e.target.value }))}
-                          className="w-20 border border-gray-300 rounded-lg px-2 py-1 text-xs"
-                        />
-                        <button onClick={() => handleActivate(sub)} className="text-xs font-medium text-sil-green">Mark active</button>
-                        {resendState[sub.id] === 'sent' ? (
+                    <div className="flex items-center gap-3 whitespace-nowrap">
+                      {sub.status === 'approved' && (
+                        <>
+                          {sub.license?.activation_url && (
+                            <a href={sub.license.activation_url} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand">
+                              Open vendor portal
+                            </a>
+                          )}
+                          <input
+                            type="number" step="0.01" min="0" placeholder="Price paid"
+                            value={priceInputs[sub.id] ?? ''}
+                            onChange={e => setPriceInputs(p => ({ ...p, [sub.id]: e.target.value }))}
+                            className="w-20 border border-gray-300 rounded-lg px-2 py-1 text-xs"
+                          />
+                          <button onClick={() => handleActivate(sub)} className="text-xs font-medium text-sil-green">Mark active</button>
+                          {resendState[sub.id] === 'sent' ? (
+                            <span className="text-xs text-sil-green">Sent</span>
+                          ) : resendState[sub.id] === 'failed' ? (
+                            <span className="text-xs text-sil-red">Failed</span>
+                          ) : (
+                            <button
+                              onClick={() => handleResendProvisioning(sub)}
+                              disabled={resendState[sub.id] === 'sending'}
+                              className="text-xs font-medium text-brand disabled:opacity-50"
+                            >
+                              {resendState[sub.id] === 'sending' ? 'Sending…' : 'Re-request provisioning'}
+                            </button>
+                          )}
+                        </>
+                      )}
+                      {sub.status === 'pending' && sub.suite_key && (
+                        resendState[sub.id] === 'sent' ? (
                           <span className="text-xs text-sil-green">Sent</span>
                         ) : resendState[sub.id] === 'failed' ? (
-                          <span className="text-xs text-sil-red">Failed</span>
+                          <span className="text-xs text-sil-red">Failed — check owner on file</span>
                         ) : (
                           <button
-                            onClick={() => handleResendProvisioning(sub)}
+                            onClick={() => handleResendApproval(sub)}
                             disabled={resendState[sub.id] === 'sending'}
                             className="text-xs font-medium text-brand disabled:opacity-50"
                           >
-                            {resendState[sub.id] === 'sending' ? 'Sending…' : 'Re-request provisioning'}
+                            {resendState[sub.id] === 'sending' ? 'Sending…' : 'Resend owner notification'}
                           </button>
-                        )}
-                      </div>
-                    )}
-                    {sub.status === 'pending' && sub.suite_key && (
-                      resendState[sub.id] === 'sent' ? (
-                        <span className="text-xs text-sil-green">Sent</span>
-                      ) : resendState[sub.id] === 'failed' ? (
-                        <span className="text-xs text-sil-red">Failed — check owner on file</span>
-                      ) : (
-                        <button
-                          onClick={() => handleResendApproval(sub)}
-                          disabled={resendState[sub.id] === 'sending'}
-                          className="text-xs font-medium text-brand disabled:opacity-50"
-                        >
-                          {resendState[sub.id] === 'sending' ? 'Sending…' : 'Resend owner notification'}
-                        </button>
-                      )
-                    )}
+                        )
+                      )}
+                      {CANCELLABLE.includes(sub.status) && (
+                        <button onClick={() => handleCancel(sub)} className="text-xs font-medium text-sil-red">Cancel</button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

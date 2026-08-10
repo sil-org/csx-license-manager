@@ -7,6 +7,8 @@ import {
   getPendingSkVerifications, getPendingApprovals, getProvisioningQueue,
   confirmSkOwnership, denySkOwnership, approveSubscription, declineSubscription, activateSubscription,
 } from '../lib/approvals'
+import { getServiceManagedSubscriptions, cancelSubscription } from '../lib/subscriptions'
+import { STATUS_LABEL } from '../lib/subscriptionDisplay'
 import {
   sendEmail,
   approvalRequestEmailSubject, approvalRequestEmailHtml,
@@ -16,13 +18,20 @@ import {
   provisioningRequiredEmailSubject, provisioningRequiredEmailHtml,
   decisionApprovedEmailSubject, decisionApprovedEmailHtml,
   declinedEmailSubject, declinedEmailHtml,
+  cancelledEmailSubject, cancelledEmailHtml,
 } from '../lib/email'
 
-export default function Approvals() {
+// Statuses cancel_subscription() will actually accept — mirrors the same
+// list in MySubscriptions.jsx. A row outside this set (already
+// cancelled/declined/revoked) shows its status only, no Cancel button.
+const NON_TERMINAL = ['pending', 'pending_sk_verification', 'approved', 'active']
+
+export default function ActionCenter() {
   const { profile } = useAuth()
   const [verifications, setVerifications] = useState(null)
   const [approvals, setApprovals] = useState(null)
   const [provisioning, setProvisioning] = useState(null)
+  const [managed, setManaged] = useState(null)
   const [error, setError] = useState(null)
   const [priceInputs, setPriceInputs] = useState({})
 
@@ -30,6 +39,7 @@ export default function Approvals() {
     getPendingSkVerifications().then(setVerifications).catch(e => setError(e.message))
     getPendingApprovals().then(setApprovals).catch(e => setError(e.message))
     getProvisioningQueue().then(setProvisioning).catch(e => setError(e.message))
+    getServiceManagedSubscriptions().then(setManaged).catch(e => setError(e.message))
   }
 
   useEffect(reload, [])
@@ -83,7 +93,7 @@ export default function Approvals() {
   }
 
   // approveSubscription() returns the same notify shape as requestSubscription()
-  // (see src/lib/subscriptions.js's buildProvisioningNotifications) — null unless
+  // (see buildProvisioningNotifications() in src/lib/subscriptions.js) — null unless
   // the license also needs provisioning, in which case both the requester and
   // whoever provisions the seat get emailed.
   async function handleApprove(sub) {
@@ -178,13 +188,41 @@ export default function Approvals() {
     }
   }
 
+  // cancel_subscription() takes an optional free-text reason, emailed to the
+  // subscriber unless they're cancelling their own request — see the
+  // `silent` option on cancelSubscription() in src/lib/subscriptions.js.
+  async function handleCancelManaged(sub) {
+    const reason = window.prompt(`Cancel ${sub.license_name} for ${sub.user_email}? Optionally add a reason (shown to them):`)
+    if (reason === null) return
+    try {
+      const isSelf = sub.user_email === profile?.primary_email
+      const notify = await cancelSubscription(sub.id, reason, { silent: isSelf })
+      reload()
+      for (const n of notify || []) {
+        try {
+          await sendEmail({
+            to: n.to,
+            subject: cancelledEmailSubject(n.licenseName),
+            html: cancelledEmailHtml({ sub: n.sub, licenseName: n.licenseName, performedBy: profile?.primary_email, reason: n.reason }),
+            template: 'cancelled',
+            subscriptionId: sub.id,
+          })
+        } catch (err) {
+          console.error('cancelled email failed:', err.message)
+        }
+      }
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   const nothingToDo =
     verifications?.length === 0 && approvals?.length === 0 && provisioning?.length === 0
 
   return (
     <AppLayout appName="License Manager" links={getLinks()}>
       <div className="max-w-3xl mx-auto p-6">
-        <h1 className="font-display text-2xl font-bold text-brand mb-6">Approvals</h1>
+        <h1 className="font-display text-2xl font-bold text-brand mb-6">Action Center</h1>
         {error && <p className="text-sil-red mb-4">{error}</p>}
 
         {nothingToDo && (
@@ -225,6 +263,18 @@ export default function Approvals() {
                   className="w-24 border border-gray-300 rounded-lg px-2 py-1 text-xs"
                 />
                 <button onClick={() => handleActivate(sub)} className="text-xs font-medium text-sil-green">Mark active</button>
+              </Row>
+            ))}
+          </Section>
+        )}
+
+        {managed?.length > 0 && (
+          <Section title="Subscriptions you manage">
+            {managed.map(sub => (
+              <Row key={sub.id} title={sub.license_name} sub={`${sub.user_email} · ${STATUS_LABEL[sub.status]}`}>
+                {NON_TERMINAL.includes(sub.status) && (
+                  <button onClick={() => handleCancelManaged(sub)} className="text-xs font-medium text-sil-red">Cancel</button>
+                )}
               </Row>
             ))}
           </Section>

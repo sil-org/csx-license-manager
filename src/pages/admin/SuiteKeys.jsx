@@ -86,7 +86,7 @@ export default function AdminSuiteKeys() {
   // "assign a new owner who still has to confirm themselves" and leaves
   // requests parked in pending_sk_verification, which is why this button used
   // to look like it did nothing. confirmSuiteKeyOwnership() actually advances
-  // them, same as if the approver had confirmed via Approvals themselves.
+  // them, same as if the approver had confirmed via Action Center themselves.
   async function handleQuickConfirm(k) {
     setError(null)
     try {
@@ -267,7 +267,7 @@ export default function AdminSuiteKeys() {
             <span className="block text-xs text-gray-400 -mt-2">
               {editing.is_group
                 ? "Anyone currently in this group can approve/decline/revoke charges to this key — no per-request verification step, since group membership is already the authorization check. Membership is synced from Google on a schedule, not read live."
-                : "Takes effect immediately — no confirmation needed from them. Any requests still awaiting verification on this key move into their Approvals queue and they're notified by email."}
+                : "Takes effect immediately — no confirmation needed from them. Any requests still awaiting verification on this key move into their Action Center queue and they're notified by email."}
             </span>
 
             <label className="block text-sm text-gray-700">

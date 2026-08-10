@@ -4,9 +4,9 @@ import { billingLabel, fyLabel } from './subscriptionDisplay'
 // Mirrors Emails.gs / the inline MailApp.sendEmail() calls in Subscriptions.gs
 // and Approvals.gs. Unlike the GAS originals, none of these embed one-click
 // action links — the new app's actions all happen on the authenticated
-// /approvals page (RLS already scopes it to what each signed-in user can act
-// on), so emails just point people there instead of carrying a bearer-token
-// link per subscription.
+// /action-center page (RLS already scopes it to what each signed-in user can
+// act on), so emails just point people there instead of carrying a
+// bearer-token link per subscription.
 
 // TEMPORARY, while Kate isn't yet comfortable trusting the app fully
 // unsupervised: every outbound email BCCs her regardless of what the caller
@@ -46,8 +46,8 @@ function appUrl(path) {
 // Manager" only shows up as an inline link where the body text needs it.
 function wrapEmail(heading, bodyHtml, footer = {
   text: 'You can also act on this from',
-  path: '/approvals',
-  linkText: 'License Manager → Approvals',
+  path: '/action-center',
+  linkText: 'License Manager → Action Center',
 }) {
   return `
 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #202124;">
@@ -99,8 +99,8 @@ export function skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail,
     ])}
     <p>Are you the budget manager for SuiteKey <strong>${suiteKey}</strong>?</p>
     ${ctaButtons([
-      { label: '✓ Yes, I manage this SuiteKey', href: appUrl('/approvals'), color: 'green' },
-      { label: '✗ No, I don’t manage it', href: appUrl('/approvals'), color: 'red' },
+      { label: '✓ Yes, I manage this SuiteKey', href: appUrl('/action-center'), color: 'green' },
+      { label: '✗ No, I don’t manage it', href: appUrl('/action-center'), color: 'red' },
     ])}
     <p style="font-size:13px;color:#666666">
       Sign in to confirm either way — if you confirm ownership, you'll be registered as the SuiteKey
@@ -125,10 +125,10 @@ export function approvalRequestEmailHtml({ suiteKey, licenseName, userEmail, rec
       ...(moreInfoUrl ? [['More info', `<a href="${moreInfoUrl}" style="color:#005CB9">${moreInfoUrl}</a>`]] : []),
     ])}
     ${ctaButtons([
-      { label: '✓ Approve', href: appUrl('/approvals'), color: 'green' },
-      { label: '✗ Decline', href: appUrl('/approvals'), color: 'red' },
+      { label: '✓ Approve', href: appUrl('/action-center'), color: 'green' },
+      { label: '✗ Decline', href: appUrl('/action-center'), color: 'red' },
     ])}
-    <p style="font-size:13px;color:#666666">Sign in to complete either action on the Approvals page.</p>
+    <p style="font-size:13px;color:#666666">Sign in to complete either action on the Action Center page.</p>
   `)
 }
 
@@ -142,7 +142,7 @@ export function suiteKeyAssignedEmailHtml({ suiteKey, pendingCount }) {
        <a href="${appUrl('/')}" style="color:#005CB9">License Manager</a>.</p>
     ${pendingCount > 0 ? `
     <p>${pendingCount} request${pendingCount === 1 ? ' is' : 's are'} already waiting on your approval.</p>
-    ${ctaButtons([{ label: 'Review Requests', href: appUrl('/approvals'), color: 'blue' }])}
+    ${ctaButtons([{ label: 'Review Requests', href: appUrl('/action-center'), color: 'blue' }])}
     ` : `
     <p style="font-size:13px;color:#666666">Sign in any time you have requests to review.</p>
     `}
@@ -367,5 +367,31 @@ export function revokedEmailHtml({ sub, licenseName, performedBy, reason }) {
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+
+export function cancelledEmailSubject(licenseName) {
+  return `License Subscription Cancelled: ${licenseName}`
+}
+
+// Sent when a service manager or admin cancels someone else's subscription
+// request (any non-terminal stage) — never for self-cancel, see
+// cancelSubscription()'s `silent` option in src/lib/subscriptions.js. Mirrors
+// revokedEmailHtml's reason-callout + performedBy-mailto-footer shape, but
+// escapes `reason` since it's free text the canceller typed.
+export function cancelledEmailHtml({ sub, licenseName, performedBy, reason }) {
+  const fy = fyLabel(sub)
+  return wrapEmail('License Subscription Cancelled', `
+    <p>Your subscription to <strong>${licenseName}</strong> has been cancelled by <a href="mailto:${performedBy}" style="color:#005CB9">${performedBy}</a>.</p>
+    ${reason ? `
+    <div style="background:#fce8e6;border-left:4px solid #D52227;border-radius:4px;padding:10px 14px;margin:16px 0;font-size:14px">
+      <strong style="color:#D52227">Reason given:</strong><br>${escapeHtml(reason)}
+    </div>` : ''}
+    ${detailsTable([
+      ['License', licenseName],
+      ['Billing', billingLabel(sub)],
+      ...(fy ? [['Fiscal Year', fy]] : []),
+    ])}
+    <p style="font-size:13px;color:#666666">Questions? Contact <a href="mailto:${performedBy}" style="color:#005CB9">${performedBy}</a>.</p>
+  `)
 }
 
