@@ -7,7 +7,7 @@ import { getAllLicenses, saveLicense, deactivateLicense, reactivateLicense } fro
 import { activationEmailHtml, renewalReminderCardHtml, renewalReminderEmailHtml } from '../../lib/email'
 
 const BLANK = {
-  id: null, name: '', vendor: '', category: '', price: '',
+  id: null, name: '', vendor: '', category: '', price: '', notes: '',
   gtis_sponsored: false, billing_cycle: 'annual', renewal_month: 10, renewal_reminder: true,
   activation_url: '', more_info_url: '', logo_url: '', google_group_email: '',
   pro_rated: false, service_manager_email: '', onboarding_message: '', reminder_message: '',
@@ -318,6 +318,17 @@ export default function AdminCatalog() {
                   Pro-rated
                 </label>
               </div>
+
+              <label className="col-span-2 block text-sm text-gray-700">
+                Description
+                <textarea
+                  value={editing.notes ?? ''}
+                  onChange={e => setEditing({ ...editing, notes: e.target.value })}
+                  rows={3}
+                  placeholder="Shown to staff in the Catalog before they subscribe — what it's for, what's included, any caveats."
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </label>
 
               <Field label="Activation URL" value={editing.activation_url} onChange={v => setEditing({ ...editing, activation_url: v })}
                 hint="Vendor admin portal link, shown to whoever provisions this license once it's approved — every subscription needs an explicit 'Mark active' regardless of whether this is set." />

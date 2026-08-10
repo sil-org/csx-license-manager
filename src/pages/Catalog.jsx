@@ -267,6 +267,18 @@ function RequestModal({ license, onClose }) {
           </>
         ) : (
           <form onSubmit={submit} className="space-y-4">
+            {(license.notes || license.more_info_url) && (
+              <div className="bg-gray-50 rounded-lg px-4 py-3 space-y-2">
+                {license.notes && (
+                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{license.notes}</p>
+                )}
+                {license.more_info_url && (
+                  <a href={license.more_info_url} target="_blank" rel="noreferrer" className="text-sm font-medium text-brand inline-block">
+                    More information →
+                  </a>
+                )}
+              </div>
+            )}
             {license.price != null && (
               <div className="bg-gray-50 rounded-lg px-4 py-3">
                 <p className="text-lg font-semibold text-gray-900">{formatPrice(license.price)}</p>
