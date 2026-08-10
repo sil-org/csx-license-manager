@@ -523,7 +523,7 @@ begin
       -- is already an authoritative claim, and current membership itself is
       -- the authorization check (is_suite_key_owner() below covers this).
       if exists (
-        select 1 from group_memberships where group_email = v_owner_group and member_email = v_actor_email
+        select 1 from group_memberships where group_email = v_owner_group and lower(member_email) = lower(v_actor_email)
       ) then
         v_status := 'approved';
       else
@@ -540,7 +540,16 @@ begin
         raise exception 'suite key % has no owner on file — provide a suggested approver email', v_suite_key;
       end if;
       v_pending_approver := nullif(lower(trim(p_suggested_approver_email)), '');
-      if v_pending_approver = v_actor_email then
+      -- lower(v_actor_email): current_profile_email() returns whatever case
+      -- Google's OAuth handed back at signup, not normalized — every other
+      -- comparison in this function (and admin_update_suite_key_owner,
+      -- admin_confirm_sk_ownership, get_report_emails, sync-group-memberships'
+      -- own write path) lowercases both sides first; this one and the
+      -- "already-owns-it" check below didn't, so an owner/approver match
+      -- could silently fall through to 'pending'/'pending_sk_verification'
+      -- over a pure case difference (e.g. an admin-typed owner email in
+      -- different case than that person's actual Google-account casing).
+      if v_pending_approver = lower(v_actor_email) then
         -- The signed-in requester is suggesting themselves as this
         -- unclaimed key's owner — no point parking this in
         -- pending_sk_verification and emailing them a link to confirm a
@@ -549,7 +558,7 @@ begin
         -- the same outcome as the "already-owns-it" branch below, instead
         -- of a self-addressed confirmation email that's easy to miss (see
         -- request-for-others RLS gap notes elsewhere in this file).
-        update suite_keys set owner_email = v_actor_email where suite_key = v_suite_key;
+        update suite_keys set owner_email = lower(v_actor_email) where suite_key = v_suite_key;
         insert into audit_log (action, suite_key, performed_by, ip_address)
         values ('sk_verified', v_suite_key, v_actor_email, current_client_ip());
         v_status := 'approved';
@@ -557,7 +566,7 @@ begin
       else
         v_status := 'pending_sk_verification';
       end if;
-    elsif v_owner = v_actor_email then
+    elsif lower(v_owner) = lower(v_actor_email) then
       v_status := 'approved';
     else
       v_status := 'pending';
