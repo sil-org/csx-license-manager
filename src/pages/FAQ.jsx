@@ -103,8 +103,8 @@ const SECTIONS = [
         a: 'The Action Center page shows any SuiteKey ownership verifications and subscription approvals waiting on you — it’s empty unless something needs your attention. For a full view of every charge to your SuiteKey(s), not just the pending ones, see SuiteKey Charges in the sidebar.',
       },
       {
-        q: 'I manage a license’s vendor setup — where do I provision seats?',
-        a: 'The Action Center page’s "Approved — needs provisioning" section lists subscriptions waiting on you, with a link to the vendor portal and a button to mark the seat active once it’s set up. Its "Subscriptions you manage" section lists every subscription to that license, including a Cancel action for any that haven’t already been cancelled or revoked.',
+        q: 'I manage a license’s vendor setup — where do I provision seats or cancel a request?',
+        a: 'Admin → All Subscriptions (also open to service managers, not just admins) lists every subscription to that license — a "Mark active" action with a link to the vendor portal for ones awaiting provisioning, and a Cancel action for any that haven’t already been cancelled or revoked.',
       },
       {
         q: 'I’m a people manager — where can I see my team’s subscriptions?',

@@ -23,20 +23,21 @@ Follow `SETUP.md`, then run both schema files in the Supabase SQL Editor, in ord
   subscription (SuiteKey with typeahead, Ministry ID, or GTIS-sponsored)
 - **My Subscriptions** (`/subscriptions`) — view your requests, cancel, opt
   in/out of renewal
-- **Action Center** (`/action-center`) — for SuiteKey owners and license
-  service managers: verify SuiteKey ownership, approve/decline requests, mark
-  approved licenses as provisioned, and (service managers/admins) cancel any
-  request for a managed license at any non-terminal stage, with an optional
-  reason emailed to the subscriber. Not role-gated in the UI — it's empty
-  unless you own a SuiteKey or service-manage a license (enforced by RLS)
+- **Action Center** (`/action-center`) — for SuiteKey owners: verify SuiteKey
+  ownership, approve/decline requests. Not role-gated in the UI — it's empty
+  unless you own a SuiteKey (enforced by RLS). Provisioning and cancellation
+  live on Admin → All Subscriptions instead (see below)
 - **My Team** (`/my-team`) — for people managers: every active/pending
   subscription used by your direct and indirect reports (`profiles.manager_email`)
 - **SuiteKey Charges** (`/suite-key-charges`) — every charge against any
   SuiteKey you own, individually or via a Google Group
 - **FAQ** (`/faq`)
 - **Admin → Catalog** — create/edit/deactivate licenses, with search
-- **Admin → All Subscriptions** — every subscription, every user, every
-  status, unfiltered
+- **Admin → All Subscriptions** — for admins, every subscription, every user,
+  every status, unfiltered; also open to license service managers, for whom
+  RLS narrows it to their own/managed rows. Mark approved subscriptions
+  active (with a link to the vendor portal), and cancel any non-terminal
+  request with an optional reason emailed to the subscriber
 - **Admin → Audit Log** — full history of every request/approval/decline/
   activation/cancellation/revocation/merge, with search
 - **Admin → Finance Export** — pro-rated cost export (CSV or on-screen
@@ -84,7 +85,7 @@ The big ones:
   CubeBackup with `{"baseUrl": "...", "domain": "..."}`, and set the
   `CUBEBACKUP_API_KEY` secret. Not scheduled yet (see
   `supabase/functions/README.md`) — the fire-and-forget kick from
-  Action Center/My Subscriptions covers the common case in the meantime, but a
+  Admin → All Subscriptions/My Subscriptions covers the common case in the meantime, but a
   schedule is the correctness backstop for anything that misses. Adding the
   next vendor is one adapter file (`supabase/functions/sync-provisioning/adapters/`)
   + a dropdown entry, not a new schema/Edge Function.

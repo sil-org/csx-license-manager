@@ -19,17 +19,6 @@ export async function getMySubscriptions(email) {
 // build a notification descriptor after a status-changing RPC call.
 export const SUB_EMAIL_FIELDS = 'user_email, fy, billing_cycle, billing_type, suite_key, ministry_id, license:licenses(name, activation_url, service_manager_email)'
 
-// Every subscription (any status) for a license the caller service-manages —
-// backs the "Subscriptions you manage" section on the Action Center page.
-// Scoped server-side by get_my_service_managed_subscriptions(), not RLS's
-// admin bypass — see that RPC's comment in
-// supabase/pending/27_service_manager_cancel.sql.
-export async function getServiceManagedSubscriptions() {
-  const { data, error } = await supabase.rpc('get_my_service_managed_subscriptions')
-  if (error) throw error
-  return data
-}
-
 // Both request_subscription and approve_subscription (src/lib/approvals.js)
 // can land a subscription straight in 'approved' (auto-approved or manually
 // approved, but the license needs provisioning before it's active) — same

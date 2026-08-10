@@ -57,8 +57,12 @@ export default function App() {
         <RequireAuth role="admin"><AdminCatalog /></RequireAuth>
       } />
 
+      {/* allowServiceManager: also open to a license's service manager, not
+          just admins — they need this page for provisioning/cancelling their
+          own licenses' subscriptions. RLS scopes what a non-admin actually
+          sees/can act on here to their own rows. */}
       <Route path="/admin/all-subscriptions" element={
-        <RequireAuth role="admin"><AdminAllSubscriptions /></RequireAuth>
+        <RequireAuth role="admin" allowServiceManager><AdminAllSubscriptions /></RequireAuth>
       } />
 
       <Route path="/admin/audit-log" element={

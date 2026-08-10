@@ -59,8 +59,6 @@ export default function AdminAllSubscriptions() {
     }
   }
 
-  // Mirrors handleActivate() in ActionCenter.jsx — duplicated rather than shared
-  // since that page's version is tied to its own provisioning-queue reload.
   async function handleActivate(sub) {
     const priceInput = priceInputs[sub.id]
     const price = priceInput?.trim() ? Number(priceInput) : null
@@ -129,10 +127,11 @@ export default function AdminAllSubscriptions() {
     }
   }
 
-  // Admins can cancel any request from any non-terminal status here — mirrors
-  // the "Subscriptions you manage" section's handleCancelManaged() in
-  // ActionCenter.jsx. Always non-silent: an admin acting from this table is
-  // never cancelling their own subscription in the self-serve sense.
+  // Admins and (per license) service managers can cancel any request from
+  // any non-terminal status here — this table is scoped by RLS, so a service
+  // manager only ever sees rows they're actually authorized to act on. Always
+  // non-silent: acting from this table is never "cancelling my own
+  // subscription" in the self-serve sense (that's My Subscriptions).
   async function handleCancel(sub) {
     const reason = window.prompt(`Cancel ${sub.license?.name} for ${sub.user_email}? Optionally add a reason (shown to them):`)
     if (reason === null) return
@@ -152,6 +151,10 @@ export default function AdminAllSubscriptions() {
           console.error('cancelled email failed:', err.message)
         }
       }
+      // Nudges sync-provisioning to reconcile (deprovision) now instead of
+      // waiting for its next scheduled run — best effort, the schedule is
+      // the correctness backstop if this fails.
+      supabase.functions.invoke('sync-provisioning').catch(err => console.error('provisioning sync kick failed:', err.message))
     } catch (err) {
       setError(err.message)
     }

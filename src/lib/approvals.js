@@ -23,16 +23,6 @@ export async function getPendingApprovals() {
   return data
 }
 
-export async function getProvisioningQueue() {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .select('*, license:licenses(name, activation_url, service_manager_email, onboarding_message, more_info_url)')
-    .eq('status', 'approved')
-    .order('created_at')
-  if (error) throw error
-  return data
-}
-
 // Both return the subscriptions they just advanced ({id, user_email, license_name}[])
 // so the caller can notify each one — see src/lib/email.js.
 

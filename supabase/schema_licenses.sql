@@ -1059,29 +1059,6 @@ begin
 end;
 $$;
 
--- Backs a new "Subscriptions you manage" section on the Action Center page —
--- every subscription (any status, not just ones awaiting the caller's next
--- action) for a license the caller service-manages. Deliberately does NOT
--- also check is_admin(), same reasoning as get_my_pending_approvals()/
--- get_my_pending_sk_verifications() (see supabase/pending/19_scope_approvals_to_owned_keys.sql)
--- — an admin who manages no licenses should see an empty list here, not
--- every subscription company-wide via RLS's admin bypass.
-create or replace function get_my_service_managed_subscriptions()
-returns table(
-  id uuid, user_email text, suite_key text, ministry_id text, status subscription_status,
-  fy int, billing_cycle billing_cycle, billing_type subscription_billing_type,
-  activated_at date, created_at timestamptz, license_id uuid, license_name text
-)
-language sql stable security definer as $$
-  select s.id, s.user_email, s.suite_key, s.ministry_id, s.status,
-         s.fy, s.billing_cycle, s.billing_type,
-         s.activated_at, s.created_at, s.license_id, l.name
-  from subscriptions s
-  join licenses l on l.id = s.license_id
-  where is_service_manager_for(s.license_id)
-  order by s.created_at desc
-$$;
-
 create or replace function revoke_subscription(p_subscription_id uuid)
 returns void language plpgsql security definer as $$
 declare
