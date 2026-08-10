@@ -93,7 +93,10 @@ export default function AdminAllSubscriptions() {
         to: notify.to,
         bcc: notify.bcc,
         subject: approvalRequestEmailSubject(notify.suiteKey),
-        html: approvalRequestEmailHtml(notify),
+        html: approvalRequestEmailHtml({
+          suiteKey: notify.suiteKey, licenseName: notify.licenseName,
+          userEmail: notify.requesterEmail, recipientEmail: notify.recipientEmail, moreInfoUrl: notify.moreInfoUrl,
+        }),
         template: 'approval_request',
         subscriptionId: sub.id,
       })
