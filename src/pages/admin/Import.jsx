@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ExternalLink } from 'lucide-react'
 import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
@@ -111,7 +112,7 @@ function parseGasAuditLog(text) {
 
 // Shared shape for every importer below: pick a file, see a preview + count,
 // import, see per-row ok/fail results. Never lets one bad row fail the batch.
-function ImportSection({ title, description, previewColumns, rowLabel, parse, doImport }) {
+function ImportSection({ title, description, sourceUrl, previewColumns, rowLabel, parse, doImport }) {
   const [fileName, setFileName] = useState('')
   const [rows, setRows] = useState(null)
   const [results, setResults] = useState(null)
@@ -153,7 +154,14 @@ function ImportSection({ title, description, previewColumns, rowLabel, parse, do
 
   return (
     <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-      <h2 className="font-display text-lg font-bold text-brand mb-1">{title}</h2>
+      <h2 className="font-display text-lg font-bold text-brand mb-1 flex items-center gap-1.5">
+        {title}
+        {sourceUrl && (
+          <a href={sourceUrl} target="_blank" rel="noreferrer" title="Open source spreadsheet" className="text-gray-300 hover:text-brand">
+            <ExternalLink size={15} />
+          </a>
+        )}
+      </h2>
       <p className="text-xs text-gray-400 mb-4">{description}</p>
 
       <input type="file" accept=".csv" onChange={handleFile} className="text-sm mb-4" />
@@ -265,6 +273,7 @@ export default function AdminImport() {
 
         <ImportSection
           title="Team hierarchy"
+          sourceUrl="https://docs.google.com/spreadsheets/d/1bSv4fta7p-TkFUnKZUKMSLkjp2wquMzyHp2N6OBGKbA/edit?gid=0#gid=0"
           description={'Upload a weekly export of the org-hierarchy Sheet to update who reports to whom (drives the My Team page). Required column: primary_email — creates a placeholder profile if that person hasn’t signed in yet (skipped if the email isn’t an eligible SIL staff domain). Optional: manager_email — leave blank for anyone with no manager on file, which is a known reality of the source data, not an error. Optional: sco (a 3-letter org code) — not used anywhere in the app yet, just captured for later.'}
           previewColumns={TEAM_HIERARCHY_COLUMNS}
           rowLabel={row => `${row.primary_email} → ${row.manager_email || '(no manager)'}`}
