@@ -1299,12 +1299,14 @@ $$;
 -- request_subscription(), for the same reasons — and the same FY rollover
 -- rule as GAS's getCurrentFiscalYear() when fy isn't given (October start).
 --
--- requester_email is optional: an email that must resolve to an existing
--- profile (primary_email match), recorded as the subscription's
--- requested_by instead of defaulting to the importing admin — for
--- historical rows where someone else actually submitted the original
--- request. Blank/omitted keeps the old behavior. Mirrors
--- admin_import_licenses()'s created_by_email.
+-- requester_email is optional: recorded as the subscription's requested_by
+-- instead of defaulting to the importing admin — for historical rows where
+-- someone else actually submitted the original request. Blank/omitted keeps
+-- the old behavior. If it doesn't match an existing profile, a placeholder
+-- one is created (display_name = the email itself) so requested_by can
+-- still point at a real profiles row — resolve_profile() (schema.sql) links
+-- that placeholder to their real Google account on their actual first
+-- sign-in instead of erroring on the now-duplicate primary_email.
 --
 -- Each row is processed in its own sub-block so one bad row can't abort the
 -- whole batch — returns one result object per input row: {ok, error?, row}.
@@ -1362,7 +1364,8 @@ begin
       if v_error is null and v_requester_email is not null then
         select id into v_requested_by from profiles where lower(primary_email) = v_requester_email;
         if v_requested_by is null then
-          v_error := 'Requester not found: ' || (v_row->>'requester_email');
+          insert into profiles (display_name, primary_email) values (v_requester_email, v_requester_email)
+            returning id into v_requested_by;
         end if;
       end if;
 

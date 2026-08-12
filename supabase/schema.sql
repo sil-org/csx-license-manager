@@ -189,15 +189,28 @@ begin
     end if;
   end if;
 
-  -- case 3: brand new person — the only path that creates a profile, so the
-  -- only path that needs the eligibility check.
+  -- case 3: brand new person, or their first sign-in after a profile was
+  -- pre-created for them without a linked account yet (e.g. license-manager's
+  -- admin_import_subscriptions creating a placeholder profile for a
+  -- historical row's requester_email) — either way this is the only path
+  -- that needs the eligibility check.
   if not is_eligible_staff_email(p_email) then
     raise exception 'Access restricted to SIL staff.';
   end if;
 
-  insert into profiles (display_name, primary_email)
-  values (p_display_name, p_email)
-  returning id into v_profile_id;
+  -- A pre-created placeholder profile already claims this primary_email
+  -- (unique, case-insensitive) — link to it instead of inserting a second
+  -- row, which would violate that uniqueness. Refresh display_name now that
+  -- we have their real Google-verified name instead of whatever placeholder
+  -- (often just the email itself) was used when the profile was pre-created.
+  select id into v_profile_id from profiles where lower(primary_email) = lower(p_email);
+  if v_profile_id is not null then
+    update profiles set display_name = p_display_name where id = v_profile_id;
+  else
+    insert into profiles (display_name, primary_email)
+    values (p_display_name, p_email)
+    returning id into v_profile_id;
+  end if;
 
   insert into linked_accounts (supabase_user_id, profile_id, email)
   values (p_supabase_user_id, v_profile_id, p_email);
