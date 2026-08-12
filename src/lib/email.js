@@ -16,7 +16,7 @@ import { billingLabel, fyLabel } from './subscriptionDisplay'
 // something to do. Remove OVERSIGHT_BCC (and the merge below) once she is.
 const OVERSIGHT_BCC = 'kate_brenner@sil.org'
 
-export async function sendEmail({ to, subject, html, template, subscriptionId, bcc }) {
+export async function sendEmail({ to, subject, html, template, subscriptionId, bcc, cc }) {
   const allBcc = [...new Set([...(bcc || []), OVERSIGHT_BCC])]
   const { error } = await supabase.functions.invoke('send-email', {
     body: {
@@ -26,6 +26,7 @@ export async function sendEmail({ to, subject, html, template, subscriptionId, b
       template,
       subscription_id: subscriptionId || null,
       bcc: allBcc,
+      cc: cc?.length ? cc : undefined,
     },
   })
   if (error) throw error
@@ -182,14 +183,15 @@ export function renewalReminderEmailSubject() {
   return 'Action Required: Software License Renewal'
 }
 
-// One license's card within the weekly renewal-reminder digest — mirrors
-// Emails.gs's sendPerLicenseReminders(), which batches one card per
-// upcoming-renewal license into a single weekly email per user. The digest
-// sender itself isn't built yet (see README's "not ported yet" list) — this
-// is the content half, so Admin → Catalog has somewhere to author and
-// preview the per-license override ahead of that. `reminderMessage` is the
-// per-license override (licenses.reminder_message); falls back to a generic
-// default when unset, same pattern as activationEmailHtml's onboardingMessage.
+// One license's card within a renewal-reminder email — mirrors Emails.gs's
+// sendPerLicenseReminders(), which batches one card per upcoming-renewal
+// license into a single email per user. Used both by Admin → Catalog's
+// preview and by the real single-subscription send in
+// Admin → All Subscriptions (see handleSendRenewalReminder there); the
+// *weekly, all-subscriptions-at-once* digest sender still isn't built (see
+// README's "not ported yet" list). `reminderMessage` is the per-license
+// override (licenses.reminder_message); falls back to a generic default when
+// unset, same pattern as activationEmailHtml's onboardingMessage.
 export function renewalReminderCardHtml({ licenseName, suiteKey, priceLabel, renewalLabel, reminderMessage }) {
   const intro = reminderMessage || `Your <strong>${licenseName}</strong> subscription is coming up for renewal.`
   return `

@@ -50,3 +50,15 @@ export function shouldShowFY(sub) {
 export function fyLabel(sub) {
   return shouldShowFY(sub) ? `FY${sub.fy}` : null
 }
+
+// Next occurrence of the 1st of renewalMonth — this year if it hasn't
+// happened yet, otherwise next year. Mirrors Emails.gs's renewal-date
+// calculation (gas-legacy/src/Emails.gs), used for the renewal-reminder
+// email's "Renews <date>" line.
+export function nextRenewalLabel(renewalMonth) {
+  if (!renewalMonth) return null
+  const now = new Date()
+  let date = new Date(now.getFullYear(), renewalMonth - 1, 1)
+  if (date.getTime() <= now.getTime()) date = new Date(now.getFullYear() + 1, renewalMonth - 1, 1)
+  return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+}

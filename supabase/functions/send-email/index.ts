@@ -11,6 +11,7 @@ interface EmailRequest {
   template: string
   subscription_id?: string
   bcc?: string[]
+  cc?: string[]
 }
 
 Deno.serve(async (req) => {
@@ -30,7 +31,7 @@ Deno.serve(async (req) => {
     )
 
     const body: EmailRequest = await req.json()
-    const { to, subject, html, template, subscription_id, bcc } = body
+    const { to, subject, html, template, subscription_id, bcc, cc } = body
 
     if (!to || (Array.isArray(to) && !to.length) || !subject || !html || !template) {
       return json({ error: 'Missing required fields: to, subject, html, template' }, 400)
@@ -40,6 +41,10 @@ Deno.serve(async (req) => {
     // recipient (which would also mean each recipient sees only themselves,
     // not who else was notified).
     const toEmail = Array.isArray(to) ? to.join(', ') : to
+    // email_log has no separate cc column — fold it into to_email so the log
+    // still shows who actually received the email (e.g. a renewal reminder's
+    // original requester, CC'd alongside the subscription owner).
+    const toEmailLog = cc?.length ? `${toEmail} (cc: ${cc.join(', ')})` : toEmail
 
     // Send via Resend
     const resendRes = await fetch(RESEND_API_URL, {
@@ -48,7 +53,11 @@ Deno.serve(async (req) => {
         'Authorization': `Bearer ${Deno.env.get('RESEND_API_KEY')}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ from: FROM, to, subject, html, reply_to: REPLY_TO, ...(bcc?.length ? { bcc } : {}) }),
+      body: JSON.stringify({
+        from: FROM, to, subject, html, reply_to: REPLY_TO,
+        ...(bcc?.length ? { bcc } : {}),
+        ...(cc?.length ? { cc } : {}),
+      }),
     })
 
     const resendData = await resendRes.json()
@@ -57,7 +66,7 @@ Deno.serve(async (req) => {
 
     // Log to database regardless of send success/failure
     await supabase.from('email_log').insert({
-      to_email: toEmail,
+      to_email: toEmailLog,
       subject,
       template,
       subscription_id: subscription_id || null,

@@ -142,6 +142,28 @@ export async function cancelSubscription(subscriptionId, reason, { silent = fals
   return [{ type: 'cancelled', to: sub.user_email, sub, licenseName: sub.license.name, reason: reason || null }]
 }
 
+// Resolves who a renewal reminder for this subscription should reach: the
+// owner (sub.user_email) always, plus whoever originally requested it — CC'd,
+// not TO'd — when that's a different person (e.g. Kate requesting a license
+// for Joe: Joe gets renewed, Kate is CC'd since she's the one who'll field
+// the renew/cancel call). Reuses the same audit_log 'requested'-action lookup
+// as resendApprovalRequest() above rather than subscriptions.requested_by
+// (a profiles uuid FK) — a plain SELECT against profiles by id would 404
+// under RLS for a non-admin service manager, since "profiles: own read" only
+// allows reading your own row or every row as an admin.
+export async function buildRenewalReminderNotification(sub) {
+  const { data: auditRows } = await supabase
+    .from('audit_log')
+    .select('performed_by')
+    .eq('subscription_id', sub.id)
+    .eq('action', 'requested')
+    .order('created_at', { ascending: false })
+    .limit(1)
+  const requesterEmail = auditRows?.[0]?.performed_by
+  const cc = requesterEmail && requesterEmail.toLowerCase() !== sub.user_email.toLowerCase() ? [requesterEmail] : []
+  return { to: sub.user_email, cc, licenseName: sub.license.name }
+}
+
 export async function optInRenewal(subscriptionId) {
   const { error } = await supabase.rpc('opt_in_renewal', { p_subscription_id: subscriptionId })
   if (error) throw error

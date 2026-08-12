@@ -6,13 +6,21 @@ import { getLinks } from '../../navLinks'
 import { useAuth } from '../../context/AuthContext'
 import { getAllSubscriptions } from '../../lib/admin'
 import { activateSubscription } from '../../lib/approvals'
-import { resendApprovalRequest, resendProvisioningRequest, cancelSubscription } from '../../lib/subscriptions'
+import { resendApprovalRequest, resendProvisioningRequest, cancelSubscription, buildRenewalReminderNotification } from '../../lib/subscriptions'
 import { supabase } from '../../lib/supabase'
 import {
   sendEmail, activationEmailSubject, activationEmailHtml, approvalRequestEmailSubject, approvalRequestEmailHtml,
   provisioningRequiredEmailSubject, provisioningRequiredEmailHtml, cancelledEmailSubject, cancelledEmailHtml,
+  renewalReminderEmailSubject, renewalReminderEmailHtml, renewalReminderCardHtml,
 } from '../../lib/email'
-import { billingLabel, fyLabel, STATUS_LABEL, STATUS_COLOR } from '../../lib/subscriptionDisplay'
+import { billingLabel, fyLabel, nextRenewalLabel, STATUS_LABEL, STATUS_COLOR } from '../../lib/subscriptionDisplay'
+
+// Mirrors Emails.gs's per-license reminder eligibility (gas-legacy/src/Emails.gs):
+// only active annual subscriptions with the per-license reminder toggle on,
+// that haven't already opted in/out for the year.
+function isRenewalReminderEligible(sub) {
+  return sub.status === 'active' && sub.billing_cycle === 'annual' && sub.renewal_reminder && sub.renewal_status === 'none'
+}
 
 // Statuses cancel_subscription() will actually accept — mirrors the same
 // list in MySubscriptions.jsx/ActionCenter.jsx.
@@ -163,6 +171,37 @@ export default function AdminAllSubscriptions() {
     }
   }
 
+  // Manually triggers a single-subscription renewal reminder — the "initial"
+  // send (issue #3: renewal notices should reach both the target account and
+  // the original requester, CC'd, when different). A weekly job that does
+  // this automatically for every eligible subscription is separate,
+  // not-yet-built work — see README's "not ported yet" list.
+  async function handleSendRenewalReminder(sub) {
+    setResendState(s => ({ ...s, [sub.id]: 'sending' }))
+    try {
+      const notify = await buildRenewalReminderNotification(sub)
+      const card = renewalReminderCardHtml({
+        licenseName: notify.licenseName,
+        suiteKey: billingLabel(sub),
+        priceLabel: sub.price_at_signup != null ? `$${Number(sub.price_at_signup).toFixed(2)}/yr` : null,
+        renewalLabel: nextRenewalLabel(sub.renewal_month),
+        reminderMessage: sub.license?.reminder_message,
+      })
+      await sendEmail({
+        to: notify.to,
+        cc: notify.cc,
+        subject: renewalReminderEmailSubject(),
+        html: renewalReminderEmailHtml({ cardsHtml: card }),
+        template: 'renewal_reminder',
+        subscriptionId: sub.id,
+      })
+      setResendState(s => ({ ...s, [sub.id]: 'sent' }))
+    } catch (err) {
+      console.error('renewal reminder failed:', err.message)
+      setResendState(s => ({ ...s, [sub.id]: 'failed' }))
+    }
+  }
+
   const q = search.trim().toLowerCase()
   const textFiltered = !q ? subs : subs?.filter(s =>
     s.user_email.toLowerCase().includes(q) ||
@@ -287,6 +326,21 @@ export default function AdminAllSubscriptions() {
                             className="text-xs font-medium text-brand disabled:opacity-50"
                           >
                             {resendState[sub.id] === 'sending' ? 'Sending…' : 'Resend owner notification'}
+                          </button>
+                        )
+                      )}
+                      {isRenewalReminderEligible(sub) && (
+                        resendState[sub.id] === 'sent' ? (
+                          <span className="text-xs text-sil-green">Sent</span>
+                        ) : resendState[sub.id] === 'failed' ? (
+                          <span className="text-xs text-sil-red">Failed</span>
+                        ) : (
+                          <button
+                            onClick={() => handleSendRenewalReminder(sub)}
+                            disabled={resendState[sub.id] === 'sending'}
+                            className="text-xs font-medium text-brand disabled:opacity-50"
+                          >
+                            {resendState[sub.id] === 'sending' ? 'Sending…' : 'Send renewal reminder'}
                           </button>
                         )
                       )}
