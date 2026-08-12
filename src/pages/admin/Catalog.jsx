@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ChevronUp, ChevronDown, ChevronsUpDown, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronUp, ChevronDown, ChevronsUpDown, X, Bold, Italic, List, Link as LinkIcon } from 'lucide-react'
 import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
@@ -367,12 +367,10 @@ export default function AdminCatalog() {
                 <div className="mt-3 space-y-4">
                   <label className="block text-sm text-gray-700">
                     Onboarding email override
-                    <textarea
+                    <RichTextEditor
                       value={editing.onboarding_message ?? ''}
-                      onChange={e => setEditing({ ...editing, onboarding_message: e.target.value })}
-                      rows={2}
+                      onChange={html => setEditing({ ...editing, onboarding_message: html })}
                       placeholder="Leave blank to use the default &quot;your license is ready&quot; message"
-                      className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                     />
                     <span className="block text-xs text-gray-400 mt-0.5">
                       Replaces the default activation email body for this license — e.g. setup steps a generic message wouldn't cover.
@@ -382,12 +380,10 @@ export default function AdminCatalog() {
 
                   <label className="block text-sm text-gray-700">
                     Renewal reminder override
-                    <textarea
+                    <RichTextEditor
                       value={editing.reminder_message ?? ''}
-                      onChange={e => setEditing({ ...editing, reminder_message: e.target.value })}
-                      rows={2}
+                      onChange={html => setEditing({ ...editing, reminder_message: html })}
                       placeholder="Leave blank to use the default renewal-reminder message"
-                      className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                     />
                     <span className="block text-xs text-gray-400 mt-0.5">
                       Replaces the default text in this license's card within the renewal-reminder digest. Content only for
@@ -428,6 +424,78 @@ export default function AdminCatalog() {
         </div>
       )}
     </AppLayout>
+  )
+}
+
+// Minimal WYSIWYG editor for the email-override fields — these values get
+// dropped straight into the outgoing email HTML unescaped (see
+// activationEmailHtml/renewalReminderCardHtml in lib/email.js), so what's
+// authored here is exactly what recipients see. Uses contentEditable +
+// execCommand rather than pulling in a rich-text dependency, since the
+// formatting needs are just bold/italic/list/link.
+const RTE_COMMANDS = [
+  { command: 'bold', icon: Bold, title: 'Bold' },
+  { command: 'italic', icon: Italic, title: 'Italic' },
+  { command: 'insertUnorderedList', icon: List, title: 'Bulleted list' },
+]
+
+function RichTextEditor({ value, onChange, placeholder }) {
+  const ref = useRef(null)
+
+  useEffect(() => {
+    if (ref.current && ref.current.innerHTML !== (value || '')) {
+      ref.current.innerHTML = value || ''
+    }
+  }, [value])
+
+  function exec(command, arg) {
+    ref.current.focus()
+    document.execCommand(command, false, arg)
+    onChange(ref.current.innerHTML)
+  }
+
+  function handleLink() {
+    const url = window.prompt('Link URL (leave blank to remove an existing link)')
+    if (url === null) return
+    ref.current.focus()
+    document.execCommand(url ? 'createLink' : 'unlink', false, url || undefined)
+    onChange(ref.current.innerHTML)
+  }
+
+  return (
+    <div className="mt-1 w-full border border-gray-300 rounded-lg overflow-hidden focus-within:ring-1 focus-within:ring-brand">
+      <div className="flex items-center gap-0.5 border-b border-gray-200 bg-gray-50 px-1.5 py-1">
+        {RTE_COMMANDS.map(({ command, icon: Icon, title }) => (
+          <button
+            key={command}
+            type="button"
+            title={title}
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => exec(command)}
+            className="p-1 rounded text-gray-600 hover:bg-gray-200"
+          >
+            <Icon size={14} />
+          </button>
+        ))}
+        <button
+          type="button"
+          title="Link"
+          onMouseDown={e => e.preventDefault()}
+          onClick={handleLink}
+          className="p-1 rounded text-gray-600 hover:bg-gray-200"
+        >
+          <LinkIcon size={14} />
+        </button>
+      </div>
+      <div
+        ref={ref}
+        contentEditable
+        suppressContentEditableWarning
+        onInput={e => onChange(e.currentTarget.innerHTML)}
+        data-placeholder={placeholder}
+        className="px-3 py-2 text-sm min-h-[4.5rem] focus:outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400"
+      />
+    </div>
   )
 }
 
