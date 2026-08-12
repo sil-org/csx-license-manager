@@ -37,11 +37,13 @@ function parseCsv(text) {
 }
 
 const EXPECTED_COLUMNS = ['user_email', 'license_name', 'suite_key', 'start_date', 'fy', 'requester_email']
-const TEAM_HIERARCHY_COLUMNS = ['primary_email', 'manager_email']
+const TEAM_HIERARCHY_COLUMNS = ['primary_email', 'manager_email', 'sco']
 
 // Header-name-based. manager_email is allowed to be blank — no manager on
 // file is a real, known state in the source data (e.g. the org's top exec,
-// or a row Workday itself has incomplete), not an error.
+// or a row Workday itself has incomplete), not an error. sco isn't read
+// anywhere in the app yet — captured for whatever uses it later, same as
+// profiles.department.
 function parseTeamHierarchy(text) {
   const parsed = parseCsv(text)
   if (parsed.length < 2) throw new Error('CSV has no data rows')
@@ -263,7 +265,7 @@ export default function AdminImport() {
 
         <ImportSection
           title="Team hierarchy"
-          description={'Upload a weekly export of the org-hierarchy Sheet to update who reports to whom (drives the My Team page). Required column: primary_email. Optional: manager_email — leave blank for anyone with no manager on file, which is a known reality of the source data, not an error.'}
+          description={'Upload a weekly export of the org-hierarchy Sheet to update who reports to whom (drives the My Team page). Required column: primary_email. Optional: manager_email — leave blank for anyone with no manager on file, which is a known reality of the source data, not an error. Optional: sco (a 3-letter org code) — not used anywhere in the app yet, just captured for later.'}
           previewColumns={TEAM_HIERARCHY_COLUMNS}
           rowLabel={row => `${row.primary_email} → ${row.manager_email || '(no manager)'}`}
           parse={parseTeamHierarchy}
