@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
 import AppLayout from '../components/AppLayout'
 import { getLinks } from '../navLinks'
+import { useAuth } from '../context/AuthContext'
 import { getTeamSubscriptions, getLastTeamImport } from '../lib/team'
 import { billingLabel, fyLabel, STATUS_LABEL, STATUS_COLOR, INACTIVE_STATUSES } from '../lib/subscriptionDisplay'
 
@@ -16,6 +17,7 @@ const COLUMNS = [
 ]
 
 export default function MyTeam() {
+  const { profile } = useAuth()
   const [subs, setSubs] = useState(null)
   const [lastImport, setLastImport] = useState(null)
   const [error, setError] = useState(null)
@@ -25,9 +27,10 @@ export default function MyTeam() {
   const [sortDir, setSortDir] = useState('asc')
 
   useEffect(() => {
-    getTeamSubscriptions().then(setSubs).catch(e => setError(e.message))
+    if (!profile) return
+    getTeamSubscriptions(profile.primary_email).then(setSubs).catch(e => setError(e.message))
     getLastTeamImport().then(setLastImport).catch(() => {})
-  }, [])
+  }, [profile])
 
   function handleSort(key) {
     if (key === sortKey) {
@@ -72,8 +75,8 @@ export default function MyTeam() {
         {!subs && !error && <p className="text-gray-400">Loading…</p>}
         {subs?.length === 0 && (
           <p className="text-gray-400">
-            No subscriptions to show — this lists licenses used by your direct and indirect reports, and either
-            you don't have any on file, or none of them have a subscription.
+            No subscriptions to show — this lists licenses used by you and your direct and indirect reports, and
+            either you don't have any reports on file, or none of you have a subscription.
           </p>
         )}
 
@@ -118,7 +121,12 @@ export default function MyTeam() {
                 <tbody className="divide-y">
                   {visibleSubs.map(sub => (
                     <tr key={sub.id}>
-                      <td className="p-3">{sub.user_email}</td>
+                      <td className="p-3">
+                        {sub.user_email}
+                        {sub.user_email.toLowerCase() === profile?.primary_email?.toLowerCase() && (
+                          <span className="text-gray-400"> (you)</span>
+                        )}
+                      </td>
                       <td className="p-3 font-medium text-brand">{sub.license?.name}</td>
                       <td className="p-3 text-gray-500">{billingLabel(sub)}</td>
                       <td className="p-3 text-gray-500">{fyLabel(sub) || '—'}</td>

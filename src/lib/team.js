@@ -6,7 +6,13 @@ import { supabase } from './supabase'
 // as My Subscriptions. Not role-gated — same "just show it, it's empty if
 // nothing applies" convention as Action Center — since whether someone has
 // reports is derived from profiles.manager_email, not a stored role.
-export async function getTeamSubscriptions() {
+//
+// currentUserEmail (the caller's own profile.primary_email, passed in by
+// MyTeam.jsx) is folded into the same result once we know they're actually a
+// manager — someone reviewing their team's licenses generally wants to see
+// their own alongside them. Only added once reportEmails is non-empty: a
+// non-manager with no reports still sees nothing, same as before.
+export async function getTeamSubscriptions(currentUserEmail) {
   const { data: rows, error: reportsError } = await supabase.rpc('get_report_emails')
   if (reportsError) throw reportsError
   // PostgREST returns a `setof text` RPC as a bare array of strings — this
@@ -14,10 +20,12 @@ export async function getTeamSubscriptions() {
   const reportEmails = (rows || []).map(r => (typeof r === 'string' ? r : r.get_report_emails))
   if (!reportEmails.length) return []
 
+  const emails = currentUserEmail ? [...reportEmails, currentUserEmail] : reportEmails
+
   const { data, error } = await supabase
     .from('subscriptions')
     .select('*, license:licenses(name, vendor, category)')
-    .in('user_email', reportEmails)
+    .in('user_email', emails)
     .order('user_email')
   if (error) throw error
   return data
