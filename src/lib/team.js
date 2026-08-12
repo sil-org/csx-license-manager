@@ -21,3 +21,12 @@ export async function getTeamSubscriptions() {
   if (error) throw error
   return data
 }
+
+// When the org-hierarchy CSV (profiles.manager_email) was last imported —
+// see supabase/pending/32_team_hierarchy_import.sql. Not admin-gated: the
+// timestamp/count aren't sensitive, and My Team itself isn't role-gated either.
+export async function getLastTeamImport() {
+  const { data, error } = await supabase.rpc('get_last_team_import')
+  if (error) throw error
+  return data?.[0] || null
+}

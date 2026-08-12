@@ -100,7 +100,7 @@ export async function updateMinistryId({ email, ministryId }) {
 export async function getAllSubscriptions() {
   const { data, error } = await supabase
     .from('subscriptions')
-    .select('*, license:licenses(name, vendor, category, activation_url, onboarding_message, more_info_url, service_manager_email)')
+    .select('*, license:licenses(name, vendor, category, activation_url, onboarding_message, reminder_message, more_info_url, service_manager_email)')
     .order('created_at', { ascending: false })
   if (error) throw error
   return data
@@ -145,6 +145,15 @@ export async function importSubscriptionsFull(rows) {
 
 export async function importAuditLog(rows) {
   const { data, error } = await supabase.rpc('admin_import_audit_log', { p_rows: rows })
+  if (error) throw error
+  return data || []
+}
+
+// Upserts profiles.manager_email from a weekly export of the org-hierarchy
+// Sheet — see supabase/pending/32_team_hierarchy_import.sql for why this is
+// a manual CSV import rather than a live pull.
+export async function importTeamHierarchy(rows) {
+  const { data, error } = await supabase.rpc('admin_import_team_hierarchy', { p_rows: rows })
   if (error) throw error
   return data || []
 }

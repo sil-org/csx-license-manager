@@ -2,7 +2,7 @@ import { useState } from 'react'
 import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
-import { importSubscriptions, importLicenses, importSubscriptionsFull, importAuditLog } from '../../lib/admin'
+import { importSubscriptions, importLicenses, importSubscriptionsFull, importAuditLog, importTeamHierarchy } from '../../lib/admin'
 
 // Minimal CSV parser — handles quoted fields (commas/newlines/escaped quotes
 // inside quotes), which a naive split(',') would break on.
@@ -37,6 +37,22 @@ function parseCsv(text) {
 }
 
 const EXPECTED_COLUMNS = ['user_email', 'license_name', 'suite_key', 'start_date', 'fy', 'requester_email']
+const TEAM_HIERARCHY_COLUMNS = ['primary_email', 'manager_email']
+
+// Header-name-based. manager_email is allowed to be blank — no manager on
+// file is a real, known state in the source data (e.g. the org's top exec,
+// or a row Workday itself has incomplete), not an error.
+function parseTeamHierarchy(text) {
+  const parsed = parseCsv(text)
+  if (parsed.length < 2) throw new Error('CSV has no data rows')
+  const header = parsed[0].map(h => h.trim().toLowerCase())
+  if (!header.includes('primary_email')) throw new Error('Missing required column: primary_email')
+  return parsed.slice(1).map(cols => {
+    const obj = {}
+    header.forEach((h, i) => { if (TEAM_HIERARCHY_COLUMNS.includes(h)) obj[h] = (cols[i] || '').trim() })
+    return obj
+  })
+}
 
 // Header-name-based: fine for a hand-made CSV with clean headers.
 function parseQuickSubscriptions(text) {
@@ -246,8 +262,17 @@ export default function AdminImport() {
         )}
 
         <ImportSection
+          title="Team hierarchy"
+          description={'Upload a weekly export of the org-hierarchy Sheet to update who reports to whom (drives the My Team page). Required column: primary_email. Optional: manager_email — leave blank for anyone with no manager on file, which is a known reality of the source data, not an error.'}
+          previewColumns={TEAM_HIERARCHY_COLUMNS}
+          rowLabel={row => `${row.primary_email} → ${row.manager_email || '(no manager)'}`}
+          parse={parseTeamHierarchy}
+          doImport={importTeamHierarchy}
+        />
+
+        <ImportSection
           title="Quick subscription import"
-          description={'Bulk-import already-active subscriptions from a hand-made CSV — no approval emails, no verification step, no history. Required columns: user_email, license_name, suite_key (a real SuiteKey, a 6-digit Ministry ID, or blank for GTIS-sponsored licenses). Optional: start_date, fy, requester_email (who actually requested it, if different from user_email — must be an existing user of this app; defaults to you).'}
+          description={'Bulk-import already-active subscriptions from a hand-made CSV — no approval emails, no verification step, no history. Required columns: user_email, license_name, suite_key (a real SuiteKey, a 6-digit Ministry ID, or blank for GTIS-sponsored licenses). Optional: start_date, fy, requester_email (who actually requested it, if different from user_email — defaults to you; creates a placeholder profile if that person hasn’t signed in yet).'}
           previewColumns={EXPECTED_COLUMNS}
           rowLabel={row => `${row.user_email} · ${row.license_name}`}
           parse={parseQuickSubscriptions}
