@@ -265,7 +265,7 @@ export default function AdminImport() {
 
         <ImportSection
           title="Team hierarchy"
-          description={'Upload a weekly export of the org-hierarchy Sheet to update who reports to whom (drives the My Team page). Required column: primary_email. Optional: manager_email — leave blank for anyone with no manager on file, which is a known reality of the source data, not an error. Optional: sco (a 3-letter org code) — not used anywhere in the app yet, just captured for later.'}
+          description={'Upload a weekly export of the org-hierarchy Sheet to update who reports to whom (drives the My Team page). Required column: primary_email — creates a placeholder profile if that person hasn’t signed in yet (skipped if the email isn’t an eligible SIL staff domain). Optional: manager_email — leave blank for anyone with no manager on file, which is a known reality of the source data, not an error. Optional: sco (a 3-letter org code) — not used anywhere in the app yet, just captured for later.'}
           previewColumns={TEAM_HIERARCHY_COLUMNS}
           rowLabel={row => `${row.primary_email} → ${row.manager_email || '(no manager)'}`}
           parse={parseTeamHierarchy}
