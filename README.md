@@ -94,11 +94,12 @@ The big ones:
   the old GAS sheet hasn't been run yet.
 - Requesting a subscription *on behalf of* someone else — only self-service
   requests are supported for now.
-- Weekly renewal-reminder digest emails — Admin → All Subscriptions can now
-  send a one-off renewal reminder for a single eligible subscription (TO the
+- **Weekly renewal-reminder and pending-approval digest emails** — built
+  (`send-renewal-reminders`/`send-pending-reminders` Edge Functions; TO the
   subscription owner, CC the original requester if different — issue #3), but
-  nothing runs this automatically yet on a schedule across every upcoming
-  renewal. Pending-approval digest emails aren't built at all yet either.
+  like `sync-group-memberships`/`sync-provisioning`, not scheduled yet (see
+  `supabase/functions/README.md`). Admin → All Subscriptions can also send a
+  one-off renewal reminder for a single subscription in the meantime.
 - The Gmail-inbox provisioning-scanner automation (GAS/Sheets-specific, no
   direct equivalent needed here).
 
