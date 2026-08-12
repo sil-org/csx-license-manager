@@ -1293,11 +1293,18 @@ $$;
 -- same license+FY (mirrors request_subscription()'s own duplicate check).
 --
 -- p_rows is a JSON array of {user_email, license_name, suite_key, start_date,
--- fy}: suite_key accepts a real SuiteKey, a 6-digit Ministry ID (bare or
--- "MIN:XXXXXX"), or blank for a GTIS-sponsored license. Applies the same
--- SuiteKey trim/tilde-strip/case-insensitive-match rules as
+-- fy, requester_email}: suite_key accepts a real SuiteKey, a 6-digit
+-- Ministry ID (bare or "MIN:XXXXXX"), or blank for a GTIS-sponsored license.
+-- Applies the same SuiteKey trim/tilde-strip/case-insensitive-match rules as
 -- request_subscription(), for the same reasons — and the same FY rollover
 -- rule as GAS's getCurrentFiscalYear() when fy isn't given (October start).
+--
+-- requester_email is optional: an email that must resolve to an existing
+-- profile (primary_email match), recorded as the subscription's
+-- requested_by instead of defaulting to the importing admin — for
+-- historical rows where someone else actually submitted the original
+-- request. Blank/omitted keeps the old behavior. Mirrors
+-- admin_import_licenses()'s created_by_email.
 --
 -- Each row is processed in its own sub-block so one bad row can't abort the
 -- whole batch — returns one result object per input row: {ok, error?, row}.
@@ -1320,6 +1327,8 @@ declare
   v_suite_key text;
   v_ministry_id text;
   v_canonical_key text;
+  v_requester_email text;
+  v_requested_by uuid;
   v_sub_id uuid;
   v_error text;
 begin
@@ -1339,6 +1348,7 @@ begin
       v_suite_key := null;
       v_ministry_id := null;
       v_license := null;
+      v_requested_by := current_profile_id();
 
       if v_user_email = '' or v_user_email is null then
         v_error := 'Missing email';
@@ -1346,6 +1356,14 @@ begin
         v_error := 'Invalid email';
       elsif v_license_name = '' or v_license_name is null then
         v_error := 'Missing license name';
+      end if;
+
+      v_requester_email := nullif(trim(lower(v_row->>'requester_email')), '');
+      if v_error is null and v_requester_email is not null then
+        select id into v_requested_by from profiles where lower(primary_email) = v_requester_email;
+        if v_requested_by is null then
+          v_error := 'Requester not found: ' || (v_row->>'requester_email');
+        end if;
       end if;
 
       if v_error is null then
@@ -1400,7 +1418,7 @@ begin
         billing_cycle, renewal_month, renewal_reminder, price_at_signup, requested_by
       ) values (
         v_user_email, v_license.id, v_suite_key, v_billing_type, v_ministry_id, v_fy, 'active', v_start_date,
-        v_license.billing_cycle, v_license.renewal_month, v_license.renewal_reminder, v_license.price, current_profile_id()
+        v_license.billing_cycle, v_license.renewal_month, v_license.renewal_reminder, v_license.price, v_requested_by
       ) returning id into v_sub_id;
 
       if v_ministry_id is not null then

@@ -36,7 +36,7 @@ function parseCsv(text) {
   return rows
 }
 
-const EXPECTED_COLUMNS = ['user_email', 'license_name', 'suite_key', 'start_date', 'fy']
+const EXPECTED_COLUMNS = ['user_email', 'license_name', 'suite_key', 'start_date', 'fy', 'requester_email']
 
 // Header-name-based: fine for a hand-made CSV with clean headers.
 function parseQuickSubscriptions(text) {
@@ -247,7 +247,7 @@ export default function AdminImport() {
 
         <ImportSection
           title="Quick subscription import"
-          description={'Bulk-import already-active subscriptions from a hand-made CSV — no approval emails, no verification step, no history. Required columns: user_email, license_name, suite_key (a real SuiteKey, a 6-digit Ministry ID, or blank for GTIS-sponsored licenses). Optional: start_date, fy.'}
+          description={'Bulk-import already-active subscriptions from a hand-made CSV — no approval emails, no verification step, no history. Required columns: user_email, license_name, suite_key (a real SuiteKey, a 6-digit Ministry ID, or blank for GTIS-sponsored licenses). Optional: start_date, fy, requester_email (who actually requested it, if different from user_email — must be an existing user of this app; defaults to you).'}
           previewColumns={EXPECTED_COLUMNS}
           rowLabel={row => `${row.user_email} · ${row.license_name}`}
           parse={parseQuickSubscriptions}
