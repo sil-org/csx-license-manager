@@ -1,9 +1,11 @@
 import { supabase } from './supabase'
 
 // Mirrors Managers.gs's getTeamSubscriptions(): direct + indirect reports'
-// non-cancelled subscriptions. Not role-gated — same "just show it, it's
-// empty if nothing applies" convention as Action Center — since whether someone
-// has reports is derived from profiles.manager_email, not a stored role.
+// subscriptions, every status included — the page itself hides
+// cancelled/declined/revoked by default (see MyTeam.jsx's hideInactive), same
+// as My Subscriptions. Not role-gated — same "just show it, it's empty if
+// nothing applies" convention as Action Center — since whether someone has
+// reports is derived from profiles.manager_email, not a stored role.
 export async function getTeamSubscriptions() {
   const { data: rows, error: reportsError } = await supabase.rpc('get_report_emails')
   if (reportsError) throw reportsError
@@ -16,7 +18,6 @@ export async function getTeamSubscriptions() {
     .from('subscriptions')
     .select('*, license:licenses(name, vendor, category)')
     .in('user_email', reportEmails)
-    .neq('status', 'cancelled')
     .order('user_email')
   if (error) throw error
   return data

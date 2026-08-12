@@ -5,7 +5,7 @@ import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { getMySubscriptions, cancelSubscription, optInRenewal, optOutRenewal } from '../lib/subscriptions'
-import { fyLabel, STATUS_LABEL, STATUS_BADGE } from '../lib/subscriptionDisplay'
+import { fyLabel, STATUS_LABEL, STATUS_BADGE, INACTIVE_STATUSES } from '../lib/subscriptionDisplay'
 
 // "SuiteKey: X" / "Ministry ID: X" / "GTIS-funded" — same underlying data as
 // subscriptionDisplay.js's billingLabel(), phrased as prose for this page's
@@ -22,11 +22,6 @@ function formatPrice(price) {
   const n = Number(price)
   return n % 1 === 0 ? `$${n}` : `$${n.toFixed(2)}`
 }
-
-// Terminal, no-longer-relevant statuses — hidden by default so old
-// cancelled/declined/revoked requests don't clutter the list of what's
-// actually current.
-const INACTIVE_STATUSES = ['cancelled', 'declined', 'revoked']
 
 export default function MySubscriptions() {
   const { profile } = useAuth()

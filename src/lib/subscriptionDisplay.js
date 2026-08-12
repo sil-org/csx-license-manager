@@ -34,6 +34,11 @@ export const STATUS_BADGE = {
   cancelled: 'bg-gray-100 text-gray-400',
 }
 
+// Terminal, no-longer-relevant statuses — hidden by default on My
+// Subscriptions and My Team so old cancelled/declined/revoked requests don't
+// clutter the list of what's actually current.
+export const INACTIVE_STATUSES = ['cancelled', 'declined', 'revoked']
+
 export function billingLabel(sub) {
   if (sub.billing_type === 'gtis') return 'GTIS'
   if (sub.billing_type === 'ministry') return `Ministry ID ${sub.ministry_id}`
