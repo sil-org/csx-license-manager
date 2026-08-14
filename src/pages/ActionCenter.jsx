@@ -103,7 +103,11 @@ export default function ActionCenter() {
             await sendEmail({
               to: n.to,
               subject: provisioningRequiredEmailSubject({ licenseName: n.licenseName, userEmail: n.sub.user_email }),
-              html: provisioningRequiredEmailHtml({ sub: n.sub, licenseName: n.licenseName, activationUrl: n.activationUrl }),
+              html: provisioningRequiredEmailHtml({
+                sub: n.sub, licenseName: n.licenseName, activationUrl: n.activationUrl, userDisplayName: n.userDisplayName,
+                jobTitle: n.jobTitle, department: n.department,
+                showName: n.showName, showJobTitle: n.showJobTitle, showDepartment: n.showDepartment,
+              }),
               template: 'provisioning_required',
               subscriptionId: sub.id,
             })

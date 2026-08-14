@@ -3,15 +3,20 @@ import { ChevronUp, ChevronDown, ChevronsUpDown, X, Bold, Italic, List, Link as 
 import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
-import { getAllLicenses, saveLicense, deactivateLicense, reactivateLicense } from '../../lib/licenses'
+import {
+  getAllLicenses, saveLicense, deactivateLicense, reactivateLicense,
+  listDepartmentApprovals, addDepartmentApproval, removeDepartmentApproval,
+} from '../../lib/licenses'
 import { activationEmailHtml, renewalReminderCardHtml, renewalReminderEmailHtml } from '../../lib/email'
 
 const BLANK = {
   id: null, name: '', vendor: '', category: '', price: '', notes: '',
   gtis_sponsored: false, billing_cycle: 'annual', renewal_month: 10, renewal_reminder: true,
   activation_url: '', more_info_url: '', logo_url: '', google_group_email: '',
-  pro_rated: false, service_manager_email: '', onboarding_message: '', reminder_message: '',
+  pro_rated: false, service_manager_emails: '', onboarding_message: '', reminder_message: '',
   provisioning_adapter: '', provisioning_config: '',
+  provisioning_email_show_name: false, provisioning_email_show_job_title: false, provisioning_email_show_department: false,
+  department_gated: false,
 }
 
 // Sample data for the Preview buttons in the email-overrides section — no
@@ -69,8 +74,11 @@ export default function AdminCatalog() {
       ...license,
       // provisioning_config comes back from the DB as a real jsonb object
       // (or null) — the form edits it as raw JSON text, so stringify it here
-      // and parse it back on save.
+      // and parse it back on save. service_manager_emails is a real text[]
+      // for the same reason — edited as a comma-separated string, split back
+      // into an array on save.
       provisioning_config: license.provisioning_config ? JSON.stringify(license.provisioning_config, null, 2) : '',
+      service_manager_emails: (license.service_manager_emails || []).join(', '),
     })
     setShowLogoInput(false)
   }
@@ -119,6 +127,7 @@ export default function AdminCatalog() {
         price_unit: PRICE_UNITS[editing.billing_cycle],
         renewal_month: renewalMonth,
         provisioning_config: configText || null,
+        service_manager_emails: editing.service_manager_emails.split(',').map(e => e.trim()).filter(Boolean),
       })
       setEditing(null)
       setError(null)
@@ -317,7 +326,13 @@ export default function AdminCatalog() {
                   <input type="checkbox" checked={editing.pro_rated} onChange={e => setEditing({ ...editing, pro_rated: e.target.checked })} />
                   Pro-rated
                 </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={editing.department_gated} onChange={e => setEditing({ ...editing, department_gated: e.target.checked })} />
+                  Department-gated (free; departments opt in to approval below)
+                </label>
               </div>
+
+              {editing.id && editing.department_gated && <DepartmentApprovals licenseId={editing.id} />}
 
               <label className="col-span-2 block text-sm text-gray-700">
                 Description
@@ -332,7 +347,24 @@ export default function AdminCatalog() {
 
               <Field label="Activation URL" value={editing.activation_url} onChange={v => setEditing({ ...editing, activation_url: v })}
                 hint="Vendor admin portal link, shown to whoever provisions this license once it's approved — every subscription needs an explicit 'Mark active' regardless of whether this is set." />
-              <Field label="Service manager email" value={editing.service_manager_email} onChange={v => setEditing({ ...editing, service_manager_email: v })} />
+              <Field label="Service manager email(s)" value={editing.service_manager_emails} onChange={v => setEditing({ ...editing, service_manager_emails: v })}
+                hint="Comma-separated if more than one — everyone listed gets the same provisioning email." />
+
+              <div className="col-span-2 flex flex-col gap-1.5 text-sm">
+                <span className="text-gray-700">Also include in the provisioning email (most service managers only want the email address above):</span>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={editing.provisioning_email_show_name} onChange={e => setEditing({ ...editing, provisioning_email_show_name: e.target.checked })} />
+                  Name
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={editing.provisioning_email_show_job_title} onChange={e => setEditing({ ...editing, provisioning_email_show_job_title: e.target.checked })} />
+                  Job title
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={editing.provisioning_email_show_department} onChange={e => setEditing({ ...editing, provisioning_email_show_department: e.target.checked })} />
+                  Department
+                </label>
+              </div>
 
               <Field label="More info URL" value={editing.more_info_url} onChange={v => setEditing({ ...editing, more_info_url: v })} />
               <Field label="Google Group email" value={editing.google_group_email} onChange={v => setEditing({ ...editing, google_group_email: v })}
@@ -515,5 +547,80 @@ function Field({ label, value, onChange, type = 'text', required, placeholder, h
       />
       {hint && <span className="block text-xs text-gray-400 mt-0.5">{hint}</span>}
     </label>
+  )
+}
+
+// Inline list/add/remove UI for a department-gated license's opt-in approval
+// list (sco -> approver email) — see request_subscription()'s
+// department_gated branch in supabase/pending/40_department_gated_licenses.sql.
+// Departments not listed here are simply auto-approved, same as
+// gtis_sponsored today.
+function DepartmentApprovals({ licenseId }) {
+  const [rows, setRows] = useState(null)
+  const [sco, setSco] = useState('')
+  const [approverEmail, setApproverEmail] = useState('')
+  const [error, setError] = useState(null)
+
+  function reload() {
+    listDepartmentApprovals(licenseId).then(setRows).catch(e => setError(e.message))
+  }
+
+  useEffect(reload, [licenseId])
+
+  async function handleAdd(e) {
+    e.preventDefault()
+    setError(null)
+    try {
+      await addDepartmentApproval(licenseId, sco, approverEmail)
+      setSco('')
+      setApproverEmail('')
+      reload()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function handleRemove(id) {
+    try {
+      await removeDepartmentApproval(id)
+      reload()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  return (
+    <div className="col-span-2 border border-gray-200 rounded-lg px-3 py-3">
+      <p className="text-sm font-medium text-gray-700 mb-2">Departments requiring approval (by SCO code)</p>
+      {error && <p className="text-sm text-sil-red mb-2">{error}</p>}
+      {rows?.length > 0 && (
+        <ul className="space-y-1 mb-3">
+          {rows.map(r => (
+            <li key={r.id} className="flex items-center justify-between text-sm bg-gray-50 rounded px-2 py-1">
+              <span><strong>{r.sco}</strong> → {r.approver_email}</span>
+              <button type="button" onClick={() => handleRemove(r.id)} className="text-gray-400 hover:text-sil-red" aria-label={`Remove ${r.sco}`}>
+                <X size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2 items-end">
+        <label className="text-xs text-gray-600">
+          SCO code
+          <input value={sco} onChange={e => setSco(e.target.value)} maxLength={3} placeholder="ENG"
+            className="mt-1 w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-sm uppercase" />
+        </label>
+        <label className="text-xs text-gray-600 flex-1">
+          Approver email
+          <input type="email" value={approverEmail} onChange={e => setApproverEmail(e.target.value)}
+            className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
+        </label>
+        <button type="button" onClick={handleAdd} disabled={!sco.trim() || !approverEmail.trim()}
+          className="text-sm font-medium bg-brand text-white rounded-lg px-3 py-1.5 disabled:opacity-40">
+          Add
+        </button>
+      </div>
+    </div>
   )
 }

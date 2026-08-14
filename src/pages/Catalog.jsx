@@ -11,6 +11,7 @@ import {
   sendEmail,
   skVerificationEmailSubject, skVerificationEmailHtml,
   approvalRequestEmailSubject, approvalRequestEmailHtml,
+  departmentApprovalRequestEmailSubject, departmentApprovalRequestEmailHtml,
   approvedPendingEmailSubject, approvedPendingEmailHtml,
   provisioningRequiredEmailSubject, provisioningRequiredEmailHtml,
 } from '../lib/email'
@@ -154,6 +155,14 @@ async function notifyForRequest({ notify, id, suiteKey, licenseName, requesterEm
           template: 'approval_request',
           subscriptionId: id,
         })
+      } else if (n.type === 'department_approval_request') {
+        await sendEmail({
+          to: n.to,
+          subject: departmentApprovalRequestEmailSubject(licenseName),
+          html: departmentApprovalRequestEmailHtml({ licenseName, userEmail: requesterEmail, recipientEmail, moreInfoUrl }),
+          template: 'department_approval_request',
+          subscriptionId: id,
+        })
       } else if (n.type === 'approved_pending') {
         await sendEmail({
           to: n.to,
@@ -166,7 +175,11 @@ async function notifyForRequest({ notify, id, suiteKey, licenseName, requesterEm
         await sendEmail({
           to: n.to,
           subject: provisioningRequiredEmailSubject({ licenseName: n.licenseName, userEmail: n.sub.user_email }),
-          html: provisioningRequiredEmailHtml({ sub: n.sub, licenseName: n.licenseName, activationUrl: n.activationUrl }),
+          html: provisioningRequiredEmailHtml({
+            sub: n.sub, licenseName: n.licenseName, activationUrl: n.activationUrl, userDisplayName: n.userDisplayName,
+            jobTitle: n.jobTitle, department: n.department,
+            showName: n.showName, showJobTitle: n.showJobTitle, showDepartment: n.showDepartment,
+          }),
           template: 'provisioning_required',
           subscriptionId: id,
         })
@@ -225,7 +238,7 @@ function RequestModal({ license, onClose }) {
     try {
       const result = await requestSubscription({
         licenseId: license.id,
-        suiteKey: license.gtis_sponsored ? null : mode === 'suite_key' ? suiteKey.trim() : null,
+        suiteKey: license.gtis_sponsored || license.department_gated ? null : mode === 'suite_key' ? suiteKey.trim() : null,
         suggestedApproverEmail: mode === 'suite_key' ? suggestedApproverEmail : null,
         ministryId: mode === 'ministry_id' ? ministryId : null,
         fy,
@@ -302,6 +315,8 @@ function RequestModal({ license, onClose }) {
 
             {license.gtis_sponsored ? (
               <p className="text-sm text-gray-600">This license is GTIS-sponsored — no approval needed.</p>
+            ) : license.department_gated ? (
+              <p className="text-sm text-gray-600">This is a free license — whether it needs approval depends on your department, and is handled automatically.</p>
             ) : (
               <>
                 <div>

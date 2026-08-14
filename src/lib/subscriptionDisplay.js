@@ -42,6 +42,7 @@ export const INACTIVE_STATUSES = ['cancelled', 'declined', 'revoked']
 export function billingLabel(sub) {
   if (sub.billing_type === 'gtis') return 'GTIS'
   if (sub.billing_type === 'ministry') return `Ministry ID ${sub.ministry_id}`
+  if (sub.billing_type === 'department') return 'Free (department-approved)'
   return sub.suite_key
 }
 

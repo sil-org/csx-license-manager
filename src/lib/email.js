@@ -133,6 +133,32 @@ export function approvalRequestEmailHtml({ suiteKey, licenseName, userEmail, rec
   `)
 }
 
+export function departmentApprovalRequestEmailSubject(licenseName) {
+  return `Action Required: License request needs your department's approval — ${licenseName}`
+}
+
+// Sent to a department's designated approver (department_approvals.approver_email)
+// when a department_gated license's request lands 'pending' for that
+// department — mirrors approvalRequestEmailHtml's shape, minus SuiteKey
+// wording, since this path never involves one (see request_subscription()'s
+// department_gated branch in supabase/pending/40_department_gated_licenses.sql).
+export function departmentApprovalRequestEmailHtml({ licenseName, userEmail, recipientEmail, moreInfoUrl }) {
+  return wrapEmail('License Request Needs Your Department’s Approval', `
+    <p>A free software license has been requested for someone in your department and needs your approval.</p>
+    ${detailsTable([
+      ['License', licenseName],
+      ['Requested by', `<a href="mailto:${userEmail}" style="color:#005CB9">${userEmail}</a>`],
+      ...(recipientEmail && recipientEmail !== userEmail ? [['License is for', recipientEmail]] : []),
+      ...(moreInfoUrl ? [['More info', `<a href="${moreInfoUrl}" style="color:#005CB9">${moreInfoUrl}</a>`]] : []),
+    ])}
+    ${ctaButtons([
+      { label: '✓ Approve', href: appUrl('/action-center'), color: 'green' },
+      { label: '✗ Decline', href: appUrl('/action-center'), color: 'red' },
+    ])}
+    <p style="font-size:13px;color:#666666">Sign in to complete either action on the Action Center page.</p>
+  `)
+}
+
 export function suiteKeyAssignedEmailSubject(suiteKey) {
   return `You've been assigned as the owner of SuiteKey ${suiteKey}`
 }
@@ -256,7 +282,10 @@ export function provisioningRequiredEmailSubject({ licenseName, userEmail }) {
 // marked active. `apiResult` is a hook for a future automated provisioning
 // integration (none exists yet — every license's activation_url is a manual
 // vendor-portal link) — omit it for today's manual-provisioning case.
-export function provisioningRequiredEmailHtml({ sub, licenseName, activationUrl, apiResult }) {
+export function provisioningRequiredEmailHtml({
+  sub, licenseName, activationUrl, apiResult, userDisplayName, jobTitle, department,
+  showName, showJobTitle, showDepartment,
+}) {
   const fy = fyLabel(sub)
   const status = apiResult === 'success'
     ? `<p>This seat was <strong>provisioned automatically via API</strong> — no manual action needed.</p>`
@@ -265,10 +294,20 @@ export function provisioningRequiredEmailHtml({ sub, licenseName, activationUrl,
            Automatic API provisioning failed for this seat — please provision it manually.
          </div>`
       : `<p>A subscription has been approved and is waiting for you to provision the seat on the vendor side.</p>`
+  // display_name defaults to the email itself for profiles created without a
+  // real name (see schema_licenses.sql's requester-profile-creation note) —
+  // skip the redundant "email (email)" in that case. Job title/department
+  // rows are dropped entirely (not shown blank) when the license's checkbox
+  // is off, or when there's no data on file yet.
+  const userLabel = showName && userDisplayName && userDisplayName !== sub.user_email
+    ? `${escapeHtml(userDisplayName)} (${sub.user_email})`
+    : sub.user_email
   return wrapEmail('Seat Provisioning Required', `
     ${status}
     ${detailsTable([
-      ['User', sub.user_email],
+      ['User', userLabel],
+      ...(showJobTitle && jobTitle ? [['Job Title', escapeHtml(jobTitle)]] : []),
+      ...(showDepartment && department ? [['Department', escapeHtml(department)]] : []),
       ['License', licenseName],
       ['Billing', billingLabel(sub)],
       ...(fy ? [['Fiscal Year', fy]] : []),

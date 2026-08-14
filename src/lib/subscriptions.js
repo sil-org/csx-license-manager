@@ -5,6 +5,15 @@ export async function getAdminEmails() {
   return data || []
 }
 
+// RLS-bypassing lookup (get_seat_provisioning_fields RPC) — profiles' "own
+// read" policy means a non-admin service manager can't otherwise see the
+// seat user's name/job title/department. Falls back to nulls (email-only)
+// if the profile has none of these on file.
+async function getSeatProvisioningFields(email) {
+  const { data } = await supabase.rpc('get_seat_provisioning_fields', { p_email: email })
+  return data?.[0] || { display_name: null, job_title: null, department: null }
+}
+
 export async function getMySubscriptions(email) {
   const { data, error } = await supabase
     .from('subscriptions')
@@ -17,7 +26,7 @@ export async function getMySubscriptions(email) {
 
 // Shared re-select shape for RPCs (here and in lib/approvals.js) that need to
 // build a notification descriptor after a status-changing RPC call.
-export const SUB_EMAIL_FIELDS = 'user_email, fy, billing_cycle, billing_type, suite_key, ministry_id, license:licenses(name, activation_url, service_manager_email)'
+export const SUB_EMAIL_FIELDS = 'user_email, fy, billing_cycle, billing_type, suite_key, ministry_id, license:licenses(name, activation_url, service_manager_emails, provisioning_email_show_name, provisioning_email_show_job_title, provisioning_email_show_department)'
 
 // Both request_subscription and approve_subscription (src/lib/approvals.js)
 // can land a subscription straight in 'approved' (auto-approved or manually
@@ -28,16 +37,21 @@ export const SUB_EMAIL_FIELDS = 'user_email, fy, billing_cycle, billing_type, su
 export async function buildProvisioningNotifications(sub) {
   const notifications = [{ type: 'approved_pending', to: sub.user_email, sub, licenseName: sub.license.name }]
 
-  let recipients = sub.license.service_manager_email ? [sub.license.service_manager_email] : []
+  let recipients = sub.license.service_manager_emails?.length ? sub.license.service_manager_emails : []
   if (!recipients.length) {
     recipients = await getAdminEmails()
   }
   // One email with every recipient in the To field, not one send per
   // recipient — send-email/Resend accepts an array for `to`.
   if (recipients.length) {
+    const { display_name: userDisplayName, job_title: jobTitle, department } = await getSeatProvisioningFields(sub.user_email)
     notifications.push({
       type: 'provisioning_required', to: recipients, sub,
       licenseName: sub.license.name, activationUrl: sub.license.activation_url,
+      userDisplayName, jobTitle, department,
+      showName: sub.license.provisioning_email_show_name,
+      showJobTitle: sub.license.provisioning_email_show_job_title,
+      showDepartment: sub.license.provisioning_email_show_department,
     })
   }
   return notifications
@@ -59,7 +73,7 @@ export async function requestSubscription({ licenseId, suiteKey, suggestedApprov
 
   const { data: sub, error: subError } = await supabase
     .from('subscriptions')
-    .select('status, suite_key, pending_approver_email, user_email, fy, billing_cycle, billing_type, ministry_id, license:licenses(name, activation_url, service_manager_email)')
+    .select('status, suite_key, pending_approver_email, user_email, fy, billing_cycle, billing_type, ministry_id, license:licenses(name, activation_url, service_manager_emails, provisioning_email_show_name, provisioning_email_show_job_title, provisioning_email_show_department)')
     .eq('id', id)
     .single()
   if (subError) throw subError
@@ -77,6 +91,8 @@ export async function requestSubscription({ licenseId, suiteKey, suggestedApprov
     const owner = data?.[0]
     const to = owner?.owner_group_email || owner?.owner_email
     if (to) notify = [{ type: 'approval_request', to }]
+  } else if (sub.status === 'pending' && sub.billing_type === 'department' && sub.pending_approver_email) {
+    notify = [{ type: 'department_approval_request', to: sub.pending_approver_email }]
   } else if (sub.status === 'approved') {
     notify = await buildProvisioningNotifications(sub)
   }

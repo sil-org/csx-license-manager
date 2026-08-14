@@ -38,13 +38,12 @@ function parseCsv(text) {
 }
 
 const EXPECTED_COLUMNS = ['user_email', 'license_name', 'suite_key', 'start_date', 'fy', 'requester_email']
-const TEAM_HIERARCHY_COLUMNS = ['primary_email', 'manager_email', 'sco']
+const TEAM_HIERARCHY_COLUMNS = ['primary_email', 'manager_email', 'sco', 'job_title']
 
 // Header-name-based. manager_email is allowed to be blank — no manager on
 // file is a real, known state in the source data (e.g. the org's top exec,
-// or a row Workday itself has incomplete), not an error. sco isn't read
-// anywhere in the app yet — captured for whatever uses it later, same as
-// profiles.department.
+// or a row Workday itself has incomplete), not an error. job_title is also
+// allowed to be blank until the source sheet has that column populated.
 function parseTeamHierarchy(text) {
   const parsed = parseCsv(text)
   if (parsed.length < 2) throw new Error('CSV has no data rows')
