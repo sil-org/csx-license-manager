@@ -203,6 +203,7 @@ function RequestModal({ license, onClose }) {
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestedApproverEmail, setSuggestedApproverEmail] = useState('')
   const [ministryId, setMinistryId] = useState('')
+  const [acknowledged, setAcknowledged] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
   const [done, setDone] = useState(false)
@@ -243,6 +244,7 @@ function RequestModal({ license, onClose }) {
         ministryId: mode === 'ministry_id' ? ministryId : null,
         fy,
         recipientEmail: recipientEmail.trim(),
+        acknowledged,
       })
       await notifyForRequest({
         notify: result.notify,
@@ -410,13 +412,35 @@ function RequestModal({ license, onClose }) {
               </>
             )}
 
+            {license.requires_acknowledgement && (
+              <div className="bg-gray-50 rounded-lg px-4 py-3 space-y-2">
+                {license.acknowledgement_text && (
+                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{license.acknowledgement_text}</p>
+                )}
+                <label className="flex items-start gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={acknowledged}
+                    onChange={e => setAcknowledged(e.target.checked)}
+                    required
+                    className="mt-0.5"
+                  />
+                  I have read and agree to the above.
+                </label>
+              </div>
+            )}
+
             {error && <p className="text-sil-red text-sm">{error}</p>}
 
             <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
               <button type="button" onClick={onClose} className="text-sm font-medium text-gray-600 border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50">
                 Cancel
               </button>
-              <button type="submit" disabled={submitting} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2 hover:bg-brand-dark transition disabled:opacity-60">
+              <button
+                type="submit"
+                disabled={submitting || (license.requires_acknowledgement && !acknowledged)}
+                className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2 hover:bg-brand-dark transition disabled:opacity-60"
+              >
                 {submitting ? 'Submitting…' : license.gtis_sponsored ? 'Confirm request' : 'Submit request'}
               </button>
             </div>

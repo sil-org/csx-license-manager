@@ -60,7 +60,7 @@ export async function buildProvisioningNotifications(sub) {
 // Returns { id, status, notify } — notify is null unless someone needs to be
 // emailed as a result, otherwise an array of { type, to, ... } entries (see
 // notifyForRequest() in src/pages/Catalog.jsx, which dispatches on type).
-export async function requestSubscription({ licenseId, suiteKey, suggestedApproverEmail, ministryId, fy, recipientEmail }) {
+export async function requestSubscription({ licenseId, suiteKey, suggestedApproverEmail, ministryId, fy, recipientEmail, acknowledged }) {
   const { data: id, error } = await supabase.rpc('request_subscription', {
     p_license_id: licenseId,
     p_suite_key: suiteKey || null,
@@ -68,6 +68,7 @@ export async function requestSubscription({ licenseId, suiteKey, suggestedApprov
     p_ministry_id: ministryId || null,
     p_fy: fy,
     p_recipient_email: recipientEmail || null,
+    p_acknowledged: !!acknowledged,
   })
   if (error) throw error
 

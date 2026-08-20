@@ -17,6 +17,7 @@ const BLANK = {
   provisioning_adapter: '', provisioning_config: '',
   provisioning_email_show_name: false, provisioning_email_show_job_title: false, provisioning_email_show_department: false,
   department_gated: false,
+  requires_acknowledgement: false, acknowledgement_text: '',
 }
 
 // Sample data for the Preview buttons in the email-overrides section — no
@@ -333,6 +334,26 @@ export default function AdminCatalog() {
               </div>
 
               {editing.id && editing.department_gated && <DepartmentApprovals licenseId={editing.id} />}
+
+              <div className="col-span-2 flex flex-col gap-1.5 text-sm">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={editing.requires_acknowledgement} onChange={e => setEditing({ ...editing, requires_acknowledgement: e.target.checked })} />
+                  Require Terms &amp; Conditions acknowledgement before requesting
+                </label>
+                {editing.requires_acknowledgement && (
+                  <label className="block text-sm text-gray-700">
+                    Terms &amp; Conditions text
+                    <textarea
+                      value={editing.acknowledgement_text ?? ''}
+                      onChange={e => setEditing({ ...editing, acknowledgement_text: e.target.value })}
+                      rows={3}
+                      required
+                      placeholder="Shown to staff in the request form, next to a required 'I agree' checkbox."
+                      className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </label>
+                )}
+              </div>
 
               <label className="col-span-2 block text-sm text-gray-700">
                 Description
