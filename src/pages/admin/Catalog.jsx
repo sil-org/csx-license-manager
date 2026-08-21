@@ -121,6 +121,10 @@ export default function AdminCatalog() {
         return
       }
     }
+    if (editing.requires_acknowledgement && !editing.acknowledgement_text?.trim()) {
+      setError('Terms & Conditions text is required when acknowledgement is required.')
+      return
+    }
     try {
       await saveLicense({
         ...editing,
@@ -327,32 +331,6 @@ export default function AdminCatalog() {
                   <input type="checkbox" checked={editing.pro_rated} onChange={e => setEditing({ ...editing, pro_rated: e.target.checked })} />
                   Pro-rated
                 </label>
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={editing.department_gated} onChange={e => setEditing({ ...editing, department_gated: e.target.checked })} />
-                  Department-gated (free; departments opt in to approval below)
-                </label>
-              </div>
-
-              {editing.id && editing.department_gated && <DepartmentApprovals licenseId={editing.id} />}
-
-              <div className="col-span-2 flex flex-col gap-1.5 text-sm">
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={editing.requires_acknowledgement} onChange={e => setEditing({ ...editing, requires_acknowledgement: e.target.checked })} />
-                  Require Terms &amp; Conditions acknowledgement before requesting
-                </label>
-                {editing.requires_acknowledgement && (
-                  <label className="block text-sm text-gray-700">
-                    Terms &amp; Conditions text
-                    <textarea
-                      value={editing.acknowledgement_text ?? ''}
-                      onChange={e => setEditing({ ...editing, acknowledgement_text: e.target.value })}
-                      rows={3}
-                      required
-                      placeholder="Shown to staff in the request form, next to a required 'I agree' checkbox."
-                      className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </label>
-                )}
               </div>
 
               <label className="col-span-2 block text-sm text-gray-700">
@@ -370,22 +348,6 @@ export default function AdminCatalog() {
                 hint="Vendor admin portal link, shown to whoever provisions this license once it's approved — every subscription needs an explicit 'Mark active' regardless of whether this is set." />
               <Field label="Service manager email(s)" value={editing.service_manager_emails} onChange={v => setEditing({ ...editing, service_manager_emails: v })}
                 hint="Comma-separated if more than one — everyone listed gets the same provisioning email." />
-
-              <div className="col-span-2 flex flex-col gap-1.5 text-sm">
-                <span className="text-gray-700">Also include in the provisioning email (most service managers only want the email address above):</span>
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={editing.provisioning_email_show_name} onChange={e => setEditing({ ...editing, provisioning_email_show_name: e.target.checked })} />
-                  Name
-                </label>
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={editing.provisioning_email_show_job_title} onChange={e => setEditing({ ...editing, provisioning_email_show_job_title: e.target.checked })} />
-                  Job title
-                </label>
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={editing.provisioning_email_show_department} onChange={e => setEditing({ ...editing, provisioning_email_show_department: e.target.checked })} />
-                  Department
-                </label>
-              </div>
 
               <Field label="More info URL" value={editing.more_info_url} onChange={v => setEditing({ ...editing, more_info_url: v })} />
               <Field label="Google Group email" value={editing.google_group_email} onChange={v => setEditing({ ...editing, google_group_email: v })}
@@ -416,8 +378,45 @@ export default function AdminCatalog() {
               )}
 
               <details className="col-span-2 border border-gray-200 rounded-lg px-3 py-2">
-                <summary className="text-sm font-medium text-gray-700 cursor-pointer select-none">Email overrides</summary>
+                <summary className="text-sm font-medium text-gray-700 cursor-pointer select-none">More settings</summary>
                 <div className="mt-3 space-y-4">
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" checked={editing.department_gated} onChange={e => setEditing({ ...editing, department_gated: e.target.checked })} />
+                    Department-gated (free; departments opt in to approval below)
+                  </label>
+
+                  {editing.id && editing.department_gated && <DepartmentApprovals licenseId={editing.id} />}
+
+                  <label className="block text-sm text-gray-700">
+                    <span className="flex items-center gap-2">
+                      <input type="checkbox" checked={editing.requires_acknowledgement} onChange={e => setEditing({ ...editing, requires_acknowledgement: e.target.checked })} />
+                      Require Terms &amp; Conditions acknowledgement before requesting
+                    </span>
+                    {editing.requires_acknowledgement && (
+                      <RichTextEditor
+                        value={editing.acknowledgement_text ?? ''}
+                        onChange={html => setEditing({ ...editing, acknowledgement_text: html })}
+                        placeholder="Shown to staff in the request form, next to a required &quot;I agree&quot; checkbox — link to the actual terms document here."
+                      />
+                    )}
+                  </label>
+
+                  <div className="flex flex-col gap-1.5 text-sm">
+                    <span className="text-gray-700">Also include in the provisioning email (most service managers only want the email address above):</span>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={editing.provisioning_email_show_name} onChange={e => setEditing({ ...editing, provisioning_email_show_name: e.target.checked })} />
+                      Name
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={editing.provisioning_email_show_job_title} onChange={e => setEditing({ ...editing, provisioning_email_show_job_title: e.target.checked })} />
+                      Job title
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={editing.provisioning_email_show_department} onChange={e => setEditing({ ...editing, provisioning_email_show_department: e.target.checked })} />
+                      Department
+                    </label>
+                  </div>
+
                   <label className="block text-sm text-gray-700">
                     Onboarding email override
                     <RichTextEditor
@@ -611,7 +610,7 @@ function DepartmentApprovals({ licenseId }) {
   }
 
   return (
-    <div className="col-span-2 border border-gray-200 rounded-lg px-3 py-3">
+    <div className="border border-gray-200 rounded-lg px-3 py-3">
       <p className="text-sm font-medium text-gray-700 mb-2">Departments requiring approval (by SCO code)</p>
       {error && <p className="text-sm text-sil-red mb-2">{error}</p>}
       {rows?.length > 0 && (

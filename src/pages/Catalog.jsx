@@ -415,7 +415,7 @@ function RequestModal({ license, onClose }) {
             {license.requires_acknowledgement && (
               <div className="bg-gray-50 rounded-lg px-4 py-3 space-y-2">
                 {license.acknowledgement_text && (
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{license.acknowledgement_text}</p>
+                  <div className="text-sm text-gray-700 [&_a]:text-brand [&_a]:underline" dangerouslySetInnerHTML={{ __html: license.acknowledgement_text }} />
                 )}
                 <label className="flex items-start gap-2 text-sm text-gray-700">
                   <input
