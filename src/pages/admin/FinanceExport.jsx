@@ -18,8 +18,8 @@ function csvEscape(value) {
 }
 
 function downloadCsv(rows, filename) {
-  const header = ['User', 'License', 'Billed to', 'Cost', 'Started', 'Status']
-  const lines = [header, ...rows.map(r => [r.user_email, r.license_name, r.billing_label, r.cost, r.start_date, r.status])]
+  const header = ['User', 'License', 'Billed to', 'Cost', 'Started', 'Renewed', 'Status']
+  const lines = [header, ...rows.map(r => [r.user_email, r.license_name, r.billing_label, r.cost, r.start_date, r.renewed_date, r.status])]
   const csv = lines.map(line => line.map(csvEscape).join(',')).join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
   const url = URL.createObjectURL(blob)
@@ -68,9 +68,9 @@ export default function AdminFinanceExport() {
         <AdminTabs />
         <h1 className="font-display text-2xl font-bold text-brand mb-2">Finance Export</h1>
         <p className="text-sm text-gray-500 mb-6">
-          Exports active and approved subscriptions with pro-rated costs for the selected date range
-          (filtered by subscription start date). Licenses marked "Pro-rated" calculate cost based on
-          months (or days, for monthly billing) remaining until renewal.
+          Exports all active subscriptions, plus approved (not-yet-activated) subscriptions started
+          in the selected date range. Licenses marked "Pro-rated" calculate cost based on months
+          (or days, for monthly billing) remaining until renewal.
         </p>
 
         <div className="flex items-end gap-3 mb-6">
@@ -96,7 +96,7 @@ export default function AdminFinanceExport() {
 
         {rows && (
           rows.length === 0 ? (
-            <p className="text-gray-400">No active/approved subscriptions started in that range.</p>
+            <p className="text-gray-400">No active subscriptions, or approved subscriptions started in that range.</p>
           ) : (
             <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
               <table className="w-full text-sm">
@@ -107,6 +107,7 @@ export default function AdminFinanceExport() {
                     <th className="p-3">Billed to</th>
                     <th className="p-3">Cost</th>
                     <th className="p-3">Started</th>
+                    <th className="p-3">Renewed</th>
                     <th className="p-3">Status</th>
                   </tr>
                 </thead>
@@ -118,6 +119,7 @@ export default function AdminFinanceExport() {
                       <td className="p-3 text-gray-500">{r.billing_label}</td>
                       <td className="p-3 text-gray-700">${Number(r.cost).toFixed(2)}</td>
                       <td className="p-3 text-gray-500 whitespace-nowrap">{r.start_date}</td>
+                      <td className="p-3 text-gray-500 whitespace-nowrap">{r.renewed_date || '—'}</td>
                       <td className="p-3 text-gray-500">{r.status}</td>
                     </tr>
                   ))}

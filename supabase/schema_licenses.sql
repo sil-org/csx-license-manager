@@ -1262,9 +1262,24 @@ begin
 end;
 $$;
 
-create or replace function get_finance_export(p_start_date date, p_end_date date)
+-- 'active' subscriptions ignore the date range entirely: start_date is the
+-- original request date and never changes on renewal (opt_in_renewal() only
+-- logs to renewals/flips renewal_status), so filtering active rows by range
+-- would silently drop anything still billable that started outside it.
+-- 'approved' rows (not yet activated) still need the range filter, or every
+-- never-activated approval ever made would show up in every export forever.
+-- renewed_date surfaces the most recent fiscal-year renewal opt-in
+-- (renewals.opt_in_date) so finance can tell a long-running active
+-- subscription apart from one still on its original term — null means it
+-- hasn't been through opt_in_renewal() yet.
+-- Adds a new OUT column, so Postgres won't let create-or-replace alter the
+-- existing return type in place — drop it first.
+drop function if exists get_finance_export(date, date);
+
+create function get_finance_export(p_start_date date, p_end_date date)
 returns table(
-  user_email text, license_name text, billing_label text, cost numeric, start_date date, status text
+  user_email text, license_name text, billing_label text, cost numeric, start_date date,
+  renewed_date date, status text
 ) language sql stable as $$
   select
     s.user_email,
@@ -1276,12 +1291,12 @@ returns table(
     end,
     calc_prorated_cost(l.price, l.billing_cycle, l.renewal_month, l.pro_rated, s.start_date),
     s.start_date,
+    (select max(r.opt_in_date) from renewals r where r.subscription_id = s.id),
     s.status::text
   from subscriptions s
   join licenses l on l.id = s.license_id
-  where s.status in ('active', 'approved')
-    and s.start_date >= p_start_date
-    and s.start_date <= p_end_date
+  where s.status = 'active'
+     or (s.status = 'approved' and s.start_date >= p_start_date and s.start_date <= p_end_date)
   order by s.start_date;
 $$;
 
@@ -1417,10 +1432,10 @@ begin
       end if;
 
       insert into subscriptions (
-        user_email, license_id, suite_key, billing_type, ministry_id, fy, status, activated_at,
+        user_email, license_id, suite_key, billing_type, ministry_id, fy, status, start_date, activated_at,
         billing_cycle, renewal_month, renewal_reminder, price_at_signup, requested_by
       ) values (
-        v_user_email, v_license.id, v_suite_key, v_billing_type, v_ministry_id, v_fy, 'active', v_start_date,
+        v_user_email, v_license.id, v_suite_key, v_billing_type, v_ministry_id, v_fy, 'active', v_start_date, v_start_date,
         v_license.billing_cycle, v_license.renewal_month, v_license.renewal_reminder, v_license.price, v_requested_by
       ) returning id into v_sub_id;
 

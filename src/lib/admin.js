@@ -108,13 +108,26 @@ export async function getAllSubscriptions() {
 
 // Mirrors GAS's getFinanceExport()/_calcProRatedCost() — see calc_prorated_cost()
 // in supabase/schema_licenses.sql for the actual pro-ration math.
+// Paginated: PostgREST caps a single response at 1000 rows (Supabase's default
+// max-rows setting), and get_finance_export() now returns every active
+// subscription regardless of the date range, so orgs of any real size blow
+// past that in one call — silently truncating the export with no error.
 export async function getFinanceExport({ from, to }) {
-  const { data, error } = await supabase.rpc('get_finance_export', {
-    p_start_date: from,
-    p_end_date: to,
-  })
-  if (error) throw error
-  return data || []
+  const pageSize = 1000
+  const rows = []
+  // Loop by exact total count rather than "got back fewer than pageSize" —
+  // if the project's PostgREST max-rows setting is ever below pageSize, a
+  // full page would look identical to a final partial one.
+  for (let offset = 0, total = null; total === null || offset < total; offset += pageSize) {
+    const { data, count, error } = await supabase
+      .rpc('get_finance_export', { p_start_date: from, p_end_date: to }, { count: 'exact' })
+      .range(offset, offset + pageSize - 1)
+    if (error) throw error
+    if (data.length === 0) break
+    rows.push(...data)
+    total = count
+  }
+  return rows
 }
 
 // Bulk-imports already-active subscriptions from a legacy/historical source.
