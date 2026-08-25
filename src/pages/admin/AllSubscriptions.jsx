@@ -314,8 +314,8 @@ export default function AdminAllSubscriptions() {
                     </button>
                   </th>
                 ))}
-                <th className="p-3">Details</th>
-                <th className="p-3">Actions</th>
+                <th className="p-3 font-semibold uppercase text-xs tracking-wide">Details</th>
+                <th className="p-3 font-semibold uppercase text-xs tracking-wide">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">

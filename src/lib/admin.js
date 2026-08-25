@@ -97,13 +97,24 @@ export async function updateMinistryId({ email, ministryId }) {
 
 // Admin-only. Every subscription, every user — mirrors GAS's getAllSubscriptions().
 // Relies on RLS (admins can already read every subscriptions/licenses row).
+// Paginated like getFinanceExport() below: PostgREST caps a single response
+// at 1000 rows, and this org has already blown past that — an unpaginated
+// select here silently drops every subscription older than the newest 1000.
 export async function getAllSubscriptions() {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .select('*, license:licenses(name, vendor, category, activation_url, onboarding_message, reminder_message, more_info_url, service_manager_emails)')
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return data
+  const pageSize = 1000
+  const rows = []
+  for (let offset = 0, total = null; total === null || offset < total; offset += pageSize) {
+    const { data, count, error } = await supabase
+      .from('subscriptions')
+      .select('*, license:licenses(name, vendor, category, activation_url, onboarding_message, reminder_message, more_info_url, service_manager_emails)', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + pageSize - 1)
+    if (error) throw error
+    if (data.length === 0) break
+    rows.push(...data)
+    total = count
+  }
+  return rows
 }
 
 // Mirrors GAS's getFinanceExport()/_calcProRatedCost() — see calc_prorated_cost()
