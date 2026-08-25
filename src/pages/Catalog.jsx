@@ -30,6 +30,20 @@ function billingSummary(license) {
   return 'Annual'
 }
 
+// Acknowledgement text is admin-authored rich text with plain <a href> links
+// (see RichTextEditor in admin/Catalog.jsx, which has no way to set target
+// itself) — rewrite them to open in a new tab rather than navigating the
+// user away from the acknowledgement they're about to accept.
+function openLinksInNewTab(html) {
+  if (!html) return html
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  doc.querySelectorAll('a[href]').forEach(a => {
+    a.setAttribute('target', '_blank')
+    a.setAttribute('rel', 'noopener noreferrer')
+  })
+  return doc.body.innerHTML
+}
+
 export default function Catalog() {
   const [licenses, setLicenses] = useState(null)
   const [error, setError] = useState(null)
@@ -415,7 +429,7 @@ function RequestModal({ license, onClose }) {
             {license.requires_acknowledgement && (
               <div className="bg-gray-50 rounded-lg px-4 py-3 space-y-2">
                 {license.acknowledgement_text && (
-                  <div className="text-sm text-gray-700 [&_a]:text-brand [&_a]:underline" dangerouslySetInnerHTML={{ __html: license.acknowledgement_text }} />
+                  <div className="text-sm text-gray-700 [&_a]:text-brand [&_a]:underline" dangerouslySetInnerHTML={{ __html: openLinksInNewTab(license.acknowledgement_text) }} />
                 )}
                 <label className="flex items-start gap-2 text-sm text-gray-700">
                   <input
