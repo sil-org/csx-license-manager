@@ -191,9 +191,17 @@ export async function optOutRenewal(subscriptionId) {
   if (error) throw error
 }
 
-// Free-text admin annotation, distinct from the license's own catalog-level
-// notes — see update_subscription_notes() in supabase/schema_licenses.sql.
-export async function updateSubscriptionNotes(subscriptionId, notes) {
-  const { error } = await supabase.rpc('update_subscription_notes', { p_subscription_id: subscriptionId, p_notes: notes || null })
+// Notes/product key/invoice number/price paid — the "purchase details" set
+// edited together from one modal in Admin -> All Subscriptions. notes is
+// distinct from the license's own catalog-level notes field — see
+// update_subscription_details() in supabase/schema_licenses.sql.
+export async function updateSubscriptionDetails(subscriptionId, { notes, productKey, invoiceNumber, pricePaid }) {
+  const { error } = await supabase.rpc('update_subscription_details', {
+    p_subscription_id: subscriptionId,
+    p_notes: notes || null,
+    p_product_key: productKey || null,
+    p_invoice_number: invoiceNumber || null,
+    p_price_paid: pricePaid === '' || pricePaid == null ? null : Number(pricePaid),
+  })
   if (error) throw error
 }

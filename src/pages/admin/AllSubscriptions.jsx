@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
+import { ChevronUp, ChevronDown, ChevronsUpDown, StickyNote, X } from 'lucide-react'
 import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
 import { useAuth } from '../../context/AuthContext'
 import { getAllSubscriptions } from '../../lib/admin'
 import { activateSubscription } from '../../lib/approvals'
-import { resendApprovalRequest, resendProvisioningRequest, cancelSubscription, buildRenewalReminderNotification, updateSubscriptionNotes } from '../../lib/subscriptions'
+import { resendApprovalRequest, resendProvisioningRequest, cancelSubscription, buildRenewalReminderNotification, updateSubscriptionDetails } from '../../lib/subscriptions'
 import { supabase } from '../../lib/supabase'
 import {
   sendEmail, activationEmailSubject, activationEmailHtml, approvalRequestEmailSubject, approvalRequestEmailHtml,
@@ -51,8 +51,10 @@ export default function AdminAllSubscriptions() {
   const [sortDir, setSortDir] = useState('desc')
   const [resendState, setResendState] = useState({})
   const [priceInputs, setPriceInputs] = useState({})
-  const [notesInputs, setNotesInputs] = useState({})
-  const [notesState, setNotesState] = useState({})
+  const [editingSub, setEditingSub] = useState(null)
+  const [editForm, setEditForm] = useState({ notes: '', productKey: '', invoiceNumber: '', pricePaid: '' })
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState(null)
 
   function reload() {
     getAllSubscriptions().then(setSubs).catch(e => setError(e.message))
@@ -177,28 +179,38 @@ export default function AdminAllSubscriptions() {
     }
   }
 
-  // Free-text admin annotation, distinct from the license's own catalog-level
-  // notes. Draft text lives in notesInputs keyed by sub.id until saved; the
-  // "Save" button only shows once the draft actually differs from what's on
-  // the row, so it disappears again right after a successful save.
-  async function handleSaveNotes(sub) {
-    const notes = notesInputs[sub.id] ?? sub.notes ?? ''
-    setNotesState(s => ({ ...s, [sub.id]: 'saving' }))
+  // Opens the "purchase details" modal (notes/product key/invoice number/price
+  // paid) — a single popup instead of inline per-row inputs, since cramming
+  // four fields into the table made rows too tall and left no room to see
+  // the rest of a row's data.
+  function openEditModal(sub) {
+    setEditError(null)
+    setEditForm({
+      notes: sub.notes || '',
+      productKey: sub.product_key || '',
+      invoiceNumber: sub.invoice_number || '',
+      pricePaid: sub.price_at_signup ?? '',
+    })
+    setEditingSub(sub)
+  }
+
+  function closeEditModal() {
+    setEditingSub(null)
+    setEditError(null)
+  }
+
+  async function handleSaveDetails(e) {
+    e.preventDefault()
+    setEditSaving(true)
+    setEditError(null)
     try {
-      await updateSubscriptionNotes(sub.id, notes)
-      setNotesInputs(n => {
-        const next = { ...n }
-        delete next[sub.id]
-        return next
-      })
-      setNotesState(s => {
-        const next = { ...s }
-        delete next[sub.id]
-        return next
-      })
+      await updateSubscriptionDetails(editingSub.id, editForm)
+      closeEditModal()
       reload()
     } catch (err) {
-      setNotesState(s => ({ ...s, [sub.id]: 'failed' }))
+      setEditError(err.message)
+    } finally {
+      setEditSaving(false)
     }
   }
 
@@ -302,16 +314,15 @@ export default function AdminAllSubscriptions() {
                     </button>
                   </th>
                 ))}
-                <th className="p-3">Notes</th>
+                <th className="p-3">Details</th>
                 <th className="p-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {visibleSubs?.map(sub => {
-                const notesDraft = notesInputs[sub.id] ?? sub.notes ?? ''
-                const notesDirty = notesDraft !== (sub.notes ?? '')
+                const hasDetails = sub.notes || sub.product_key || sub.invoice_number
                 return (
-                <tr key={sub.id}>
+                <tr key={sub.id} className="hover:bg-gray-50 transition-colors">
                   <td className="p-3">{sub.user_email}</td>
                   <td className="p-3 font-medium text-brand">{sub.license?.name}</td>
                   <td className="p-3 text-gray-500">{billingLabel(sub)}</td>
@@ -319,25 +330,13 @@ export default function AdminAllSubscriptions() {
                   <td className={`p-3 ${STATUS_COLOR[sub.status]}`}>{STATUS_LABEL[sub.status]}</td>
                   <td className="p-3 text-gray-500 whitespace-nowrap">{sub.activated_at || '—'}</td>
                   <td className="p-3">
-                    <div className="flex flex-col gap-1">
-                      <textarea
-                        rows={2}
-                        value={notesDraft}
-                        onChange={e => setNotesInputs(n => ({ ...n, [sub.id]: e.target.value }))}
-                        placeholder="Add a note…"
-                        className="w-40 border border-gray-300 rounded-lg px-2 py-1 text-xs"
-                      />
-                      {notesDirty && (
-                        <button
-                          onClick={() => handleSaveNotes(sub)}
-                          disabled={notesState[sub.id] === 'saving'}
-                          className="text-xs font-medium text-brand self-start disabled:opacity-50"
-                        >
-                          {notesState[sub.id] === 'saving' ? 'Saving…' : 'Save'}
-                        </button>
-                      )}
-                      {notesState[sub.id] === 'failed' && <span className="text-xs text-sil-red">Failed to save</span>}
-                    </div>
+                    <button
+                      onClick={() => openEditModal(sub)}
+                      title="Notes, product key, invoice number, price paid"
+                      className={`p-1 rounded hover:bg-gray-100 ${hasDetails ? 'text-brand' : 'text-gray-300'}`}
+                    >
+                      <StickyNote size={16} />
+                    </button>
                   </td>
                   <td className="p-3">
                     <div className="flex items-center gap-3 whitespace-nowrap">
@@ -412,6 +411,69 @@ export default function AdminAllSubscriptions() {
           </table>
         </div>
       </div>
+
+      {editingSub && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 overflow-y-auto z-50" onClick={closeEditModal}>
+          <form onSubmit={handleSaveDetails} onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-lg p-6 max-w-md w-full my-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-display text-lg font-bold text-brand">{editingSub.license?.name}</h2>
+              <button type="button" onClick={closeEditModal} aria-label="Close" className="text-gray-400 hover:text-gray-600">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">{editingSub.user_email}</p>
+            {editError && <p className="text-sil-red text-sm mb-3">{editError}</p>}
+            <div className="space-y-3">
+              <label className="block text-sm text-gray-700">
+                Cost at time of purchase
+                <input
+                  type="number" step="0.01" min="0"
+                  value={editForm.pricePaid}
+                  onChange={e => setEditForm(f => ({ ...f, pricePaid: e.target.value }))}
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="block text-sm text-gray-700">
+                Product key
+                <input
+                  type="text"
+                  value={editForm.productKey}
+                  onChange={e => setEditForm(f => ({ ...f, productKey: e.target.value }))}
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="block text-sm text-gray-700">
+                Invoice number
+                <input
+                  type="text"
+                  value={editForm.invoiceNumber}
+                  onChange={e => setEditForm(f => ({ ...f, invoiceNumber: e.target.value }))}
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="block text-sm text-gray-700">
+                Notes
+                <textarea
+                  rows={4}
+                  value={editForm.notes}
+                  onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))}
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </label>
+            </div>
+            <div className="flex justify-end gap-3 mt-5">
+              <button type="button" onClick={closeEditModal} className="text-sm font-medium text-gray-500">Cancel</button>
+              <button
+                type="submit"
+                disabled={editSaving}
+                className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2 hover:bg-brand-dark transition disabled:opacity-50"
+              >
+                {editSaving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </AppLayout>
   )
 }
