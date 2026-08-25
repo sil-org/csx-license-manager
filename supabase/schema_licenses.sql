@@ -195,6 +195,7 @@ create table if not exists subscriptions (
   price_at_signup       numeric,
   requested_by          uuid references profiles(id),
   legacy_id             text,   -- GAS Subscriptions sheet's ID (e.g. "SUB-XXXXXXXX"), set only by admin_import_subscriptions_full()
+  notes                 text,   -- free-text admin annotation, set only via update_subscription_notes() — distinct from licenses.notes (the catalog-item note)
   created_at            timestamptz not null default now()
 );
 
@@ -1253,6 +1254,30 @@ begin
 end;
 $$;
 
+-- ─── RPC: update_subscription_notes ────────────────────────────────────────────
+-- Free-text admin annotation on a single subscription (e.g. "waiting on
+-- vendor invoice", "seat shared with contractor X") — distinct from
+-- licenses.notes, which is a catalog-level note about the license itself.
+-- Same authority as cancel_subscription()'s admin-or-service-manager check,
+-- minus the self-service branch: a note is an internal annotation for
+-- whoever administers the license, not something the subscriber sets on
+-- their own request.
+
+create or replace function update_subscription_notes(p_subscription_id uuid, p_notes text)
+returns void language plpgsql security definer as $$
+declare
+  v_sub subscriptions%rowtype;
+begin
+  select * into v_sub from subscriptions where id = p_subscription_id;
+  if v_sub.id is null then raise exception 'subscription not found'; end if;
+  if not (is_admin() or is_service_manager_for(v_sub.license_id)) then
+    raise exception 'not authorized to edit notes on this subscription';
+  end if;
+
+  update subscriptions set notes = nullif(trim(p_notes), '') where id = p_subscription_id;
+end;
+$$;
+
 -- ─── RPC: admin_update_ministry_id ──────────────────────────────────────────────
 -- Mirrors Managers.gs updateMinistryId(): admin-only, upserts a 6-digit
 -- Ministry ID for an email, or deletes the row if p_ministry_id is blank.
@@ -1555,12 +1580,19 @@ $$;
 -- actually charged once a license's price changes after the fact.
 -- Adds a new OUT column, so Postgres won't let create-or-replace alter the
 -- existing return type in place — drop it first.
+-- notes surfaces subscriptions.notes (the per-subscription admin annotation,
+-- set via update_subscription_notes()) so finance can see context like
+-- "waiting on vendor invoice" without cross-referencing Admin -> All
+-- Subscriptions — distinct from licenses.notes, which is about the catalog
+-- item, not any one subscription.
+-- Adds a new OUT column, so Postgres won't let create-or-replace alter the
+-- existing return type in place — drop it first.
 drop function if exists get_finance_export(date, date);
 
 create function get_finance_export(p_start_date date, p_end_date date)
 returns table(
   user_email text, license_name text, billing_label text, cost numeric, price_paid numeric,
-  start_date date, renewed_date date, status text
+  start_date date, renewed_date date, status text, notes text
 ) language sql stable as $$
   select
     s.user_email,
@@ -1574,7 +1606,8 @@ returns table(
     s.price_at_signup,
     s.start_date,
     (select max(r.opt_in_date) from renewals r where r.subscription_id = s.id),
-    s.status::text
+    s.status::text,
+    s.notes
   from subscriptions s
   join licenses l on l.id = s.license_id
   where s.status = 'active'

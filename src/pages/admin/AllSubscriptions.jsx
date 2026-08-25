@@ -6,7 +6,7 @@ import { getLinks } from '../../navLinks'
 import { useAuth } from '../../context/AuthContext'
 import { getAllSubscriptions } from '../../lib/admin'
 import { activateSubscription } from '../../lib/approvals'
-import { resendApprovalRequest, resendProvisioningRequest, cancelSubscription, buildRenewalReminderNotification } from '../../lib/subscriptions'
+import { resendApprovalRequest, resendProvisioningRequest, cancelSubscription, buildRenewalReminderNotification, updateSubscriptionNotes } from '../../lib/subscriptions'
 import { supabase } from '../../lib/supabase'
 import {
   sendEmail, activationEmailSubject, activationEmailHtml, approvalRequestEmailSubject, approvalRequestEmailHtml,
@@ -51,6 +51,8 @@ export default function AdminAllSubscriptions() {
   const [sortDir, setSortDir] = useState('desc')
   const [resendState, setResendState] = useState({})
   const [priceInputs, setPriceInputs] = useState({})
+  const [notesInputs, setNotesInputs] = useState({})
+  const [notesState, setNotesState] = useState({})
 
   function reload() {
     getAllSubscriptions().then(setSubs).catch(e => setError(e.message))
@@ -175,6 +177,31 @@ export default function AdminAllSubscriptions() {
     }
   }
 
+  // Free-text admin annotation, distinct from the license's own catalog-level
+  // notes. Draft text lives in notesInputs keyed by sub.id until saved; the
+  // "Save" button only shows once the draft actually differs from what's on
+  // the row, so it disappears again right after a successful save.
+  async function handleSaveNotes(sub) {
+    const notes = notesInputs[sub.id] ?? sub.notes ?? ''
+    setNotesState(s => ({ ...s, [sub.id]: 'saving' }))
+    try {
+      await updateSubscriptionNotes(sub.id, notes)
+      setNotesInputs(n => {
+        const next = { ...n }
+        delete next[sub.id]
+        return next
+      })
+      setNotesState(s => {
+        const next = { ...s }
+        delete next[sub.id]
+        return next
+      })
+      reload()
+    } catch (err) {
+      setNotesState(s => ({ ...s, [sub.id]: 'failed' }))
+    }
+  }
+
   // Manually triggers a single-subscription renewal reminder — the "initial"
   // send (issue #3: renewal notices should reach both the target account and
   // the original requester, CC'd, when different). A weekly job that does
@@ -275,11 +302,15 @@ export default function AdminAllSubscriptions() {
                     </button>
                   </th>
                 ))}
+                <th className="p-3">Notes</th>
                 <th className="p-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {visibleSubs?.map(sub => (
+              {visibleSubs?.map(sub => {
+                const notesDraft = notesInputs[sub.id] ?? sub.notes ?? ''
+                const notesDirty = notesDraft !== (sub.notes ?? '')
+                return (
                 <tr key={sub.id}>
                   <td className="p-3">{sub.user_email}</td>
                   <td className="p-3 font-medium text-brand">{sub.license?.name}</td>
@@ -287,6 +318,27 @@ export default function AdminAllSubscriptions() {
                   <td className="p-3 text-gray-500">{fyLabel(sub) || '—'}</td>
                   <td className={`p-3 ${STATUS_COLOR[sub.status]}`}>{STATUS_LABEL[sub.status]}</td>
                   <td className="p-3 text-gray-500 whitespace-nowrap">{sub.activated_at || '—'}</td>
+                  <td className="p-3">
+                    <div className="flex flex-col gap-1">
+                      <textarea
+                        rows={2}
+                        value={notesDraft}
+                        onChange={e => setNotesInputs(n => ({ ...n, [sub.id]: e.target.value }))}
+                        placeholder="Add a note…"
+                        className="w-40 border border-gray-300 rounded-lg px-2 py-1 text-xs"
+                      />
+                      {notesDirty && (
+                        <button
+                          onClick={() => handleSaveNotes(sub)}
+                          disabled={notesState[sub.id] === 'saving'}
+                          className="text-xs font-medium text-brand self-start disabled:opacity-50"
+                        >
+                          {notesState[sub.id] === 'saving' ? 'Saving…' : 'Save'}
+                        </button>
+                      )}
+                      {notesState[sub.id] === 'failed' && <span className="text-xs text-sil-red">Failed to save</span>}
+                    </div>
+                  </td>
                   <td className="p-3">
                     <div className="flex items-center gap-3 whitespace-nowrap">
                       {sub.status === 'approved' && (
@@ -354,7 +406,8 @@ export default function AdminAllSubscriptions() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>

@@ -190,3 +190,10 @@ export async function optOutRenewal(subscriptionId) {
   const { error } = await supabase.rpc('opt_out_renewal', { p_subscription_id: subscriptionId })
   if (error) throw error
 }
+
+// Free-text admin annotation, distinct from the license's own catalog-level
+// notes — see update_subscription_notes() in supabase/schema_licenses.sql.
+export async function updateSubscriptionNotes(subscriptionId, notes) {
+  const { error } = await supabase.rpc('update_subscription_notes', { p_subscription_id: subscriptionId, p_notes: notes || null })
+  if (error) throw error
+}
