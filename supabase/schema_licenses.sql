@@ -14,14 +14,20 @@
 --   - Provisioning.gs's Gmail-inbox scanning automation — GAS-specific
 --     housekeeping with no direct equivalent; drop or reimplement as a
 --     scheduled job against Gmail's API if still needed.
---   - Requesting a subscription on behalf of someone else (GAS allowed
---     UserEmail != requester); this schema only supports self-service
---     requests for now.
 --
 -- Since ported: Catalog.gs's finance export and bulk CSV import
 -- (calc_prorated_cost/get_finance_export, admin_import_subscriptions below),
 -- and Managers.gs's org-hierarchy "my team's subscriptions" view
 -- (get_report_emails, My Team page).
+--
+-- Since added, with no GAS equivalent: requesting a subscription on behalf
+-- of someone else (request_subscription()'s p_recipient_email); adapter-based
+-- automated provisioning (provisioning_adapter/provisioning_config,
+-- supabase/functions/sync-provisioning); department-gated licensing
+-- (department_approvals); per-license Terms & Conditions acknowledgement
+-- (requires_acknowledgement); and the Workday-derived org-hierarchy CSV
+-- import (admin_import_team_hierarchy) feeding profiles.manager_email/sco/
+-- job_title.
 
 -- ─── ENUMS ───────────────────────────────────────────────────────────────────
 
@@ -67,6 +73,11 @@ do $$ begin
   create type subscription_billing_type as enum ('suite_key', 'gtis', 'ministry');
 exception when duplicate_object then null; end $$;
 
+-- 'department' backs department-gated licensing (an otherwise-free license
+-- that still needs a named approver for specific departments' seats) — see
+-- department_approvals and request_subscription()'s department_gated branch.
+alter type subscription_billing_type add value if not exists 'department';
+
 -- ─── PROFILE EXTENSIONS ──────────────────────────────────────────────────────
 -- Needed so RPCs below can join subscriptions/licenses (keyed by email) back
 -- to a profile. The base template's profiles.primary_email has no unique
@@ -74,6 +85,11 @@ exception when duplicate_object then null; end $$;
 
 alter table profiles add column if not exists department text;
 alter table profiles add column if not exists manager_email text;
+-- sco/job_title come from the same Workday-derived org-hierarchy CSV import
+-- as manager_email (see admin_import_team_hierarchy() below) — sco is a
+-- 3-letter org code, job_title is free text.
+alter table profiles add column if not exists sco text;
+alter table profiles add column if not exists job_title text;
 create unique index if not exists profiles_primary_email_idx on profiles (lower(primary_email));
 
 -- ─── TABLES ──────────────────────────────────────────────────────────────────
@@ -141,9 +157,18 @@ create table if not exists licenses (
   more_info_url        text,
   google_group_email   text,
   pro_rated            boolean not null default false,
-  service_manager_email text,
+  service_manager_emails text[] not null default '{}',   -- multi-recipient; was a single service_manager_email text column pre-38
   onboarding_message   text,   -- overrides the default "your license is ready" activation email body for this license
   reminder_message     text,   -- overrides the default renewal-reminder card body for this license (weekly digest sender not built yet — see README)
+  provisioning_adapter text,   -- null = manual (today's behavior); e.g. 'cubebackup'
+  provisioning_config  jsonb,  -- adapter-specific settings, e.g. {"domain": "sil.org"}
+  provisioning_lock_until timestamptz,   -- concurrency guard: sync-provisioning claims a license before processing it, so an overlapping run skips rather than double-calling the vendor's API
+  provisioning_email_show_name boolean not null default false,
+  provisioning_email_show_job_title boolean not null default false,
+  provisioning_email_show_department boolean not null default false,
+  department_gated    boolean not null default false,   -- gate approval on the recipient's own department (see department_approvals) instead of a suite key
+  requires_acknowledgement boolean not null default false,   -- requester must acknowledge acknowledgement_text before requesting
+  acknowledgement_text text,
   legacy_id            text,   -- GAS Licenses sheet's ID (e.g. "LIC-XXXXXXXX"), set only by admin_import_licenses()
   created_at           timestamptz not null default now()
 );
@@ -225,6 +250,46 @@ create index if not exists email_log_subscription_id_idx on email_log (subscript
 create index if not exists audit_log_subscription_id_idx on audit_log (subscription_id);
 create index if not exists audit_log_suite_key_idx on audit_log (suite_key);
 
+-- Delivery log for the sync-provisioning Edge Function — one row per
+-- enable/disable/error outcome. Mirrors email_log's shape/RLS style: text
+-- status/action columns rather than enums, since dispatch logic lives in the
+-- Edge Function's adapter modules, not in Postgres.
+create table if not exists provisioning_log (
+  id             uuid primary key default gen_random_uuid(),
+  created_at     timestamptz not null default now(),
+  license_id     uuid references licenses(id),
+  adapter        text not null,
+  email          text not null,
+  action         text not null, -- 'enabled' | 'disabled'
+  external_id    text,
+  status         text not null, -- 'ok' | 'failed'
+  error          text
+);
+
+create index if not exists provisioning_log_license_id_idx on provisioning_log (license_id);
+
+-- Audit trail for the weekly Workday-derived org-hierarchy CSV import (feeds
+-- profiles.manager_email/sco/job_title) — just enough for the My Team page to
+-- show "last imported on X" without granting non-admins direct select access.
+create table if not exists team_hierarchy_imports (
+  id           uuid primary key default gen_random_uuid(),
+  created_at   timestamptz not null default now(),
+  performed_by text not null,
+  row_count    int not null
+);
+
+-- Per-license, per-department opt-in for department-gated licensing (an
+-- otherwise-free license that still needs a named approver for specific
+-- departments' seats) — see request_subscription()'s department_gated branch.
+create table if not exists department_approvals (
+  id             uuid primary key default gen_random_uuid(),
+  license_id     uuid not null references licenses(id),
+  sco            text not null check (sco ~ '^[A-Z]{3}$'),
+  approver_email text not null,
+  created_at     timestamptz not null default now(),
+  unique (license_id, sco)
+);
+
 -- ─── ROW LEVEL SECURITY ──────────────────────────────────────────────────────
 
 alter table suite_keys enable row level security;
@@ -235,6 +300,9 @@ alter table renewals enable row level security;
 alter table audit_log enable row level security;
 alter table email_log enable row level security;
 alter table group_memberships enable row level security;
+alter table provisioning_log enable row level security;
+alter table team_hierarchy_imports enable row level security;
+alter table department_approvals enable row level security;
 
 -- Helpers
 
@@ -275,13 +343,13 @@ create or replace function is_service_manager_for(p_license_id uuid)
 returns boolean language sql stable security definer as $$
   select exists(
     select 1 from licenses
-    where id = p_license_id and service_manager_email = current_profile_email()
+    where id = p_license_id and current_profile_email() = any(service_manager_emails)
   )
 $$;
 
 create or replace function is_service_manager_any()
 returns boolean language sql stable security definer as $$
-  select exists(select 1 from licenses where service_manager_email = current_profile_email())
+  select exists(select 1 from licenses where current_profile_email() = any(service_manager_emails))
 $$;
 
 create or replace function is_suite_key_owner_any()
@@ -366,7 +434,7 @@ create policy "ministry_ids: own or admin read" on ministry_ids for select
 
 drop policy if exists "licenses: read active, or own scope" on licenses;
 create policy "licenses: read active, or own scope" on licenses for select
-  using (active or is_admin() or service_manager_email = current_profile_email());
+  using (active or is_admin() or current_profile_email() = any(service_manager_emails));
 drop policy if exists "licenses: admin write" on licenses;
 create policy "licenses: admin write" on licenses for all
   using (is_admin()) with check (is_admin());
@@ -418,6 +486,19 @@ create policy "email_log: admin read" on email_log for select using (is_admin())
 -- No insert/update policies for authenticated — only the send-email Edge
 -- Function writes here, via the service-role key (which bypasses RLS).
 
+drop policy if exists "provisioning_log: admin read" on provisioning_log;
+create policy "provisioning_log: admin read" on provisioning_log for select using (is_admin());
+-- No insert/update policies for authenticated — only sync-provisioning
+-- (service-role key) writes here.
+
+drop policy if exists "team_hierarchy_imports: admin read" on team_hierarchy_imports;
+create policy "team_hierarchy_imports: admin read" on team_hierarchy_imports for select
+  using (is_admin());
+
+drop policy if exists "department_approvals: admin only" on department_approvals;
+create policy "department_approvals: admin only" on department_approvals for all
+  using (is_admin()) with check (is_admin());
+
 -- ─── RPC: request_subscription ────────────────────────────────────────────────
 -- Mirrors Subscriptions.gs createSubscription(). Branches on GTIS-sponsored /
 -- ministry-ID / suite-key paths to decide the initial status.
@@ -425,6 +506,8 @@ create policy "email_log: admin read" on email_log for select using (is_admin())
 -- Adds a 6th parameter, so the old 5-arg overload must be dropped explicitly —
 -- CREATE OR REPLACE only replaces a function with an identical argument list.
 drop function if exists request_subscription(uuid, text, text, text, int);
+-- Adds a 7th parameter (p_acknowledged) — same reason, drop the 6-arg overload.
+drop function if exists request_subscription(uuid, text, text, text, int, text);
 
 create or replace function request_subscription(
   p_license_id uuid,
@@ -432,7 +515,8 @@ create or replace function request_subscription(
   p_suggested_approver_email text,
   p_ministry_id text,
   p_fy int,
-  p_recipient_email text default null
+  p_recipient_email text default null,
+  p_acknowledged boolean default false
 ) returns uuid language plpgsql security definer as $$
 declare
   v_license licenses%rowtype;
@@ -452,6 +536,7 @@ declare
   v_owner text;
   v_owner_group text;
   v_pending_approver text := null;
+  v_sco text;
 begin
   if v_actor_email is null then raise exception 'not authenticated'; end if;
   if not is_eligible_staff_email(v_recipient_email) then
@@ -460,6 +545,10 @@ begin
 
   select * into v_license from licenses where id = p_license_id and active;
   if v_license.id is null then raise exception 'license not found or inactive'; end if;
+
+  if v_license.requires_acknowledgement and not coalesce(p_acknowledged, false) then
+    raise exception 'you must acknowledge the terms & conditions for this license before requesting it';
+  end if;
 
   if exists (
     select 1 from subscriptions
@@ -473,6 +562,26 @@ begin
     v_billing_type := 'gtis';
     v_audit_suite_key := 'GTIS';
     v_status := 'approved';
+
+  elsif v_license.department_gated then
+    -- Gate on the recipient's own department, not the requester's — a
+    -- department's opt-in should apply to whoever will actually use the
+    -- seat, regardless of who happened to submit the request on their
+    -- behalf. No profile, or no sco on file, or no opt-in row for that sco:
+    -- auto-approve, same as gtis_sponsored.
+    v_billing_type := 'department';
+    select sco into v_sco from profiles where lower(primary_email) = v_recipient_email;
+    if v_sco is not null then
+      select approver_email into v_pending_approver
+      from department_approvals where license_id = p_license_id and sco = v_sco;
+    end if;
+    v_audit_suite_key := 'DEPT:' || coalesce(v_sco, 'none');
+    if v_pending_approver is not null then
+      v_status := 'pending';
+    else
+      v_pending_approver := null;
+      v_status := 'approved';
+    end if;
 
   elsif p_ministry_id is not null then
     if p_ministry_id !~ '^\d{6}$' then
@@ -589,10 +698,16 @@ begin
   -- Always log the request itself, even when it's about to be auto-approved
   -- below — otherwise an auto-approved subscription's audit trail starts
   -- with 'auto_approved' and never shows that a request happened at all.
+  -- The "on behalf of" and "acknowledged T&C" notes are independent and both
+  -- append when applicable, rather than one replacing the other.
   insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, notes, ip_address)
   values (
     'requested', v_sub_id, v_license.name, v_recipient_email, v_audit_suite_key, v_actor_email,
-    case when v_recipient_email <> v_actor_email then 'on behalf of ' || v_recipient_email else null end,
+    nullif(trim(concat_ws(
+      '; ',
+      case when v_recipient_email <> v_actor_email then 'on behalf of ' || v_recipient_email else null end,
+      case when v_license.requires_acknowledgement then 'acknowledged terms & conditions' else null end
+    )), ''),
     current_client_ip()
   );
 
@@ -773,6 +888,21 @@ language sql stable security definer as $$
   select primary_email from profiles where role = 'admin' and primary_email is not null;
 $$;
 
+-- ─── RPC: get_seat_provisioning_fields ─────────────────────────────────────────
+-- Same narrow-RLS-bypass rationale as get_admin_emails above: the
+-- "provisioning required" email needs the seat's user's display name/job
+-- title/department (not just their email, which is all subscriptions.
+-- user_email carries) so whoever provisions the seat manually has something
+-- to type into the vendor portal — but profiles' own SELECT policy only lets
+-- a caller read their own row (or all rows, if admin). One round trip for all
+-- three fields instead of three near-identical single-field lookups.
+
+create or replace function get_seat_provisioning_fields(p_email text)
+returns table(display_name text, job_title text, department text)
+language sql stable security definer as $$
+  select display_name, job_title, department from profiles where lower(primary_email) = lower(p_email) limit 1;
+$$;
+
 -- ─── RPC: get_my_pending_sk_verifications / get_my_pending_approvals ───────────
 -- The Action Center page's "here's what needs MY attention" lists. Deliberately
 -- NOT is_admin()-inclusive, unlike subscriptions' own RLS policy — scoped to
@@ -798,7 +928,7 @@ language sql stable security definer as $$
   select s.id, s.user_email, s.suite_key, l.name
   from subscriptions s join licenses l on l.id = s.license_id
   where s.status = 'pending'
-    and is_suite_key_owner(s.suite_key)
+    and (is_suite_key_owner(s.suite_key) or s.pending_approver_email = current_profile_email())
   order by s.created_at
 $$;
 
@@ -966,13 +1096,14 @@ begin
   select * into v_sub from subscriptions where id = p_subscription_id;
   if v_sub.id is null then raise exception 'subscription not found'; end if;
   if v_sub.status != 'pending' then raise exception 'subscription is not pending approval'; end if;
-  if not (is_admin() or is_suite_key_owner(v_sub.suite_key)) then
+  if not (is_admin() or is_suite_key_owner(v_sub.suite_key) or v_sub.pending_approver_email = v_email) then
     raise exception 'not authorized to approve this subscription';
   end if;
 
   select * into v_license from licenses where id = v_sub.license_id;
 
-  -- Owner approval only clears the SuiteKey-ownership gate — it never skips
+  -- Owner approval only clears the SuiteKey-ownership (or, for
+  -- department-gated licenses, department-approver) gate — it never skips
   -- provisioning. No license is auto-provisioned today, so this always lands
   -- on 'approved' and relies on buildProvisioningNotifications() (see
   -- src/lib/subscriptions.js) firing off the "someone needs to provision
@@ -1026,7 +1157,7 @@ begin
   if v_sub.status != 'approved' then raise exception 'subscription is not approved'; end if;
 
   select * into v_license from licenses where id = v_sub.license_id;
-  if not (is_admin() or v_license.service_manager_email = v_email) then
+  if not (is_admin() or v_email = any(v_license.service_manager_emails)) then
     raise exception 'not authorized to activate this subscription';
   end if;
 
@@ -1147,21 +1278,117 @@ begin
 end;
 $$;
 
--- ─── RPC: save_license / deactivate_license (admin catalog CRUD) ─────────────
+-- ─── RPC: admin_import_team_hierarchy / get_last_team_import ────────────────
+-- Admin CSV importer for profiles.manager_email/sco/job_title, fed by a
+-- weekly export of the Workday-derived org-hierarchy Sheet (see README's My
+-- Team section) — there's no live API pull, since a direct Workday
+-- integration isn't currently available and Workday itself is being retired
+-- within a year. Mirrors admin_import_subscriptions()'s shape: one result
+-- per input row, a bad row never aborts the batch.
+--
+-- Unlike admin_import_subscriptions()'s placeholder-profile path (which has
+-- no eligibility gate — it's one historical requester at a time, already a
+-- known SIL person), a missing profile here is only created after passing
+-- is_eligible_staff_email() — the hierarchy export can include people this
+-- app should never have a row for (external contractors/vendors, terminated
+-- staff still on an old export, a shared/generic mailbox listed as someone's
+-- manager); rows that fail eligibility are reported back as failures, not
+-- silently skipped.
+--
+-- get_last_team_import() is a narrow security-definer read so the My Team
+-- page can show "last imported on X" without granting non-admins direct
+-- select on team_hierarchy_imports — same rationale as get_report_emails/
+-- get_admin_emails elsewhere in this file.
 
-create or replace function save_license(p_license jsonb)
-returns uuid language plpgsql security definer as $$
-declare v_id uuid;
+create or replace function admin_import_team_hierarchy(p_rows jsonb)
+returns jsonb language plpgsql security definer as $$
+declare
+  v_admin text := current_profile_email();
+  v_row jsonb;
+  v_results jsonb := '[]'::jsonb;
+  v_email text;
+  v_manager_email text;
+  v_sco text;
+  v_job_title text;
+  v_ok_count int := 0;
 begin
   if not is_admin() then raise exception 'admin only'; end if;
+
+  for v_row in select * from jsonb_array_elements(p_rows)
+  loop
+    begin
+      v_email := lower(trim(v_row->>'primary_email'));
+      v_manager_email := nullif(trim(lower(v_row->>'manager_email')), '');
+      v_sco := nullif(trim(upper(v_row->>'sco')), '');
+      v_job_title := nullif(trim(v_row->>'job_title'), '');
+
+      if v_email = '' or v_email is null then
+        v_results := v_results || jsonb_build_object('ok', false, 'error', 'Missing primary_email', 'row', v_row);
+        continue;
+      end if;
+
+      if v_sco is not null and v_sco !~ '^[A-Z]{3}$' then
+        v_results := v_results || jsonb_build_object('ok', false, 'error', 'SCO must be exactly 3 letters: ' || v_sco, 'row', v_row);
+        continue;
+      end if;
+
+      if not exists (select 1 from profiles where lower(primary_email) = v_email) then
+        if not is_eligible_staff_email(v_email) then
+          v_results := v_results || jsonb_build_object('ok', false, 'error', 'Not an eligible staff email: ' || v_email, 'row', v_row);
+          continue;
+        end if;
+        insert into profiles (display_name, primary_email) values (v_email, v_email);
+      end if;
+
+      update profiles set manager_email = v_manager_email, sco = v_sco, job_title = v_job_title where lower(primary_email) = v_email;
+
+      v_ok_count := v_ok_count + 1;
+      v_results := v_results || jsonb_build_object('ok', true, 'row', v_row);
+    exception when others then
+      v_results := v_results || jsonb_build_object('ok', false, 'error', sqlerrm, 'row', v_row);
+    end;
+  end loop;
+
+  insert into team_hierarchy_imports (performed_by, row_count) values (v_admin, v_ok_count);
+
+  return v_results;
+end;
+$$;
+
+create or replace function get_last_team_import()
+returns table(created_at timestamptz, row_count int)
+language sql stable security definer as $$
+  select created_at, row_count from team_hierarchy_imports order by created_at desc limit 1
+$$;
+
+-- ─── RPC: save_license / deactivate_license (admin catalog CRUD) ─────────────
+
+-- Full reconciled param list (service_manager_emails array, provisioning
+-- adapter/config + email-field flags, department_gated, requires_
+-- acknowledgement/acknowledgement_text) — this function's body is always
+-- rewritten from scratch, never diffed, so each new admin-editable column
+-- lands here alongside every earlier one instead of drifting out of sync.
+create or replace function save_license(p_license jsonb)
+returns uuid language plpgsql security definer as $$
+declare
+  v_id uuid;
+  v_service_manager_emails text[];
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+
+  select coalesce(array_agg(trim(e)), '{}'::text[]) into v_service_manager_emails
+  from jsonb_array_elements_text(coalesce(p_license->'service_manager_emails', '[]'::jsonb)) e
+  where trim(e) <> '';
 
   v_id := (p_license->>'id')::uuid;
   if v_id is null then
     insert into licenses (
       name, vendor, category, price, price_unit, notes, gtis_sponsored,
       billing_cycle, renewal_month, renewal_reminder, logo_url, activation_url,
-      more_info_url, google_group_email, pro_rated, service_manager_email,
-      onboarding_message, reminder_message, created_by
+      more_info_url, google_group_email, pro_rated, service_manager_emails,
+      onboarding_message, reminder_message, provisioning_adapter, provisioning_config,
+      provisioning_email_show_name, provisioning_email_show_job_title, provisioning_email_show_department,
+      department_gated, requires_acknowledgement, acknowledgement_text, created_by
     ) values (
       p_license->>'name', p_license->>'vendor', p_license->>'category',
       (p_license->>'price')::numeric, p_license->>'price_unit', p_license->>'notes',
@@ -1171,8 +1398,16 @@ begin
       coalesce((p_license->>'renewal_reminder')::boolean, true),
       p_license->>'logo_url', p_license->>'activation_url', p_license->>'more_info_url',
       p_license->>'google_group_email', coalesce((p_license->>'pro_rated')::boolean, false),
-      p_license->>'service_manager_email', nullif(p_license->>'onboarding_message', ''),
-      nullif(p_license->>'reminder_message', ''), current_profile_id()
+      v_service_manager_emails,
+      nullif(p_license->>'onboarding_message', ''), nullif(p_license->>'reminder_message', ''),
+      nullif(p_license->>'provisioning_adapter', ''), nullif(p_license->>'provisioning_config', '')::jsonb,
+      coalesce((p_license->>'provisioning_email_show_name')::boolean, false),
+      coalesce((p_license->>'provisioning_email_show_job_title')::boolean, false),
+      coalesce((p_license->>'provisioning_email_show_department')::boolean, false),
+      coalesce((p_license->>'department_gated')::boolean, false),
+      coalesce((p_license->>'requires_acknowledgement')::boolean, false),
+      nullif(p_license->>'acknowledgement_text', ''),
+      current_profile_id()
     ) returning id into v_id;
   else
     update licenses set
@@ -1185,13 +1420,55 @@ begin
       logo_url = p_license->>'logo_url', activation_url = p_license->>'activation_url',
       more_info_url = p_license->>'more_info_url', google_group_email = p_license->>'google_group_email',
       pro_rated = coalesce((p_license->>'pro_rated')::boolean, false),
-      service_manager_email = p_license->>'service_manager_email',
+      service_manager_emails = v_service_manager_emails,
       onboarding_message = nullif(p_license->>'onboarding_message', ''),
-      reminder_message = nullif(p_license->>'reminder_message', '')
+      reminder_message = nullif(p_license->>'reminder_message', ''),
+      provisioning_adapter = nullif(p_license->>'provisioning_adapter', ''),
+      provisioning_config = nullif(p_license->>'provisioning_config', '')::jsonb,
+      provisioning_email_show_name = coalesce((p_license->>'provisioning_email_show_name')::boolean, false),
+      provisioning_email_show_job_title = coalesce((p_license->>'provisioning_email_show_job_title')::boolean, false),
+      provisioning_email_show_department = coalesce((p_license->>'provisioning_email_show_department')::boolean, false),
+      department_gated = coalesce((p_license->>'department_gated')::boolean, false),
+      requires_acknowledgement = coalesce((p_license->>'requires_acknowledgement')::boolean, false),
+      acknowledgement_text = nullif(p_license->>'acknowledgement_text', '')
     where id = v_id;
   end if;
 
   return v_id;
+end;
+$$;
+
+-- ─── RPC: admin CRUD for department_approvals ────────────────────────────────
+-- Table RLS is already admin-only, so these are thin wrappers for the admin
+-- UI rather than a security boundary of their own — same rationale as
+-- save_license()/deactivate_license() being security-definer + an explicit
+-- is_admin() check even though RLS would block a non-admin anyway.
+
+create or replace function admin_list_department_approvals(p_license_id uuid)
+returns table(id uuid, sco text, approver_email text)
+language sql stable security definer as $$
+  select id, sco, approver_email from department_approvals
+  where license_id = p_license_id order by sco
+$$;
+
+create or replace function admin_add_department_approval(p_license_id uuid, p_sco text, p_approver_email text)
+returns uuid language plpgsql security definer as $$
+declare v_id uuid;
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+  insert into department_approvals (license_id, sco, approver_email)
+  values (p_license_id, upper(trim(p_sco)), lower(trim(p_approver_email)))
+  on conflict (license_id, sco) do update set approver_email = excluded.approver_email
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+create or replace function admin_remove_department_approval(p_id uuid)
+returns void language plpgsql security definer as $$
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+  delete from department_approvals where id = p_id;
 end;
 $$;
 
@@ -1272,14 +1549,18 @@ $$;
 -- (renewals.opt_in_date) so finance can tell a long-running active
 -- subscription apart from one still on its original term — null means it
 -- hasn't been through opt_in_renewal() yet.
+-- price_paid is subscriptions.price_at_signup — the license price snapshotted
+-- at request/activation time — kept separate from `cost` because `cost`
+-- recalculates off the license's *current* price, which drifts from what was
+-- actually charged once a license's price changes after the fact.
 -- Adds a new OUT column, so Postgres won't let create-or-replace alter the
 -- existing return type in place — drop it first.
 drop function if exists get_finance_export(date, date);
 
 create function get_finance_export(p_start_date date, p_end_date date)
 returns table(
-  user_email text, license_name text, billing_label text, cost numeric, start_date date,
-  renewed_date date, status text
+  user_email text, license_name text, billing_label text, cost numeric, price_paid numeric,
+  start_date date, renewed_date date, status text
 ) language sql stable as $$
   select
     s.user_email,
@@ -1290,6 +1571,7 @@ returns table(
       else s.suite_key
     end,
     calc_prorated_cost(l.price, l.billing_cycle, l.renewal_month, l.pro_rated, s.start_date),
+    s.price_at_signup,
     s.start_date,
     (select max(r.opt_in_date) from renewals r where r.subscription_id = s.id),
     s.status::text
@@ -1482,6 +1764,7 @@ declare
   v_created_by uuid;
   v_id uuid;
   v_error text;
+  v_service_manager_email text;
 begin
   if not is_admin() then raise exception 'admin only'; end if;
 
@@ -1513,10 +1796,15 @@ begin
         select id into v_created_by from profiles where lower(primary_email) = lower(trim(v_row->>'created_by_email'));
       end if;
 
+      -- GAS's Licenses sheet only ever had one service-manager address, so a
+      -- single-element array (or empty) is the correct mapping here — no
+      -- delimiter splitting needed, unlike a hypothetical multi-value CSV source.
+      v_service_manager_email := nullif(trim(lower(v_row->>'service_manager_email')), '');
+
       insert into licenses (
         legacy_id, name, vendor, category, price, price_unit, notes, active, gtis_sponsored,
         billing_cycle, renewal_month, renewal_reminder, created_by, logo_url, activation_url,
-        more_info_url, google_group_email, pro_rated, service_manager_email
+        more_info_url, google_group_email, pro_rated, service_manager_emails
       ) values (
         v_legacy_id, v_name, nullif(trim(v_row->>'vendor'), ''), nullif(trim(v_row->>'category'), ''),
         nullif(v_row->>'price', '')::numeric,
@@ -1531,7 +1819,7 @@ begin
         nullif(trim(v_row->>'logo_url'), ''), nullif(trim(v_row->>'activation_url'), ''),
         nullif(trim(v_row->>'more_info_url'), ''), nullif(trim(lower(v_row->>'google_group_email')), ''),
         coalesce((v_row->>'pro_rated')::boolean, false),
-        nullif(trim(lower(v_row->>'service_manager_email')), '')
+        case when v_service_manager_email is null then '{}'::text[] else array[v_service_manager_email] end
       ) returning id into v_id;
 
       v_results := v_results || jsonb_build_object('ok', true, 'id', v_id, 'row', v_row);

@@ -18,8 +18,8 @@ function csvEscape(value) {
 }
 
 function downloadCsv(rows, filename) {
-  const header = ['User', 'License', 'Billed to', 'Cost', 'Started', 'Renewed', 'Status']
-  const lines = [header, ...rows.map(r => [r.user_email, r.license_name, r.billing_label, r.cost, r.start_date, r.renewed_date, r.status])]
+  const header = ['User', 'License', 'Billed to', 'Cost', 'Price paid', 'Started', 'Renewed', 'Status']
+  const lines = [header, ...rows.map(r => [r.user_email, r.license_name, r.billing_label, r.cost, r.price_paid, r.start_date, r.renewed_date, r.status])]
   const csv = lines.map(line => line.map(csvEscape).join(',')).join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
   const url = URL.createObjectURL(blob)
@@ -106,6 +106,7 @@ export default function AdminFinanceExport() {
                     <th className="p-3">License</th>
                     <th className="p-3">Billed to</th>
                     <th className="p-3">Cost</th>
+                    <th className="p-3">Price paid</th>
                     <th className="p-3">Started</th>
                     <th className="p-3">Renewed</th>
                     <th className="p-3">Status</th>
@@ -118,6 +119,7 @@ export default function AdminFinanceExport() {
                       <td className="p-3 font-medium text-brand">{r.license_name}</td>
                       <td className="p-3 text-gray-500">{r.billing_label}</td>
                       <td className="p-3 text-gray-700">${Number(r.cost).toFixed(2)}</td>
+                      <td className="p-3 text-gray-700">{r.price_paid != null ? `$${Number(r.price_paid).toFixed(2)}` : '—'}</td>
                       <td className="p-3 text-gray-500 whitespace-nowrap">{r.start_date}</td>
                       <td className="p-3 text-gray-500 whitespace-nowrap">{r.renewed_date || '—'}</td>
                       <td className="p-3 text-gray-500">{r.status}</td>
