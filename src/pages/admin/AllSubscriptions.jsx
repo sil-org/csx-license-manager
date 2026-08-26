@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronUp, ChevronDown, ChevronsUpDown, StickyNote, X, RefreshCw, XCircle, CheckCircle2 } from 'lucide-react'
+import { ChevronUp, ChevronDown, ChevronsUpDown, StickyNote, X, RefreshCw, XCircle, CheckCircle2, Bell } from 'lucide-react'
 import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
@@ -223,6 +223,11 @@ export default function AdminAllSubscriptions() {
   // the original requester, CC'd, when different). A weekly job that does
   // this automatically for every eligible subscription is separate,
   // not-yet-built work — see README's "not ported yet" list.
+  function confirmSendRenewalReminder(sub) {
+    if (!window.confirm(`Send a renewal reminder for ${sub.license?.name} to ${sub.user_email}?`)) return
+    handleSendRenewalReminder(sub)
+  }
+
   async function handleSendRenewalReminder(sub) {
     setResendState(s => ({ ...s, [sub.id]: 'sending' }))
     try {
@@ -428,11 +433,12 @@ export default function AdminAllSubscriptions() {
                           <span className="text-xs text-sil-red">Failed</span>
                         ) : (
                           <button
-                            onClick={() => handleSendRenewalReminder(sub)}
+                            onClick={() => confirmSendRenewalReminder(sub)}
                             disabled={resendState[sub.id] === 'sending'}
-                            className="text-xs font-medium text-brand disabled:opacity-50"
+                            title="Send renewal reminder"
+                            className="p-1 rounded hover:bg-gray-100 text-brand disabled:opacity-50"
                           >
-                            {resendState[sub.id] === 'sending' ? 'Sending…' : 'Send renewal reminder'}
+                            <Bell size={16} className={resendState[sub.id] === 'sending' ? 'animate-spin' : ''} />
                           </button>
                         )
                       )}
