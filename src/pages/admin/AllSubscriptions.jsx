@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronUp, ChevronDown, ChevronsUpDown, StickyNote, X, RefreshCw, XCircle, CheckCircle2, Bell } from 'lucide-react'
+import { ChevronUp, ChevronDown, ChevronsUpDown, StickyNote, X, RefreshCw, XCircle, CheckCircle2, Bell, ExternalLink } from 'lucide-react'
 import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
@@ -383,11 +383,6 @@ export default function AdminAllSubscriptions() {
                     <div className="flex items-center gap-3 whitespace-nowrap">
                       {sub.status === 'approved' && (
                         <>
-                          {sub.license?.activation_url && (
-                            <a href={sub.license.activation_url} target="_blank" rel="noreferrer" className="text-xs font-medium text-brand">
-                              Open vendor portal
-                            </a>
-                          )}
                           <button
                             onClick={() => openEditModal(sub, { activate: true })}
                             title="Mark active (opens purchase details)"
@@ -461,7 +456,18 @@ export default function AdminAllSubscriptions() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 overflow-y-auto z-50" onClick={closeEditModal}>
           <form onSubmit={handleSaveDetails} onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-lg p-6 max-w-md w-full my-8">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="font-display text-lg font-bold text-brand">{editingSub.license?.name}</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="font-display text-lg font-bold text-brand">{editingSub.license?.name}</h2>
+                {editingSub.license?.activation_url && (
+                  <a
+                    href={editingSub.license.activation_url} target="_blank" rel="noreferrer"
+                    title="Open vendor portal"
+                    className="text-gray-400 hover:text-brand"
+                  >
+                    <ExternalLink size={16} />
+                  </a>
+                )}
+              </div>
               <button type="button" onClick={closeEditModal} aria-label="Close" className="text-gray-400 hover:text-gray-600">
                 <X size={18} />
               </button>
