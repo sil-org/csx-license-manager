@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronUp, ChevronDown, ChevronsUpDown, StickyNote, X } from 'lucide-react'
+import { ChevronUp, ChevronDown, ChevronsUpDown, StickyNote, X, RefreshCw, XCircle, CheckCircle2 } from 'lucide-react'
 import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
@@ -47,11 +47,13 @@ export default function AdminAllSubscriptions() {
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [licenseFilter, setLicenseFilter] = useState('')
+  const [fyFilter, setFyFilter] = useState('')
   const [sortKey, setSortKey] = useState('started')
   const [sortDir, setSortDir] = useState('desc')
   const [resendState, setResendState] = useState({})
-  const [priceInputs, setPriceInputs] = useState({})
   const [editingSub, setEditingSub] = useState(null)
+  const [activateMode, setActivateMode] = useState(false)
   const [editForm, setEditForm] = useState({ notes: '', productKey: '', invoiceNumber: '', pricePaid: '' })
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState(null)
@@ -68,29 +70,6 @@ export default function AdminAllSubscriptions() {
     } else {
       setSortKey(key)
       setSortDir('asc')
-    }
-  }
-
-  async function handleActivate(sub) {
-    const priceInput = priceInputs[sub.id]
-    const price = priceInput?.trim() ? Number(priceInput) : null
-    try {
-      await activateSubscription(sub.id, price)
-      reload()
-      try {
-        await sendEmail({
-          to: sub.user_email,
-          subject: activationEmailSubject(sub.license?.name),
-          html: activationEmailHtml({ sub, licenseName: sub.license?.name, onboardingMessage: sub.license?.onboarding_message, moreInfoUrl: sub.license?.more_info_url }),
-          template: 'activation',
-          subscriptionId: sub.id,
-        })
-      } catch (err) {
-        console.error('activation email failed:', err.message)
-      }
-      supabase.functions.invoke('sync-provisioning').catch(err => console.error('provisioning sync kick failed:', err.message))
-    } catch (err) {
-      setError(err.message)
     }
   }
 
@@ -122,6 +101,11 @@ export default function AdminAllSubscriptions() {
   // Covers a service manager who missed (or never got, e.g. this went
   // active without ever notifying anyone — see the "no license is
   // auto-provisioned yet" fix) the original provisioning-required email.
+  function confirmResendProvisioning(sub) {
+    if (!window.confirm(`Resend the provisioning-required email for ${sub.license?.name} (${sub.user_email})?`)) return
+    handleResendProvisioning(sub)
+  }
+
   async function handleResendProvisioning(sub) {
     setResendState(s => ({ ...s, [sub.id]: 'sending' }))
     try {
@@ -182,8 +166,10 @@ export default function AdminAllSubscriptions() {
   // Opens the "purchase details" modal (notes/product key/invoice number/price
   // paid) — a single popup instead of inline per-row inputs, since cramming
   // four fields into the table made rows too tall and left no room to see
-  // the rest of a row's data.
-  function openEditModal(sub) {
+  // the rest of a row's data. The "Mark active" icon on approved rows opens
+  // the same modal in activate mode: saving details also flips the
+  // subscription to active instead of just recording the purchase details.
+  function openEditModal(sub, { activate = false } = {}) {
     setEditError(null)
     setEditForm({
       notes: sub.notes || '',
@@ -191,11 +177,13 @@ export default function AdminAllSubscriptions() {
       invoiceNumber: sub.invoice_number || '',
       pricePaid: sub.price_at_signup ?? '',
     })
+    setActivateMode(activate)
     setEditingSub(sub)
   }
 
   function closeEditModal() {
     setEditingSub(null)
+    setActivateMode(false)
     setEditError(null)
   }
 
@@ -203,8 +191,24 @@ export default function AdminAllSubscriptions() {
     e.preventDefault()
     setEditSaving(true)
     setEditError(null)
+    const sub = editingSub
     try {
-      await updateSubscriptionDetails(editingSub.id, editForm)
+      await updateSubscriptionDetails(sub.id, editForm)
+      if (activateMode) {
+        await activateSubscription(sub.id, null)
+        try {
+          await sendEmail({
+            to: sub.user_email,
+            subject: activationEmailSubject(sub.license?.name),
+            html: activationEmailHtml({ sub, licenseName: sub.license?.name, onboardingMessage: sub.license?.onboarding_message, moreInfoUrl: sub.license?.more_info_url }),
+            template: 'activation',
+            subscriptionId: sub.id,
+          })
+        } catch (err) {
+          console.error('activation email failed:', err.message)
+        }
+        supabase.functions.invoke('sync-provisioning').catch(err => console.error('provisioning sync kick failed:', err.message))
+      }
       closeEditModal()
       reload()
     } catch (err) {
@@ -245,42 +249,74 @@ export default function AdminAllSubscriptions() {
     }
   }
 
+  const licenseOptions = useMemo(() => (
+    [...new Set((subs || []).map(s => s.license?.name).filter(Boolean))].sort()
+  ), [subs])
+  const fyOptions = useMemo(() => (
+    [...new Set((subs || []).map(s => s.fy).filter(fy => fy != null))].sort((a, b) => b - a)
+  ), [subs])
+
   const q = search.trim().toLowerCase()
-  const textFiltered = !q ? subs : subs?.filter(s =>
-    s.user_email.toLowerCase().includes(q) ||
-    (s.license?.name || '').toLowerCase().includes(q) ||
-    (s.suite_key || '').toLowerCase().includes(q) ||
-    (s.ministry_id || '').toLowerCase().includes(q) ||
-    s.status.toLowerCase().includes(q)
-  )
-  const statusFiltered = !statusFilter ? textFiltered : textFiltered?.filter(s => s.status === statusFilter)
+  const filteredSubs = subs?.filter(s => {
+    if (q && !(
+      s.user_email.toLowerCase().includes(q) ||
+      (s.license?.name || '').toLowerCase().includes(q) ||
+      (s.suite_key || '').toLowerCase().includes(q) ||
+      (s.ministry_id || '').toLowerCase().includes(q) ||
+      s.status.toLowerCase().includes(q)
+    )) return false
+    if (statusFilter && s.status !== statusFilter) return false
+    if (licenseFilter && s.license?.name !== licenseFilter) return false
+    if (fyFilter && String(s.fy) !== fyFilter) return false
+    return true
+  })
 
   const visibleSubs = useMemo(() => {
-    if (!statusFiltered) return statusFiltered
+    if (!filteredSubs) return filteredSubs
     const col = COLUMNS.find(c => c.key === sortKey)
-    const sorted = [...statusFiltered].sort((a, b) => {
+    const sorted = [...filteredSubs].sort((a, b) => {
       const av = col.sort(a), bv = col.sort(b)
       return av < bv ? -1 : av > bv ? 1 : 0
     })
     return sortDir === 'desc' ? sorted.reverse() : sorted
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFiltered, sortKey, sortDir])
+  }, [filteredSubs, sortKey, sortDir])
 
   return (
     <AppLayout appName="License Manager" links={getLinks()}>
-      <div className="max-w-6xl mx-auto p-6">
+      <div className="max-w-7xl mx-auto p-6">
         <AdminTabs />
         <h1 className="font-display text-2xl font-bold text-brand mb-6">Admin — All Subscriptions</h1>
         {error && <p className="text-sil-red mb-4">{error}</p>}
 
         {subs?.length > 0 && (
-          <div className="flex gap-3 mb-4">
+          <div className="flex flex-wrap gap-3 mb-4">
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Filter by user, license, SuiteKey, or Ministry ID…"
-              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              className="flex-1 min-w-[240px] border border-gray-300 rounded-lg px-3 py-2 text-sm"
             />
+            <select
+              value={licenseFilter}
+              onChange={e => setLicenseFilter(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            >
+              <option value="">All licenses</option>
+              {licenseOptions.map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+            <select
+              value={fyFilter}
+              onChange={e => setFyFilter(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+            >
+              <option value="">All FYs</option>
+              {fyOptions.map(fy => (
+                <option key={fy} value={String(fy)}>{`FY${fy}`}</option>
+              ))}
+            </select>
             <select
               value={statusFilter}
               onChange={e => setStatusFilter(e.target.value)}
@@ -347,24 +383,25 @@ export default function AdminAllSubscriptions() {
                               Open vendor portal
                             </a>
                           )}
-                          <input
-                            type="number" step="0.01" min="0" placeholder="Price paid"
-                            value={priceInputs[sub.id] ?? ''}
-                            onChange={e => setPriceInputs(p => ({ ...p, [sub.id]: e.target.value }))}
-                            className="w-20 border border-gray-300 rounded-lg px-2 py-1 text-xs"
-                          />
-                          <button onClick={() => handleActivate(sub)} className="text-xs font-medium text-sil-green">Mark active</button>
+                          <button
+                            onClick={() => openEditModal(sub, { activate: true })}
+                            title="Mark active (opens purchase details)"
+                            className="p-1 rounded hover:bg-gray-100 text-sil-green"
+                          >
+                            <CheckCircle2 size={16} />
+                          </button>
                           {resendState[sub.id] === 'sent' ? (
                             <span className="text-xs text-sil-green">Sent</span>
                           ) : resendState[sub.id] === 'failed' ? (
                             <span className="text-xs text-sil-red">Failed</span>
                           ) : (
                             <button
-                              onClick={() => handleResendProvisioning(sub)}
+                              onClick={() => confirmResendProvisioning(sub)}
                               disabled={resendState[sub.id] === 'sending'}
-                              className="text-xs font-medium text-brand disabled:opacity-50"
+                              title="Re-request provisioning"
+                              className="p-1 rounded hover:bg-gray-100 text-brand disabled:opacity-50"
                             >
-                              {resendState[sub.id] === 'sending' ? 'Sending…' : 'Re-request provisioning'}
+                              <RefreshCw size={16} className={resendState[sub.id] === 'sending' ? 'animate-spin' : ''} />
                             </button>
                           )}
                         </>
@@ -400,7 +437,9 @@ export default function AdminAllSubscriptions() {
                         )
                       )}
                       {CANCELLABLE.includes(sub.status) && (
-                        <button onClick={() => handleCancel(sub)} className="text-xs font-medium text-sil-red">Cancel</button>
+                        <button onClick={() => handleCancel(sub)} title="Cancel subscription" className="p-1 rounded hover:bg-gray-100 text-sil-red">
+                          <XCircle size={16} />
+                        </button>
                       )}
                     </div>
                   </td>
@@ -422,6 +461,9 @@ export default function AdminAllSubscriptions() {
               </button>
             </div>
             <p className="text-sm text-gray-500 mb-4">{editingSub.user_email}</p>
+            {activateMode && (
+              <p className="text-sm text-sil-green mb-4">Saving will mark this subscription active and notify the user their license is provisioned.</p>
+            )}
             {editError && <p className="text-sil-red text-sm mb-3">{editError}</p>}
             <div className="space-y-3">
               <label className="block text-sm text-gray-700">
@@ -468,7 +510,7 @@ export default function AdminAllSubscriptions() {
                 disabled={editSaving}
                 className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2 hover:bg-brand-dark transition disabled:opacity-50"
               >
-                {editSaving ? 'Saving…' : 'Save'}
+                {activateMode ? (editSaving ? 'Marking active…' : 'Mark active') : (editSaving ? 'Saving…' : 'Save')}
               </button>
             </div>
           </form>
