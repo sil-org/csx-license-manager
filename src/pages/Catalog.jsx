@@ -217,6 +217,7 @@ function RequestModal({ license, onClose }) {
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestedApproverEmail, setSuggestedApproverEmail] = useState('')
   const [ministryId, setMinistryId] = useState('')
+  const [extraFieldValue, setExtraFieldValue] = useState('')
   const [acknowledged, setAcknowledged] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
@@ -258,6 +259,7 @@ function RequestModal({ license, onClose }) {
         ministryId: mode === 'ministry_id' ? ministryId : null,
         fy,
         recipientEmail: recipientEmail.trim(),
+        extraFieldValue: license.extra_field_label ? extraFieldValue.trim() : null,
         acknowledged,
       })
       await notifyForRequest({
@@ -328,6 +330,21 @@ function RequestModal({ license, onClose }) {
               />
               <p className="text-xs text-gray-400 mt-1">Pre-filled with your email. Change this to request on behalf of someone else.</p>
             </div>
+
+            {license.extra_field_label && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {license.extra_field_label} {license.extra_field_required && <span className="text-sil-red">*</span>}
+                </label>
+                <input
+                  type="text"
+                  required={license.extra_field_required}
+                  value={extraFieldValue}
+                  onChange={e => setExtraFieldValue(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+            )}
 
             {license.gtis_sponsored ? (
               <p className="text-sm text-gray-600">This license is GTIS-sponsored — no approval needed.</p>

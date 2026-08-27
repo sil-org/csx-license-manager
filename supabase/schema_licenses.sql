@@ -169,6 +169,8 @@ create table if not exists licenses (
   department_gated    boolean not null default false,   -- gate approval on the recipient's own department (see department_approvals) instead of a suite key
   requires_acknowledgement boolean not null default false,   -- requester must acknowledge acknowledgement_text before requesting
   acknowledgement_text text,
+  extra_field_label    text,   -- null = no extra field; set = RequestModal asks for one more piece of text at request time (e.g. "Shared Drive name")
+  extra_field_required boolean not null default false,   -- only meaningful when extra_field_label is set
   legacy_id            text,   -- GAS Licenses sheet's ID (e.g. "LIC-XXXXXXXX"), set only by admin_import_licenses()
   created_at           timestamptz not null default now()
 );
@@ -198,6 +200,7 @@ create table if not exists subscriptions (
   notes                 text,   -- free-text admin annotation, distinct from licenses.notes (the catalog-item note)
   product_key           text,
   invoice_number        text,   -- notes/product_key/invoice_number/price_at_signup are all set together via update_subscription_details()
+  extra_field_value     text,   -- requester's answer to licenses.extra_field_label, captured at request time; editable after via update_subscription_details()
   created_at            timestamptz not null default now()
 );
 
@@ -519,7 +522,8 @@ create or replace function request_subscription(
   p_ministry_id text,
   p_fy int,
   p_recipient_email text default null,
-  p_acknowledged boolean default false
+  p_acknowledged boolean default false,
+  p_extra_field_value text default null
 ) returns uuid language plpgsql security definer as $$
 declare
   v_license licenses%rowtype;
@@ -551,6 +555,10 @@ begin
 
   if v_license.requires_acknowledgement and not coalesce(p_acknowledged, false) then
     raise exception 'you must acknowledge the terms & conditions for this license before requesting it';
+  end if;
+
+  if v_license.extra_field_required and nullif(trim(p_extra_field_value), '') is null then
+    raise exception '% is required for this license', coalesce(v_license.extra_field_label, 'this field');
   end if;
 
   if exists (
@@ -692,10 +700,11 @@ begin
   -- what triggers the provisioning-required notification below.
   insert into subscriptions (
     user_email, license_id, suite_key, billing_type, ministry_id, fy, status, billing_cycle,
-    renewal_month, renewal_reminder, price_at_signup, pending_approver_email, requested_by
+    renewal_month, renewal_reminder, price_at_signup, pending_approver_email, requested_by, extra_field_value
   ) values (
     v_recipient_email, p_license_id, v_suite_key, v_billing_type, v_ministry_id, p_fy, v_status, v_license.billing_cycle,
-    v_license.renewal_month, v_license.renewal_reminder, v_license.price, v_pending_approver, current_profile_id()
+    v_license.renewal_month, v_license.renewal_reminder, v_license.price, v_pending_approver, current_profile_id(),
+    nullif(trim(p_extra_field_value), '')
   ) returning id into v_sub_id;
 
   -- Always log the request itself, even when it's about to be auto-approved
@@ -1270,7 +1279,8 @@ $$;
 -- already there" one.
 
 create or replace function update_subscription_details(
-  p_subscription_id uuid, p_notes text, p_product_key text, p_invoice_number text, p_price_paid numeric
+  p_subscription_id uuid, p_notes text, p_product_key text, p_invoice_number text, p_price_paid numeric,
+  p_extra_field_value text default null
 ) returns void language plpgsql security definer as $$
 declare
   v_sub subscriptions%rowtype;
@@ -1285,7 +1295,8 @@ begin
     notes = nullif(trim(p_notes), ''),
     product_key = nullif(trim(p_product_key), ''),
     invoice_number = nullif(trim(p_invoice_number), ''),
-    price_at_signup = p_price_paid
+    price_at_signup = p_price_paid,
+    extra_field_value = nullif(trim(p_extra_field_value), '')
   where id = p_subscription_id;
 end;
 $$;
@@ -1425,7 +1436,8 @@ begin
       more_info_url, google_group_email, pro_rated, service_manager_emails,
       onboarding_message, reminder_message, provisioning_adapter, provisioning_config,
       provisioning_email_show_name, provisioning_email_show_job_title, provisioning_email_show_department,
-      department_gated, requires_acknowledgement, acknowledgement_text, created_by
+      department_gated, requires_acknowledgement, acknowledgement_text,
+      extra_field_label, extra_field_required, created_by
     ) values (
       p_license->>'name', p_license->>'vendor', p_license->>'category',
       (p_license->>'price')::numeric, p_license->>'price_unit', p_license->>'notes',
@@ -1444,6 +1456,8 @@ begin
       coalesce((p_license->>'department_gated')::boolean, false),
       coalesce((p_license->>'requires_acknowledgement')::boolean, false),
       nullif(p_license->>'acknowledgement_text', ''),
+      nullif(p_license->>'extra_field_label', ''),
+      coalesce((p_license->>'extra_field_required')::boolean, false),
       current_profile_id()
     ) returning id into v_id;
   else
@@ -1467,7 +1481,9 @@ begin
       provisioning_email_show_department = coalesce((p_license->>'provisioning_email_show_department')::boolean, false),
       department_gated = coalesce((p_license->>'department_gated')::boolean, false),
       requires_acknowledgement = coalesce((p_license->>'requires_acknowledgement')::boolean, false),
-      acknowledgement_text = nullif(p_license->>'acknowledgement_text', '')
+      acknowledgement_text = nullif(p_license->>'acknowledgement_text', ''),
+      extra_field_label = nullif(p_license->>'extra_field_label', ''),
+      extra_field_required = coalesce((p_license->>'extra_field_required')::boolean, false)
     where id = v_id;
   end if;
 
@@ -1853,7 +1869,7 @@ begin
       ) values (
         v_legacy_id, v_name, nullif(trim(v_row->>'vendor'), ''), nullif(trim(v_row->>'category'), ''),
         nullif(v_row->>'price', '')::numeric,
-        case v_billing_cycle when 'annual' then 'per seat/year' when 'monthly' then 'per seat/month' else 'one-time' end,
+        case v_billing_cycle when 'annual' then 'per year' when 'monthly' then 'per month' else 'one-time' end,
         nullif(v_row->>'notes', ''),
         coalesce((v_row->>'active')::boolean, true),
         coalesce((v_row->>'gtis_sponsored')::boolean, false),

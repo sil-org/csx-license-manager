@@ -65,6 +65,7 @@ Deno.serve(async (req) => {
       .eq('billing_cycle', 'annual')
       .eq('renewal_reminder', true)
       .eq('renewal_status', 'none')
+      .neq('billing_type', 'gtis')
       .not('renewal_month', 'is', null)
     if (subsError) throw subsError
 

@@ -17,9 +17,14 @@ import { billingLabel, fyLabel, nextRenewalLabel, STATUS_LABEL, STATUS_COLOR } f
 
 // Mirrors Emails.gs's per-license reminder eligibility (gas-legacy/src/Emails.gs):
 // only active annual subscriptions with the per-license reminder toggle on,
-// that haven't already opted in/out for the year.
+// that haven't already opted in/out for the year. GTIS-sponsored subscriptions
+// are excluded outright — GTIS foots the whole bill, so there's never a
+// renew/cancel decision for the seat holder to make (unlike department-gated,
+// which is free per-seat but still opt-in per-license via renewal_reminder —
+// see 48_gemini_renewal_reminder_fix.sql).
 function isRenewalReminderEligible(sub) {
-  return sub.status === 'active' && sub.billing_cycle === 'annual' && sub.renewal_reminder && sub.renewal_status === 'none'
+  return sub.status === 'active' && sub.billing_cycle === 'annual' && sub.renewal_reminder
+    && sub.renewal_status === 'none' && sub.billing_type !== 'gtis'
 }
 
 // Statuses cancel_subscription() will actually accept — mirrors the same
@@ -54,7 +59,7 @@ export default function AdminAllSubscriptions() {
   const [resendState, setResendState] = useState({})
   const [editingSub, setEditingSub] = useState(null)
   const [activateMode, setActivateMode] = useState(false)
-  const [editForm, setEditForm] = useState({ notes: '', productKey: '', invoiceNumber: '', pricePaid: '' })
+  const [editForm, setEditForm] = useState({ notes: '', productKey: '', invoiceNumber: '', pricePaid: '', extraFieldValue: '' })
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState(null)
 
@@ -176,6 +181,7 @@ export default function AdminAllSubscriptions() {
       productKey: sub.product_key || '',
       invoiceNumber: sub.invoice_number || '',
       pricePaid: sub.price_at_signup ?? '',
+      extraFieldValue: sub.extra_field_value || '',
     })
     setActivateMode(activate)
     setEditingSub(sub)
@@ -361,7 +367,7 @@ export default function AdminAllSubscriptions() {
             </thead>
             <tbody className="divide-y">
               {visibleSubs?.map(sub => {
-                const hasDetails = sub.notes || sub.product_key || sub.invoice_number
+                const hasDetails = sub.notes || sub.product_key || sub.invoice_number || sub.extra_field_value
                 return (
                 <tr key={sub.id} className="hover:bg-gray-50 transition-colors">
                   <td className="p-3">{sub.user_email}</td>
@@ -478,6 +484,17 @@ export default function AdminAllSubscriptions() {
             )}
             {editError && <p className="text-sil-red text-sm mb-3">{editError}</p>}
             <div className="space-y-3">
+              {editingSub.license?.extra_field_label && (
+                <label className="block text-sm text-gray-700">
+                  {editingSub.license.extra_field_label}
+                  <input
+                    type="text"
+                    value={editForm.extraFieldValue}
+                    onChange={e => setEditForm(f => ({ ...f, extraFieldValue: e.target.value }))}
+                    className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </label>
+              )}
               <label className="block text-sm text-gray-700">
                 Cost at time of purchase
                 <input

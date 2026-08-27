@@ -60,7 +60,7 @@ export async function buildProvisioningNotifications(sub) {
 // Returns { id, status, notify } — notify is null unless someone needs to be
 // emailed as a result, otherwise an array of { type, to, ... } entries (see
 // notifyForRequest() in src/pages/Catalog.jsx, which dispatches on type).
-export async function requestSubscription({ licenseId, suiteKey, suggestedApproverEmail, ministryId, fy, recipientEmail, acknowledged }) {
+export async function requestSubscription({ licenseId, suiteKey, suggestedApproverEmail, ministryId, fy, recipientEmail, extraFieldValue, acknowledged }) {
   const { data: id, error } = await supabase.rpc('request_subscription', {
     p_license_id: licenseId,
     p_suite_key: suiteKey || null,
@@ -68,6 +68,7 @@ export async function requestSubscription({ licenseId, suiteKey, suggestedApprov
     p_ministry_id: ministryId || null,
     p_fy: fy,
     p_recipient_email: recipientEmail || null,
+    p_extra_field_value: extraFieldValue || null,
     p_acknowledged: !!acknowledged,
   })
   if (error) throw error
@@ -195,13 +196,14 @@ export async function optOutRenewal(subscriptionId) {
 // edited together from one modal in Admin -> All Subscriptions. notes is
 // distinct from the license's own catalog-level notes field — see
 // update_subscription_details() in supabase/schema_licenses.sql.
-export async function updateSubscriptionDetails(subscriptionId, { notes, productKey, invoiceNumber, pricePaid }) {
+export async function updateSubscriptionDetails(subscriptionId, { notes, productKey, invoiceNumber, pricePaid, extraFieldValue }) {
   const { error } = await supabase.rpc('update_subscription_details', {
     p_subscription_id: subscriptionId,
     p_notes: notes || null,
     p_product_key: productKey || null,
     p_invoice_number: invoiceNumber || null,
     p_price_paid: pricePaid === '' || pricePaid == null ? null : Number(pricePaid),
+    p_extra_field_value: extraFieldValue || null,
   })
   if (error) throw error
 }

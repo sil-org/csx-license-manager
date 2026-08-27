@@ -18,6 +18,7 @@ const BLANK = {
   provisioning_email_show_name: false, provisioning_email_show_job_title: false, provisioning_email_show_department: false,
   department_gated: false,
   requires_acknowledgement: false, acknowledgement_text: '',
+  extra_field_label: '', extra_field_required: false,
 }
 
 // Sample data for the Preview buttons in the email-overrides section — no
@@ -38,7 +39,7 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ]
 
-const PRICE_UNITS = { annual: 'per seat/year', monthly: 'per seat/month', one_time: 'one-time' }
+const PRICE_UNITS = { annual: 'per year', monthly: 'per month', one_time: 'one-time' }
 
 function billingLabel(license) {
   if (license.billing_cycle === 'monthly') return 'Monthly'
@@ -386,6 +387,18 @@ export default function AdminCatalog() {
                   </label>
 
                   {editing.id && editing.department_gated && <DepartmentApprovals licenseId={editing.id} />}
+
+                  <div className="space-y-1.5">
+                    <Field label="Extra field label" value={editing.extra_field_label} onChange={v => setEditing({ ...editing, extra_field_label: v })}
+                      placeholder='e.g. "Shared Drive name"'
+                      hint="Asks requesters for one more piece of text at request time — shown in Admin -> All Subscriptions' details popup. Leave blank for none." />
+                    {editing.extra_field_label && (
+                      <label className="flex items-center gap-2 text-sm text-gray-700">
+                        <input type="checkbox" checked={editing.extra_field_required} onChange={e => setEditing({ ...editing, extra_field_required: e.target.checked })} />
+                        Required
+                      </label>
+                    )}
+                  </div>
 
                   <label className="block text-sm text-gray-700">
                     <span className="flex items-center gap-2">
