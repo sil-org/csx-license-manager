@@ -171,6 +171,7 @@ create table if not exists licenses (
   acknowledgement_text text,
   extra_field_label    text,   -- null = no extra field; set = RequestModal asks for one more piece of text at request time (e.g. "Shared Drive name")
   extra_field_required boolean not null default false,   -- only meaningful when extra_field_label is set
+  allow_multiple_per_person boolean not null default false,   -- lets one person hold more than one subscription to this license in the same FY (e.g. multiple Shared Drives) — bypasses request_subscription()'s one-per-person-per-FY guard
   legacy_id            text,   -- GAS Licenses sheet's ID (e.g. "LIC-XXXXXXXX"), set only by admin_import_licenses()
   created_at           timestamptz not null default now()
 );
@@ -561,7 +562,7 @@ begin
     raise exception '% is required for this license', coalesce(v_license.extra_field_label, 'this field');
   end if;
 
-  if exists (
+  if not v_license.allow_multiple_per_person and exists (
     select 1 from subscriptions
     where user_email = v_recipient_email and license_id = p_license_id and fy = p_fy
       and status not in ('declined', 'revoked', 'cancelled')
@@ -1437,7 +1438,7 @@ begin
       onboarding_message, reminder_message, provisioning_adapter, provisioning_config,
       provisioning_email_show_name, provisioning_email_show_job_title, provisioning_email_show_department,
       department_gated, requires_acknowledgement, acknowledgement_text,
-      extra_field_label, extra_field_required, created_by
+      extra_field_label, extra_field_required, allow_multiple_per_person, created_by
     ) values (
       p_license->>'name', p_license->>'vendor', p_license->>'category',
       (p_license->>'price')::numeric, p_license->>'price_unit', p_license->>'notes',
@@ -1458,6 +1459,7 @@ begin
       nullif(p_license->>'acknowledgement_text', ''),
       nullif(p_license->>'extra_field_label', ''),
       coalesce((p_license->>'extra_field_required')::boolean, false),
+      coalesce((p_license->>'allow_multiple_per_person')::boolean, false),
       current_profile_id()
     ) returning id into v_id;
   else
@@ -1483,7 +1485,8 @@ begin
       requires_acknowledgement = coalesce((p_license->>'requires_acknowledgement')::boolean, false),
       acknowledgement_text = nullif(p_license->>'acknowledgement_text', ''),
       extra_field_label = nullif(p_license->>'extra_field_label', ''),
-      extra_field_required = coalesce((p_license->>'extra_field_required')::boolean, false)
+      extra_field_required = coalesce((p_license->>'extra_field_required')::boolean, false),
+      allow_multiple_per_person = coalesce((p_license->>'allow_multiple_per_person')::boolean, false)
     where id = v_id;
   end if;
 

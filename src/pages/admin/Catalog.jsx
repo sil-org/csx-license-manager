@@ -19,6 +19,7 @@ const BLANK = {
   department_gated: false,
   requires_acknowledgement: false, acknowledgement_text: '',
   extra_field_label: '', extra_field_required: false,
+  allow_multiple_per_person: false,
 }
 
 // Sample data for the Preview buttons in the email-overrides section — no
@@ -387,6 +388,11 @@ export default function AdminCatalog() {
                   </label>
 
                   {editing.id && editing.department_gated && <DepartmentApprovals licenseId={editing.id} />}
+
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" checked={editing.allow_multiple_per_person} onChange={e => setEditing({ ...editing, allow_multiple_per_person: e.target.checked })} />
+                    Allow multiple per person (e.g. a person can hold more than one Shared Drive)
+                  </label>
 
                   <div className="space-y-1.5">
                     <Field label="Extra field label" value={editing.extra_field_label} onChange={v => setEditing({ ...editing, extra_field_label: v })}
