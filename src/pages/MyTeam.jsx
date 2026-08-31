@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
+import { ChevronUp, ChevronDown, ChevronsUpDown, XCircle } from 'lucide-react'
 import AppLayout from '../components/AppLayout'
 import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
 import { getTeamSubscriptions, getLastTeamImport } from '../lib/team'
+import { supabase } from '../lib/supabase'
+import { cancelSubscription } from '../lib/subscriptions'
+import { sendEmail, cancelledEmailSubject, cancelledEmailHtml } from '../lib/email'
 import { billingLabel, fyLabel, STATUS_LABEL, STATUS_COLOR, INACTIVE_STATUSES } from '../lib/subscriptionDisplay'
 
 // Same column/sort pattern as Admin -> All Subscriptions' COLUMNS, so the
@@ -16,6 +19,12 @@ const COLUMNS = [
   { key: 'status', label: 'Status', sort: s => STATUS_LABEL[s.status] || s.status },
 ]
 
+// Statuses cancel_subscription() will actually accept — mirrors the same
+// list in MySubscriptions.jsx/AllSubscriptions.jsx. A manager cancelling a
+// report's subscription is authorized server-side by is_manager_of() (see
+// 57_manager_and_suite_key_owner_revoke.sql).
+const CANCELLABLE = ['pending', 'pending_sk_verification', 'approved', 'active']
+
 export default function MyTeam() {
   const { profile } = useAuth()
   const [subs, setSubs] = useState(null)
@@ -26,11 +35,53 @@ export default function MyTeam() {
   const [sortKey, setSortKey] = useState('user_email')
   const [sortDir, setSortDir] = useState('asc')
 
-  useEffect(() => {
+  function reload() {
     if (!profile) return
     getTeamSubscriptions(profile.primary_email).then(setSubs).catch(e => setError(e.message))
+  }
+
+  useEffect(() => {
+    reload()
     getLastTeamImport().then(setLastImport).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile])
+
+  // Same shape as Admin -> All Subscriptions' handleCancel: always non-silent
+  // (this is never "cancelling my own subscription" in the self-serve sense,
+  // even for the manager's own row — that's My Subscriptions), with an
+  // optional reason shown to the person whose subscription this is.
+  async function handleCancel(sub) {
+    const reason = window.prompt(`Cancel ${sub.license?.name} for ${sub.user_email}? Optionally add a reason (shown to them):`)
+    if (reason === null) return
+    try {
+      const notify = await cancelSubscription(sub.id, reason)
+      reload()
+      for (const n of notify || []) {
+        try {
+          await sendEmail({
+            to: n.to,
+            subject: cancelledEmailSubject(n.licenseName),
+            html: cancelledEmailHtml({ sub: n.sub, licenseName: n.licenseName, performedBy: profile?.primary_email, reason: n.reason }),
+            template: 'cancelled',
+            subscriptionId: sub.id,
+          })
+        } catch (err) {
+          console.error('cancelled email failed:', err.message)
+        }
+      }
+      // Nudges sync-provisioning to reconcile (deprovision) now instead of
+      // waiting for its next scheduled run — best effort, the schedule is
+      // the correctness backstop if this fails.
+      supabase.functions.invoke('sync-provisioning').catch(err => console.error('provisioning sync kick failed:', err.message))
+      // Removes sub.user_email from the license's Google Group, if it has
+      // one — a single targeted removal, never a full-membership resync.
+      supabase.functions.invoke('sync-provisioning', {
+        body: { groupMembershipUpdate: { licenseId: sub.license_id, email: sub.user_email, action: 'remove' } },
+      }).catch(err => console.error('group membership removal failed:', err.message))
+    } catch (err) {
+      setError(err.message)
+    }
+  }
 
   function handleSort(key) {
     if (key === sortKey) {
@@ -116,6 +167,7 @@ export default function MyTeam() {
                         </button>
                       </th>
                     ))}
+                    <th className="p-3 font-semibold uppercase text-xs tracking-wide">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -131,6 +183,13 @@ export default function MyTeam() {
                       <td className="p-3 text-gray-500">{billingLabel(sub)}</td>
                       <td className="p-3 text-gray-500">{fyLabel(sub) || '—'}</td>
                       <td className={`p-3 ${STATUS_COLOR[sub.status]}`}>{STATUS_LABEL[sub.status]}</td>
+                      <td className="p-3">
+                        {CANCELLABLE.includes(sub.status) && (
+                          <button onClick={() => handleCancel(sub)} title="Cancel subscription" className="p-1 rounded hover:bg-gray-100 text-sil-red">
+                            <XCircle size={16} />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

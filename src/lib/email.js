@@ -388,14 +388,15 @@ export function revokedEmailSubject(licenseName) {
 
 // Mirrors Approvals.gs's _notifySubscriberOfDecision() for the 'revoked'
 // case — sent when a SuiteKey owner or admin revokes a previously-active
-// subscription.
+// subscription. Escapes `reason` since it's free text the revoker typed —
+// same as cancelledEmailHtml below.
 export function revokedEmailHtml({ sub, licenseName, performedBy, reason }) {
   const fy = fyLabel(sub)
   return wrapEmail('License Subscription Revoked', `
     <p>Your subscription to <strong>${licenseName}</strong> has been revoked by <a href="mailto:${performedBy}" style="color:#005CB9">${performedBy}</a>.</p>
     ${reason ? `
     <div style="background:#fce8e6;border-left:4px solid #D52227;border-radius:4px;padding:10px 14px;margin:16px 0;font-size:14px">
-      <strong style="color:#D52227">Reason given:</strong><br>${reason}
+      <strong style="color:#D52227">Reason given:</strong><br>${escapeHtml(reason)}
     </div>` : ''}
     ${detailsTable([
       ['License', licenseName],

@@ -118,8 +118,9 @@ create table if not exists suite_keys (
 create unique index if not exists suite_keys_lower_suite_key_idx on suite_keys (lower(suite_key));
 
 -- Cache of Google Group membership, refreshed on a schedule by the
--- sync-group-memberships Edge Function (a domain-wide-delegated service
--- account, narrowly scoped to admin.directory.group[.member].readonly).
+-- sync-group-memberships Edge Function (a service account assigned a
+-- Workspace admin role directly, narrowly scoped to
+-- admin.directory.group[.member].readonly).
 -- RLS can't make live calls to Google's API, so authorization checks read
 -- this cache rather than querying Directory API per-request. Only ever
 -- populated for groups actually referenced as a suite_keys.owner_group_email —
@@ -384,6 +385,15 @@ $$;
 create or replace function is_org_manager()
 returns boolean language sql stable security definer as $$
   select exists(select 1 from profiles where lower(manager_email) = lower(current_profile_email()))
+$$;
+
+-- Is p_email one of the current user's direct/indirect reports — backs
+-- cancel_subscription()'s manager authorization (My Team's "Cancel" button).
+-- Reuses get_report_emails() rather than re-walking manager_email itself, so
+-- the two stay in lockstep by construction.
+create or replace function is_manager_of(p_email text)
+returns boolean language sql stable security definer as $$
+  select lower(p_email) in (select get_report_emails())
 $$;
 
 -- Best-effort caller IP for audit_log, read from the request headers Supabase's
@@ -1200,7 +1210,9 @@ begin
   if v_sub.status not in ('pending', 'pending_sk_verification', 'approved', 'active') then
     raise exception 'subscription cannot be cancelled from its current status';
   end if;
-  if not (is_admin() or v_sub.user_email = v_email or is_service_manager_for(v_sub.license_id)) then
+  -- is_manager_of() covers My Team's "Cancel" button — a people manager
+  -- cancelling a direct/indirect report's subscription.
+  if not (is_admin() or v_sub.user_email = v_email or is_service_manager_for(v_sub.license_id) or is_manager_of(v_sub.user_email)) then
     raise exception 'not authorized to cancel this subscription';
   end if;
 
@@ -1212,7 +1224,7 @@ begin
 end;
 $$;
 
-create or replace function revoke_subscription(p_subscription_id uuid)
+create or replace function revoke_subscription(p_subscription_id uuid, p_reason text default null)
 returns void language plpgsql security definer as $$
 declare
   v_email text := current_profile_email();
@@ -1229,8 +1241,8 @@ begin
   select name into v_license_name from licenses where id = v_sub.license_id;
   update subscriptions set status = 'revoked' where id = p_subscription_id;
 
-  insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, ip_address)
-  values ('revoked', p_subscription_id, v_license_name, v_sub.user_email, v_sub.suite_key, v_email, current_client_ip());
+  insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, notes, ip_address)
+  values ('revoked', p_subscription_id, v_license_name, v_sub.user_email, v_sub.suite_key, v_email, p_reason, current_client_ip());
 end;
 $$;
 

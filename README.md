@@ -28,9 +28,11 @@ Follow `SETUP.md`, then run both schema files in the Supabase SQL Editor, in ord
   unless you own a SuiteKey (enforced by RLS). Provisioning and cancellation
   live on Admin → All Subscriptions instead (see below)
 - **My Team** (`/my-team`) — for people managers: every active/pending
-  subscription used by your direct and indirect reports (`profiles.manager_email`)
+  subscription used by your direct and indirect reports (`profiles.manager_email`),
+  with cancellation (optional reason emailed to the subscriber)
 - **SuiteKey Charges** (`/suite-key-charges`) — every charge against any
-  SuiteKey you own, individually or via a Google Group
+  SuiteKey you own, individually or via a Google Group, with revocation of
+  active subscriptions (optional reason emailed to the subscriber)
 - **FAQ** (`/faq`)
 - **Admin → Catalog** — create/edit/deactivate licenses, with search
 - **Admin → All Subscriptions** — for admins, every subscription, every user,

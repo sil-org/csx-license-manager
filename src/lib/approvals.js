@@ -78,9 +78,10 @@ export async function activateSubscription(subscriptionId, price) {
   if (error) throw error
 }
 
-// Returns [{ type: 'revoked', to, sub, licenseName }] for the caller to email.
-export async function revokeSubscription(subscriptionId) {
-  const { error } = await supabase.rpc('revoke_subscription', { p_subscription_id: subscriptionId })
+// Returns [{ type: 'revoked', to, sub, licenseName, reason }] for the caller
+// to email — see handleRevoke() in SuiteKeyCharges.jsx.
+export async function revokeSubscription(subscriptionId, reason) {
+  const { error } = await supabase.rpc('revoke_subscription', { p_subscription_id: subscriptionId, p_reason: reason || null })
   if (error) throw error
 
   const { data: sub, error: subError } = await supabase
@@ -90,5 +91,5 @@ export async function revokeSubscription(subscriptionId) {
     .single()
   if (subError) throw subError
 
-  return [{ type: 'revoked', to: sub.user_email, sub, licenseName: sub.license.name }]
+  return [{ type: 'revoked', to: sub.user_email, sub, licenseName: sub.license.name, reason: reason || null }]
 }
