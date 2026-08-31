@@ -337,12 +337,10 @@ export default function AdminCatalog() {
 
               <label className="col-span-2 block text-sm text-gray-700">
                 Description
-                <textarea
+                <RichTextEditor
                   value={editing.notes ?? ''}
-                  onChange={e => setEditing({ ...editing, notes: e.target.value })}
-                  rows={3}
+                  onChange={html => setEditing({ ...editing, notes: html })}
                   placeholder="Shown to staff in the Catalog before they subscribe — what it's for, what's included, any caveats."
-                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                 />
               </label>
 

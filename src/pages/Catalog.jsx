@@ -301,7 +301,7 @@ function RequestModal({ license, onClose }) {
             {(license.notes || license.more_info_url) && (
               <div className="bg-gray-50 rounded-lg px-4 py-3 space-y-2">
                 {license.notes && (
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{license.notes}</p>
+                  <div className="text-sm text-gray-700 [&_a]:text-brand [&_a]:underline" dangerouslySetInnerHTML={{ __html: openLinksInNewTab(license.notes) }} />
                 )}
                 {license.more_info_url && (
                   <a href={license.more_info_url} target="_blank" rel="noreferrer" className="text-sm font-medium text-brand inline-block">
