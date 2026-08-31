@@ -163,6 +163,12 @@ export default function AdminAllSubscriptions() {
       // waiting for its next scheduled run — best effort, the schedule is
       // the correctness backstop if this fails.
       supabase.functions.invoke('sync-provisioning').catch(err => console.error('provisioning sync kick failed:', err.message))
+      // Removes sub.user_email from the license's Google Group, if it has
+      // one — a single targeted removal, never a full-membership resync.
+      // See supabase/functions/sync-provisioning/index.ts's header comment.
+      supabase.functions.invoke('sync-provisioning', {
+        body: { groupMembershipUpdate: { licenseId: sub.license_id, email: sub.user_email, action: 'remove' } },
+      }).catch(err => console.error('group membership removal failed:', err.message))
     } catch (err) {
       setError(err.message)
     }
@@ -214,6 +220,11 @@ export default function AdminAllSubscriptions() {
           console.error('activation email failed:', err.message)
         }
         supabase.functions.invoke('sync-provisioning').catch(err => console.error('provisioning sync kick failed:', err.message))
+        // Adds sub.user_email to the license's Google Group, if it has one —
+        // a single targeted add, never a full-membership resync.
+        supabase.functions.invoke('sync-provisioning', {
+          body: { groupMembershipUpdate: { licenseId: sub.license_id, email: sub.user_email, action: 'add' } },
+        }).catch(err => console.error('group membership add failed:', err.message))
       }
       closeEditModal()
       reload()

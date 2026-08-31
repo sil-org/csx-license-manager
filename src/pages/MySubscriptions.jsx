@@ -56,6 +56,11 @@ export default function MySubscriptions() {
       // next scheduled run — best effort, the schedule is the correctness
       // backstop if this fails.
       supabase.functions.invoke('sync-provisioning').catch(err => console.error('provisioning sync kick failed:', err.message))
+      // Removes the current user from the license's Google Group, if it has
+      // one — a single targeted removal, never a full-membership resync.
+      supabase.functions.invoke('sync-provisioning', {
+        body: { groupMembershipUpdate: { licenseId: sub.license_id, email: sub.user_email, action: 'remove' } },
+      }).catch(err => console.error('group membership removal failed:', err.message))
     } catch (err) {
       setError(err.message)
     }

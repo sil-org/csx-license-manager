@@ -9,21 +9,25 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 // (Supabase Scheduled Functions, or pg_cron + pg_net if that's not available)
 // — every 15-60 min is plenty given how infrequently these rosters change.
 //
-// Auth: a domain-wide-delegated service account, narrowly scoped to
-// admin.directory.group.readonly + admin.directory.group.member.readonly —
-// nothing else. This was a deliberate choice over a personal OAuth token:
-// the delegation belongs to the Workspace domain, not to whichever admin
-// granted it, so it keeps working regardless of personnel changes. See the
-// setup notes at the bottom of this file for what a Workspace super admin
-// needs to do once, by hand, to authorize it.
+// Auth: the service account authenticates as itself — no impersonation, no
+// domain-wide delegation. It's been directly assigned a Workspace admin role
+// (Admin Console → Account → Admin roles → Groups Admin (or a custom role
+// scoped to just Groups) → Admins tab → Assign service accounts), narrowly
+// scoped to admin.directory.group.readonly +
+// admin.directory.group.member.readonly — nothing else. This was a
+// deliberate choice over domain-wide delegation: DWD grants "impersonate any
+// user in the domain for these scopes," which is broader than this needs and
+// ties the grant to acting *as* some admin's identity; a role assigned
+// directly to the service account is scoped to exactly Groups, is its own
+// auditable principal, and doesn't depend on any particular human admin
+// account continuing to exist. See the setup notes at the bottom of this
+// file for what a Workspace super admin needs to do once, by hand, to
+// authorize it.
 //
 // Required secrets (Supabase Edge Function secrets, not the frontend .env):
 //   GOOGLE_SERVICE_ACCOUNT_EMAIL       the service account's own email
 //   GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY its PEM private key (the "private_key"
 //                                      field from the downloaded JSON key file)
-//   GOOGLE_ADMIN_IMPERSONATE_EMAIL     a real Workspace admin's email the
-//                                      service account impersonates for
-//                                      Directory API calls (the `sub` claim)
 
 const DIRECTORY_SCOPES = [
   'https://www.googleapis.com/auth/admin.directory.group.readonly',
@@ -133,7 +137,6 @@ async function listGroupMembers(accessToken: string, groupEmail: string): Promis
 async function getAccessToken(): Promise<string> {
   const email = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_EMAIL')!
   const privateKeyPem = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY')!
-  const impersonate = Deno.env.get('GOOGLE_ADMIN_IMPERSONATE_EMAIL')!
 
   const now = Math.floor(Date.now() / 1000)
   const header = { alg: 'RS256', typ: 'JWT' }
@@ -143,7 +146,6 @@ async function getAccessToken(): Promise<string> {
     aud: 'https://oauth2.googleapis.com/token',
     iat: now,
     exp: now + 3600,
-    sub: impersonate,
   }
 
   const unsigned = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(claims))}`
@@ -194,21 +196,22 @@ function corsHeaders() {
 // ─── One-time setup a Workspace super admin needs to do by hand ────────────
 // 1. Google Cloud Console (use an org-owned project, not a personal one):
 //    - Create/select a project, enable the "Admin SDK API".
-//    - Create a service account, generate a JSON key, note its email and
-//      the "private_key" field.
-// 2. Google Workspace Admin Console → Security → API controls →
-//    Domain-wide delegation → Add new:
-//    - Client ID: the service account's numeric client ID (not its email).
-//    - Scopes: https://www.googleapis.com/auth/admin.directory.group.readonly,
-//              https://www.googleapis.com/auth/admin.directory.group.member.readonly
+//    - Create a service account, generate a JSON key, note its email (the
+//      "client_email" field) and its "private_key" field.
+//    - Note the service account's unique ID too (GCP IAM → the service
+//      account → Details — a numeric "Unique ID", not its email), needed
+//      for step 2.
+// 2. Google Workspace Admin Console → Account → Admin roles:
+//    - Pick "Groups Admin" (built-in), or create a custom role scoped to
+//      just the Groups privileges this needs.
+//    - Open that role → Admins tab → Assign service accounts → search for
+//      the service account by the unique ID from step 1 → assign.
+//    This grants the role to the service account directly, as itself — no
+//    domain-wide delegation, no impersonating a human admin's identity.
 // 3. Set these as Supabase Edge Function secrets (Project Settings > Edge
 //    Functions, or `supabase secrets set`):
 //      GOOGLE_SERVICE_ACCOUNT_EMAIL
 //      GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY   (paste the full PEM, including
 //                                            the BEGIN/END lines)
-//      GOOGLE_ADMIN_IMPERSONATE_EMAIL       (a real admin's email — this is
-//                                            whose identity Directory API
-//                                            calls run as; needs Workspace
-//                                            admin privileges over Groups)
 // 4. Deploy this function, then schedule it (Supabase Scheduled Functions,
 //    or pg_cron calling it via pg_net) — every 15-60 min is plenty.
