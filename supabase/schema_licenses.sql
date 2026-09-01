@@ -1650,7 +1650,17 @@ returns table(
     s.start_date,
     (select max(r.opt_in_date) from renewals r where r.subscription_id = s.id),
     s.status::text,
-    s.notes
+    -- Folds in extra_field_value (e.g. a Shared Drive's name) so it isn't
+    -- lost from the export when an admin never separately typed it into
+    -- notes — extra_field_value is set once at request time and often left
+    -- as the only record of it (see licenses.extra_field_label).
+    concat_ws(
+      '; ',
+      s.notes,
+      case when s.extra_field_value is not null
+        then coalesce(l.extra_field_label, 'Extra field') || ': ' || s.extra_field_value
+      end
+    )
   from subscriptions s
   join licenses l on l.id = s.license_id
   where s.status = 'active'
