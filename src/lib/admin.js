@@ -106,7 +106,7 @@ export async function getAllSubscriptions() {
   for (let offset = 0, total = null; total === null || offset < total; offset += pageSize) {
     const { data, count, error } = await supabase
       .from('subscriptions')
-      .select('*, license:licenses(name, vendor, category, activation_url, onboarding_message, reminder_message, more_info_url, service_manager_emails, extra_field_label, extra_field_required)', { count: 'exact' })
+      .select('*, license:licenses(name, vendor, category, activation_url, onboarding_message, reminder_message, more_info_url, service_manager_emails, extra_field_label, extra_field_required, provisioning_email_show_name, provisioning_email_show_job_title, provisioning_email_show_department)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + pageSize - 1)
     if (error) throw error
