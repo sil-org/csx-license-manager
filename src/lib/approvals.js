@@ -23,6 +23,12 @@ export async function getPendingApprovals() {
   return data
 }
 
+export async function getPendingProvisioning() {
+  const { data, error } = await supabase.rpc('get_my_pending_provisioning')
+  if (error) throw error
+  return data
+}
+
 // Both return the subscriptions they just advanced ({id, user_email, license_name}[])
 // so the caller can notify each one — see src/lib/email.js.
 

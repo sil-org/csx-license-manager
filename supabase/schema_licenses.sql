@@ -926,14 +926,24 @@ language sql stable security definer as $$
   select display_name, job_title, department from profiles where lower(primary_email) = lower(p_email) limit 1;
 $$;
 
--- ─── RPC: get_my_pending_sk_verifications / get_my_pending_approvals ───────────
+-- ─── RPC: get_my_pending_sk_verifications / get_my_pending_approvals /
+--          get_my_pending_provisioning ─────────────────────────────────────
 -- The Action Center page's "here's what needs MY attention" lists. Deliberately
 -- NOT is_admin()-inclusive, unlike subscriptions' own RLS policy — scoped to
 -- exactly what the next click (confirm_sk_ownership, approve_subscription/
--- decline_subscription) would actually authorize for a non-admin, so an
--- admin viewing their own Action Center page doesn't see every pending row
--- company-wide, only their own. Admins acting on someone else's key have
--- dedicated tools elsewhere (Admin -> SuiteKeys' quick-confirm, sk-merge).
+-- decline_subscription, activate_subscription) would actually authorize for
+-- a non-admin, so an admin viewing their own Action Center page doesn't see
+-- every pending row company-wide, only their own. Admins acting on someone
+-- else's key have dedicated tools elsewhere (Admin -> SuiteKeys'
+-- quick-confirm, sk-merge).
+--
+-- get_my_pending_provisioning() exists for non-admin service managers (e.g.
+-- a vendor-side contact who provisions seats for one license, like
+-- CrashPlan) — they can already reach Admin -> All Subscriptions to do the
+-- provisioning itself (is_service_manager_for grants that there, see the
+-- "subscriptions: read own or authority" RLS policy below), but had no way
+-- to discover that a seat was waiting on them without visiting that page
+-- speculatively.
 
 create or replace function get_my_pending_sk_verifications()
 returns table(id uuid, user_email text, suite_key text, license_name text)
@@ -952,6 +962,16 @@ language sql stable security definer as $$
   from subscriptions s join licenses l on l.id = s.license_id
   where s.status = 'pending'
     and (is_suite_key_owner(s.suite_key) or s.pending_approver_email = current_profile_email())
+  order by s.created_at
+$$;
+
+create or replace function get_my_pending_provisioning()
+returns table(id uuid, user_email text, suite_key text, license_name text)
+language sql stable security definer as $$
+  select s.id, s.user_email, s.suite_key, l.name
+  from subscriptions s join licenses l on l.id = s.license_id
+  where s.status = 'approved'
+    and is_service_manager_for(s.license_id)
   order by s.created_at
 $$;
 

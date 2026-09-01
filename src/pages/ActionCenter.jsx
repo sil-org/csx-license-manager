@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import AppLayout from '../components/AppLayout'
 import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
 import {
-  getPendingSkVerifications, getPendingApprovals,
+  getPendingSkVerifications, getPendingApprovals, getPendingProvisioning,
   confirmSkOwnership, denySkOwnership, approveSubscription, declineSubscription,
 } from '../lib/approvals'
 import {
@@ -16,19 +17,23 @@ import {
   declinedEmailSubject, declinedEmailHtml,
 } from '../lib/email'
 
-// Strictly "what do I need to approve/decline or verify" — provisioning and
-// cancellation (any status, any license you own or manage) live on
-// Admin -> All Subscriptions instead, which is also open to service managers
-// (see allowServiceManager on the /admin/all-subscriptions route in App.jsx).
+// "What do I need to approve/decline, verify, or provision" — the actual
+// provisioning UI (purchase details, activation) and cancellation (any
+// status, any license you own or manage) still live on Admin -> All
+// Subscriptions, which is also open to service managers (see
+// allowServiceManager on the /admin/all-subscriptions route in App.jsx).
+// This page just surfaces that a seat is waiting, with a link over there.
 export default function ActionCenter() {
   const { profile } = useAuth()
   const [verifications, setVerifications] = useState(null)
   const [approvals, setApprovals] = useState(null)
+  const [provisioning, setProvisioning] = useState(null)
   const [error, setError] = useState(null)
 
   function reload() {
     getPendingSkVerifications().then(setVerifications).catch(e => setError(e.message))
     getPendingApprovals().then(setApprovals).catch(e => setError(e.message))
+    getPendingProvisioning().then(setProvisioning).catch(e => setError(e.message))
   }
 
   useEffect(reload, [])
@@ -155,7 +160,7 @@ export default function ActionCenter() {
     }
   }
 
-  const nothingToDo = verifications?.length === 0 && approvals?.length === 0
+  const nothingToDo = verifications?.length === 0 && approvals?.length === 0 && provisioning?.length === 0
 
   return (
     <AppLayout appName="License Manager" links={getLinks()}>
@@ -164,7 +169,7 @@ export default function ActionCenter() {
         {error && <p className="text-sil-red mb-4">{error}</p>}
 
         {nothingToDo && (
-          <p className="text-gray-400">Nothing needs your attention right now. This page shows SuiteKey ownership verifications and subscription approvals waiting on you.</p>
+          <p className="text-gray-400">Nothing needs your attention right now. This page shows SuiteKey ownership verifications, subscription approvals, and seats waiting on you to provision.</p>
         )}
 
         {verifications?.length > 0 && (
@@ -184,6 +189,16 @@ export default function ActionCenter() {
               <Row key={sub.id} title={sub.license_name} sub={`${sub.user_email} · ${sub.suite_key}`}>
                 <button onClick={() => handleApprove(sub)} className="text-xs font-medium text-sil-green">Approve</button>
                 <button onClick={() => handleDecline(sub)} className="text-xs font-medium text-sil-red">Decline</button>
+              </Row>
+            ))}
+          </Section>
+        )}
+
+        {provisioning?.length > 0 && (
+          <Section title="Needs provisioning">
+            {provisioning.map(sub => (
+              <Row key={sub.id} title={sub.license_name} sub={`${sub.user_email} · ${sub.suite_key}`}>
+                <Link to="/admin/all-subscriptions" className="text-xs font-medium text-sil-green">Provision →</Link>
               </Row>
             ))}
           </Section>
