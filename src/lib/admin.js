@@ -182,6 +182,15 @@ export async function importTeamHierarchy(rows) {
   return data || []
 }
 
+// Upserts the sco -> department-name lookup (sco_codes) from an export of
+// the org-structure Sheet — see supabase/pending/60_sco_codes.sql. Changes
+// far less often than team hierarchy, but same upsert-only shape.
+export async function importScoCodes(rows) {
+  const { data, error } = await supabase.rpc('admin_import_sco_codes', { p_rows: rows })
+  if (error) throw error
+  return data || []
+}
+
 // Admin-only. Lists every profile (email, role) for the Admin Users page.
 export async function getProfiles() {
   const { data, error } = await supabase.from('profiles').select('id, display_name, primary_email, role').order('primary_email')

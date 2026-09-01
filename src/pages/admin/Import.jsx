@@ -3,7 +3,7 @@ import { ExternalLink } from 'lucide-react'
 import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
-import { importSubscriptions, importLicenses, importSubscriptionsFull, importAuditLog, importTeamHierarchy } from '../../lib/admin'
+import { importSubscriptions, importLicenses, importSubscriptionsFull, importAuditLog, importTeamHierarchy, importScoCodes } from '../../lib/admin'
 
 // Minimal CSV parser — handles quoted fields (commas/newlines/escaped quotes
 // inside quotes), which a naive split(',') would break on.
@@ -39,6 +39,7 @@ function parseCsv(text) {
 
 const EXPECTED_COLUMNS = ['user_email', 'license_name', 'suite_key', 'start_date', 'fy', 'requester_email']
 const TEAM_HIERARCHY_COLUMNS = ['primary_email', 'manager_email', 'sco', 'job_title']
+const SCO_CODE_COLUMNS = ['zone', 'area', 'ou', 'code']
 
 // Header-name-based. manager_email is allowed to be blank — no manager on
 // file is a real, known state in the source data (e.g. the org's top exec,
@@ -52,6 +53,21 @@ function parseTeamHierarchy(text) {
   return parsed.slice(1).map(cols => {
     const obj = {}
     header.forEach((h, i) => { if (TEAM_HIERARCHY_COLUMNS.includes(h)) obj[h] = (cols[i] || '').trim() })
+    return obj
+  })
+}
+
+// Header-name-based. Only 'code' and 'ou' are required — area/zone are
+// stored since the Sheet has them, but nothing reads them yet.
+function parseScoCodes(text) {
+  const parsed = parseCsv(text)
+  if (parsed.length < 2) throw new Error('CSV has no data rows')
+  const header = parsed[0].map(h => h.trim().toLowerCase())
+  const missing = ['code', 'ou'].filter(c => !header.includes(c))
+  if (missing.length) throw new Error(`Missing required column(s): ${missing.join(', ')}`)
+  return parsed.slice(1).map(cols => {
+    const obj = {}
+    header.forEach((h, i) => { if (SCO_CODE_COLUMNS.includes(h)) obj[h] = (cols[i] || '').trim() })
     return obj
   })
 }
@@ -156,7 +172,7 @@ function ImportSection({ title, description, sourceUrl, previewColumns, rowLabel
       <h2 className="font-display text-lg font-bold text-brand mb-1 flex items-center gap-1.5">
         {title}
         {sourceUrl && (
-          <a href={sourceUrl} target="_blank" rel="noreferrer" title="Open source spreadsheet" className="text-gray-300 hover:text-brand">
+          <a href={sourceUrl} target="_blank" rel="noreferrer" title="Open source spreadsheet" className="text-gray-400 hover:text-brand">
             <ExternalLink size={15} />
           </a>
         )}
@@ -273,11 +289,21 @@ export default function AdminImport() {
         <ImportSection
           title="Team hierarchy"
           sourceUrl="https://docs.google.com/spreadsheets/d/1bSv4fta7p-TkFUnKZUKMSLkjp2wquMzyHp2N6OBGKbA/edit?gid=0#gid=0"
-          description={'Upload a weekly export of the org-hierarchy Sheet to update who reports to whom (drives the My Team page). Required column: primary_email — creates a placeholder profile if that person hasn’t signed in yet (skipped if the email isn’t an eligible SIL staff domain). Optional: manager_email — leave blank for anyone with no manager on file, which is a known reality of the source data, not an error. Optional: sco (a 3-letter org code) — not used anywhere in the app yet, just captured for later.'}
+          description={'Upload a weekly export of the org-hierarchy Sheet to update who reports to whom (drives the My Team page). Required column: primary_email — creates a placeholder profile if that person hasn’t signed in yet (skipped if the email isn’t an eligible SIL staff domain). Optional: manager_email — leave blank for anyone with no manager on file, which is a known reality of the source data, not an error. Optional: sco (a 3-letter org code) — drives department-gated licensing and, via the SCO codes import below, the department name shown in provisioning emails.'}
           previewColumns={TEAM_HIERARCHY_COLUMNS}
           rowLabel={row => `${row.primary_email} → ${row.manager_email || '(no manager)'}`}
           parse={parseTeamHierarchy}
           doImport={importTeamHierarchy}
+        />
+
+        <ImportSection
+          title="SCO codes"
+          sourceUrl="https://docs.google.com/spreadsheets/d/1C7FK-6sZB5nETIyJeTGHVteaesSniLkAWrKaI1ONyhU/edit?gid=474403988#gid=474403988"
+          description={'Upload an export of the org-structure Sheet (Zone/Area/OU/Code) to update the department names shown in provisioning emails. Required columns: code (3-letter SCO code), ou (department name). Optional: area, zone — captured but not used anywhere in the app yet. Changes far less often than Team hierarchy; only re-run this when the org structure itself changes.'}
+          previewColumns={SCO_CODE_COLUMNS}
+          rowLabel={row => `${row.code} → ${row.ou}`}
+          parse={parseScoCodes}
+          doImport={importScoCodes}
         />
 
         <ImportSection
