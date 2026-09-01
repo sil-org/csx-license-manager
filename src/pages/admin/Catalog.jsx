@@ -6,6 +6,7 @@ import { getLinks } from '../../navLinks'
 import {
   getAllLicenses, saveLicense, deactivateLicense, reactivateLicense,
   listDepartmentApprovals, addDepartmentApproval, removeDepartmentApproval,
+  sizeAwareSort,
 } from '../../lib/licenses'
 import { activationEmailHtml, renewalReminderCardHtml, renewalReminderEmailHtml } from '../../lib/email'
 
@@ -47,19 +48,6 @@ function billingLabel(license) {
   if (license.billing_cycle === 'one_time') return 'One-time'
   if (!license.renewal_month) return '—'
   return `${String(license.renewal_month).padStart(2, '0')} - ${MONTH_NAMES[license.renewal_month - 1]}`
-}
-
-// Sorts names like "Shared Drive 100 GB" / "Shared Drive 1 TB" by actual
-// size instead of lexicographically (which would put "100" before "50").
-// Names without a size pattern just fall back to plain alphabetical order.
-const SIZE_RE = /(\d+(?:\.\d+)?)\s*(g|gb|t|tb)\b/i
-const UNIT_GB = { g: 1, gb: 1, t: 1000, tb: 1000 }
-
-function sizeAwareSort(name) {
-  const m = name.match(SIZE_RE)
-  if (!m) return name.toLowerCase()
-  const size = parseFloat(m[1]) * UNIT_GB[m[2].toLowerCase()]
-  return String(size).padStart(10, '0') + name.toLowerCase()
 }
 
 // Each column's sort() returns a directly-comparable value — keeps the

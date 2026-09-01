@@ -4,7 +4,7 @@ import { X } from 'lucide-react'
 import AppLayout from '../components/AppLayout'
 import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
-import { getActiveLicenses } from '../lib/licenses'
+import { getActiveLicenses, sizeAwareSort } from '../lib/licenses'
 import { requestSubscription } from '../lib/subscriptions'
 import { searchSuiteKeys } from '../lib/suiteKeys'
 import {
@@ -53,7 +53,9 @@ export default function Catalog() {
   const activeCategory = searchParams.get('category')
 
   useEffect(() => {
-    getActiveLicenses().then(setLicenses).catch(e => setError(e.message))
+    getActiveLicenses()
+      .then(data => setLicenses([...data].sort((a, b) => sizeAwareSort(a.name) < sizeAwareSort(b.name) ? -1 : 1)))
+      .catch(e => setError(e.message))
   }, [])
 
   const categories = useMemo(

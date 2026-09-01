@@ -1,5 +1,19 @@
 import { supabase } from './supabase'
 
+// Sorts names like "Shared Drive Quota - 100 GB" / "... - 1 TB" by actual
+// size instead of lexicographically (which would put "100" before "50", and
+// "1 TB" before both since space sorts before any digit).
+// Names without a size pattern just fall back to plain alphabetical order.
+const SIZE_RE = /(\d+(?:\.\d+)?)\s*(g|gb|t|tb)\b/i
+const UNIT_GB = { g: 1, gb: 1, t: 1000, tb: 1000 }
+
+export function sizeAwareSort(name) {
+  const m = name.match(SIZE_RE)
+  if (!m) return name.toLowerCase()
+  const size = parseFloat(m[1]) * UNIT_GB[m[2].toLowerCase()]
+  return String(size).padStart(10, '0') + name.toLowerCase()
+}
+
 export async function getActiveLicenses() {
   const { data, error } = await supabase
     .from('licenses')
