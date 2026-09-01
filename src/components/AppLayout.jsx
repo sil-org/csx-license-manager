@@ -1,9 +1,10 @@
 import { Link, useLocation } from 'react-router-dom'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Menu, X, LogOut, ChevronDown } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { signOut } from '../lib/auth'
 import { supabase } from '../lib/supabase'
+import { getActionCenterCount } from '../lib/approvals'
 import FeedbackWidget from './FeedbackWidget'
 import InstallPrompt from './InstallPrompt'
 
@@ -19,8 +20,21 @@ export default function AppLayout({ appName, links, children }) {
   const fullPath = pathname + search
   const [mobileOpen, setMobileOpen] = useState(false)
   const [openSections, setOpenSections] = useState(new Set())
+  const [actionCount, setActionCount] = useState(0)
 
-  const visibleLinks = links.filter(l => !l.adminOnly || profile?.role === 'admin')
+  // Refetches on every AppLayout mount, i.e. every page navigation — no
+  // realtime subscription, but good enough to stay roughly fresh without
+  // every one of the 15 call sites needing to know this exists.
+  useEffect(() => {
+    if (!profile) return
+    let cancelled = false
+    getActionCenterCount().then(n => { if (!cancelled) setActionCount(n) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [profile?.id])
+
+  const visibleLinks = links
+    .filter(l => !l.adminOnly || profile?.role === 'admin')
+    .map(l => (l.to === '/action-center' && actionCount > 0) ? { ...l, badge: actionCount } : l)
 
   // Links with a query string (e.g. category filters) match the full
   // path+search; plain links match pathname (or a route nested under it).
@@ -93,7 +107,7 @@ export default function AppLayout({ appName, links, children }) {
                   {Icon && <Icon size={16} className="flex-shrink-0" />}
                   <span className="truncate">{link.label}</span>
                   {!!link.badge && (
-                    <span className="ml-auto bg-brand text-white rounded-full text-[11px] font-semibold px-1.5 leading-4">
+                    <span className="ml-auto bg-sil-red text-white rounded-full text-[11px] font-semibold px-1.5 leading-4">
                       {link.badge}
                     </span>
                   )}

@@ -29,6 +29,15 @@ export async function getPendingProvisioning() {
   return data
 }
 
+// Total across all three categories — powers the sidebar's Action Center
+// badge (AppLayout.jsx), which has no reason to know the categories exist.
+export async function getActionCenterCount() {
+  const [verifications, approvals, provisioning] = await Promise.all([
+    getPendingSkVerifications(), getPendingApprovals(), getPendingProvisioning(),
+  ])
+  return verifications.length + approvals.length + provisioning.length
+}
+
 // Both return the subscriptions they just advanced ({id, user_email, license_name}[])
 // so the caller can notify each one — see src/lib/email.js.
 
