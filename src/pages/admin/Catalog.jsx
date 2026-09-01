@@ -49,11 +49,24 @@ function billingLabel(license) {
   return `${String(license.renewal_month).padStart(2, '0')} - ${MONTH_NAMES[license.renewal_month - 1]}`
 }
 
+// Sorts names like "Shared Drive 100 GB" / "Shared Drive 1 TB" by actual
+// size instead of lexicographically (which would put "100" before "50").
+// Names without a size pattern just fall back to plain alphabetical order.
+const SIZE_RE = /(\d+(?:\.\d+)?)\s*(g|gb|t|tb)\b/i
+const UNIT_GB = { g: 1, gb: 1, t: 1000, tb: 1000 }
+
+function sizeAwareSort(name) {
+  const m = name.match(SIZE_RE)
+  if (!m) return name.toLowerCase()
+  const size = parseFloat(m[1]) * UNIT_GB[m[2].toLowerCase()]
+  return String(size).padStart(10, '0') + name.toLowerCase()
+}
+
 // Each column's sort() returns a directly-comparable value — keeps the
 // header-click handler and the actual comparator generic across columns
 // instead of a big switch statement.
 const COLUMNS = [
-  { key: 'name', label: 'Name', sort: l => l.name.toLowerCase() },
+  { key: 'name', label: 'Name', sort: l => sizeAwareSort(l.name) },
   { key: 'vendor', label: 'Vendor', sort: l => (l.vendor || '').toLowerCase() },
   { key: 'category', label: 'Category', sort: l => (l.category || '').toLowerCase() },
   { key: 'price', label: 'Price', sort: l => Number(l.price) || 0, align: 'right' },
@@ -404,11 +417,11 @@ export default function AdminCatalog() {
                     )}
                   </div>
 
-                  <label className="block text-sm text-gray-700">
-                    <span className="flex items-center gap-2">
+                  <div className="text-sm text-gray-700">
+                    <label className="flex items-center gap-2">
                       <input type="checkbox" checked={editing.requires_acknowledgement} onChange={e => setEditing({ ...editing, requires_acknowledgement: e.target.checked })} />
                       Require Terms &amp; Conditions acknowledgement before requesting
-                    </span>
+                    </label>
                     {editing.requires_acknowledgement && (
                       <RichTextEditor
                         value={editing.acknowledgement_text ?? ''}
@@ -416,7 +429,7 @@ export default function AdminCatalog() {
                         placeholder="Shown to staff in the request form, next to a required &quot;I agree&quot; checkbox — link to the actual terms document here."
                       />
                     )}
-                  </label>
+                  </div>
 
                   <div className="flex flex-col gap-1.5 text-sm">
                     <span className="text-gray-700">Also include in the provisioning email (most service managers only want the email address above):</span>
