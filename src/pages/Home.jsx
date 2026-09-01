@@ -1,16 +1,38 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { signInWithGoogle } from '../lib/auth'
 
+const REDIRECT_HINT = "If your browser blocked a redirect, allow redirects for sil.org and accounts.google.com, then try again."
+
 export default function Home() {
-  const { session, profile, loading } = useAuth()
+  const { session, profile, loading, authError, refreshProfile } = useAuth()
   const navigate = useNavigate()
+  const [signInError, setSignInError] = useState(null)
 
   if (loading) return <LoadingScreen />
 
   if (session && profile) {
     navigate(profile.role === 'admin' ? '/admin/catalog' : '/catalog')
     return null
+  }
+
+  if (session && authError) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center text-center px-4">
+        <p className="text-gray-600 mb-4 max-w-sm">We couldn't load your profile. {REDIRECT_HINT}</p>
+        <button onClick={refreshProfile} className="text-brand underline text-sm">Try again</button>
+      </div>
+    )
+  }
+
+  async function handleSignIn() {
+    setSignInError(null)
+    try {
+      await signInWithGoogle()
+    } catch (err) {
+      setSignInError(err)
+    }
   }
 
   return (
@@ -23,12 +45,16 @@ export default function Home() {
         <p className="text-gray-500 mb-8 text-sm">Request and manage software license subscriptions</p>
 
         <button
-          onClick={signInWithGoogle}
+          onClick={handleSignIn}
           className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition"
         >
           <GoogleIcon />
           Sign in with Google
         </button>
+
+        {signInError && (
+          <p className="mt-4 text-xs text-red-600">{REDIRECT_HINT}</p>
+        )}
 
         <p className="mt-6 text-xs text-gray-400">
           Restricted to SIL staff.

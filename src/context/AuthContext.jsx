@@ -7,19 +7,30 @@ const AuthContext = createContext(null)
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(undefined) // undefined = loading
   const [profile, setProfile] = useState(null)
+  const [authError, setAuthError] = useState(null)
+
+  async function loadProfile(user) {
+    try {
+      setProfile(await resolveProfile(user))
+      setAuthError(null)
+    } catch (err) {
+      setAuthError(err)
+    }
+  }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
-      if (session?.user) resolveProfile(session.user).then(setProfile)
+      if (session?.user) loadProfile(session.user)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
       if (session?.user) {
-        resolveProfile(session.user).then(setProfile)
+        loadProfile(session.user)
       } else {
         setProfile(null)
+        setAuthError(null)
       }
     })
 
@@ -28,11 +39,13 @@ export function AuthProvider({ children }) {
 
   async function refreshProfile() {
     const { data: { session: s } } = await supabase.auth.getSession()
-    if (s?.user) resolveProfile(s.user).then(setProfile)
+    if (s?.user) loadProfile(s.user)
   }
 
+  const loading = session === undefined || (session !== null && profile === null && authError === null)
+
   return (
-    <AuthContext.Provider value={{ session, profile, loading: session === undefined || (session !== null && profile === null), refreshProfile }}>
+    <AuthContext.Provider value={{ session, profile, loading, authError, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   )
