@@ -8,7 +8,11 @@ import {
   listDepartmentApprovals, addDepartmentApproval, removeDepartmentApproval,
   sizeAwareSort,
 } from '../../lib/licenses'
-import { activationEmailHtml, renewalReminderCardHtml, renewalReminderEmailHtml } from '../../lib/email'
+import {
+  activationEmailHtml, renewalReminderCardHtml, renewalReminderEmailHtml, renewalReminderEmailSubject, sendEmail,
+} from '../../lib/email'
+import { startRenewalPeriod } from '../../lib/subscriptions'
+import { nextRenewalLabel } from '../../lib/subscriptionDisplay'
 
 const BLANK = {
   id: null, name: '', vendor: '', category: '', price: '', notes: '',
@@ -72,6 +76,7 @@ export default function AdminCatalog() {
   const [search, setSearch] = useState('')
   const [sortKey, setSortKey] = useState('name')
   const [sortDir, setSortDir] = useState('asc')
+  const [renewalSending, setRenewalSending] = useState(false)
 
   function openEditor(license) {
     setEditing({
@@ -164,6 +169,66 @@ export default function AdminCatalog() {
       reload()
     } catch (err) {
       setError(err.message)
+    }
+  }
+
+  // Opens a renewal period for this license/FY: stamps every eligible active
+  // subscription's open_renewal_fy (see start_renewal_period() in
+  // supabase/schema_licenses.sql) and emails each affected owner directly —
+  // one digest per person, no CC, mirroring send-renewal-reminders/index.ts's
+  // byOwner grouping (a person can hold more than one subscription of this
+  // license — see allow_multiple_per_person). Manual by design: nothing ever
+  // opens a period on its own, only this action does; the weekly cron just
+  // keeps nagging whoever it opened until they respond.
+  async function handleStartRenewalPeriod() {
+    const now = new Date()
+    const currentFy = now.getFullYear() + (now.getMonth() >= 9 ? 1 : 0)
+    const input = window.prompt(`Start a renewal period for ${editing.name} — which fiscal year?`, String(currentFy + 1))
+    if (!input) return
+    const fiscalYear = parseInt(input, 10)
+    if (!Number.isInteger(fiscalYear)) return
+
+    setRenewalSending(true)
+    setError(null)
+    try {
+      const rows = await startRenewalPeriod(editing.id, fiscalYear)
+      if (!rows.length) {
+        alert('No eligible subscriptions — everyone is already renewed, mid-decision for another year, or not active/annual.')
+        return
+      }
+
+      const byOwner = new Map()
+      for (const row of rows) {
+        const owner = row.user_email.toLowerCase()
+        if (!byOwner.has(owner)) byOwner.set(owner, [])
+        byOwner.get(owner).push(renewalReminderCardHtml({
+          licenseName: row.license_name,
+          suiteKey: row.billing_label,
+          priceLabel: row.price_at_signup != null ? `$${Number(row.price_at_signup).toFixed(2)}/yr` : null,
+          renewalLabel: nextRenewalLabel(row.renewal_month),
+          reminderMessage: editing.reminder_message,
+        }))
+      }
+
+      let sent = 0
+      for (const [owner, cards] of byOwner) {
+        try {
+          await sendEmail({
+            to: owner,
+            subject: renewalReminderEmailSubject(),
+            html: renewalReminderEmailHtml({ cardsHtml: cards.join('') }),
+            template: 'renewal_reminder',
+          })
+          sent++
+        } catch (err) {
+          console.error(`renewal period email failed for ${owner}:`, err.message)
+        }
+      }
+      alert(`FY${fiscalYear} renewal period started for ${editing.name}: ${rows.length} subscription(s), ${sent} email(s) sent.`)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setRenewalSending(false)
     }
   }
 
@@ -456,8 +521,8 @@ export default function AdminCatalog() {
                       placeholder="Leave blank to use the default renewal-reminder message"
                     />
                     <span className="block text-xs text-gray-400 mt-0.5">
-                      Replaces the default text in this license's card within the renewal-reminder digest. Content only for
-                      now — the weekly digest itself isn't automated yet (see supabase/schema_licenses.sql notes).
+                      Replaces the default text in this license's card within the renewal-reminder digest — used both by
+                      "Start renewal period" below and the weekly nag it kicks off for anyone who hasn't responded yet.
                     </span>
                     <button type="button" onClick={previewReminder} className="mt-1 text-xs font-medium text-brand">Preview</button>
                   </label>
@@ -466,9 +531,19 @@ export default function AdminCatalog() {
             </div>
 
             <div className="flex items-center justify-between pt-4">
-              <div className="flex gap-3">
+              <div className="flex items-center gap-3">
                 <button type="submit" className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">Save</button>
                 <button type="button" onClick={() => setEditing(null)} className="text-sm font-medium text-gray-500">Cancel</button>
+                {editing.id && editing.active && editing.billing_cycle === 'annual' && (
+                  <button
+                    type="button"
+                    onClick={handleStartRenewalPeriod}
+                    disabled={renewalSending}
+                    className="text-sm font-medium text-brand disabled:opacity-50"
+                  >
+                    {renewalSending ? 'Starting…' : 'Start renewal period'}
+                  </button>
+                )}
               </div>
               {editing.id && (
                 editing.active

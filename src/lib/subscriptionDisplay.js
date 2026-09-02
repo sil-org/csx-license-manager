@@ -39,6 +39,26 @@ export const STATUS_BADGE = {
 // clutter the list of what's actually current.
 export const INACTIVE_STATUSES = ['cancelled', 'declined', 'revoked']
 
+export const RENEWAL_LABEL = {
+  none: 'Awaiting decision',
+  opted_in: 'Renewing',
+  opted_out: 'Not renewing',
+}
+
+export const RENEWAL_COLOR = {
+  none: 'text-sil-yellow',
+  opted_in: 'text-sil-green',
+  opted_out: 'text-sil-red',
+}
+
+// renewal_status only reflects a real decision for annual, non-GTIS
+// subscriptions — mirrors isRenewalReminderEligible() in AllSubscriptions.jsx.
+// Monthly and GTIS-sponsored subscriptions carry the 'none' default but never
+// present a renew/cancel choice, so showing it there would be misleading.
+export function shouldShowRenewal(sub) {
+  return sub.billing_cycle === 'annual' && sub.billing_type !== 'gtis'
+}
+
 export function billingLabel(sub) {
   if (sub.billing_type === 'gtis') return 'GTIS'
   if (sub.billing_type === 'ministry') return `Ministry ID ${sub.ministry_id}`

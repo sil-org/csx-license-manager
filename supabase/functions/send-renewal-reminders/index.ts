@@ -1,25 +1,23 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
-// Weekly renewal-reminder digest — one email per subscription owner, listing
-// every annual subscription of theirs whose renewal date is coming up and
-// who hasn't responded yet (renewal_status stays 'none' until they opt in or
-// out via My Subscriptions). Mirrors gas-legacy/src/Emails.gs's
-// sendPerLicenseReminders()/sendWeeklyReminders(), with two changes for the
-// new app:
-//   - CC's the original requester (per subscription) when different from the
-//     owner — see issue #3 / src/lib/subscriptions.js's
-//     buildRenewalReminderNotification(), which does the same resolution for
-//     the manual single-subscription send in Admin -> All Subscriptions.
-//   - No bearer-token opt-in/opt-out links (GAS emailed one-click URLs) —
-//     the card just points to the authenticated /subscriptions page, same as
-//     renewalReminderCardHtml() in src/lib/email.js. This function can't
-//     import that module directly (it pulls in the browser Supabase client,
-//     which reads Vite env vars that don't exist under Deno), so the HTML
-//     below is a deliberate, minimal duplicate — keep the two in sync if the
-//     design changes.
+// Weekly renewal-reminder nag — one email per subscription owner, listing
+// every annual subscription of theirs that's currently in an OPEN renewal
+// period (subscriptions.open_renewal_fy is set) and still undecided. A
+// period only exists once an admin explicitly opens one via
+// start_renewal_period() (Admin -> Catalog's "Start renewal period") — this
+// function never discovers or opens a period on its own, it only keeps
+// nagging until opt_in_renewal()/opt_out_renewal() clears open_renewal_fy.
+// Mirrors gas-legacy/src/Emails.gs's sendPerLicenseReminders()/
+// sendWeeklyReminders(), with one change for the new app: no bearer-token
+// opt-in/opt-out links (GAS emailed one-click URLs) — the card just points
+// to the authenticated /subscriptions page, same as renewalReminderCardHtml()
+// in src/lib/email.js. This function can't import that module directly (it
+// pulls in the browser Supabase client, which reads Vite env vars that don't
+// exist under Deno), so the HTML below is a deliberate, minimal duplicate —
+// keep the two in sync if the design changes.
 //
 // Naturally idempotent per run: eligibility is recomputed from current DB
-// state every time (status/renewal_status), so there's no separate "already
+// state every time (open_renewal_fy), so there's no separate "already
 // reminded this week" tracking to maintain — same posture as sync-provisioning.
 //
 // Auth: checks its own CRON_SECRET rather than relying on Supabase's
@@ -36,10 +34,6 @@ const CRON_SECRET = Deno.env.get('CRON_SECRET')
 
 const APP_ORIGIN = 'https://licensemanager.sil.org'
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
-// ~2 months — matches the WINDOW constant gas-legacy/src/Emails.gs's
-// sendPerLicenseReminders() actually used (that function's own header
-// comment says "35 days", but the code itself computed 60).
-const WINDOW_MS = 60 * 24 * 60 * 60 * 1000
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders() })
@@ -58,79 +52,54 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(Deno.env.get('SUPABASE_URL')!, serviceRoleKey)
 
-    const { data: subs, error: subsError } = await supabase
+    const { data: eligible, error: subsError } = await supabase
       .from('subscriptions')
       .select('id, user_email, suite_key, ministry_id, billing_type, renewal_month, price_at_signup, license:licenses(name, reminder_message)')
       .eq('status', 'active')
       .eq('billing_cycle', 'annual')
       .eq('renewal_reminder', true)
-      .eq('renewal_status', 'none')
+      .not('open_renewal_fy', 'is', null)
       .neq('billing_type', 'gtis')
-      .not('renewal_month', 'is', null)
     if (subsError) throw subsError
 
     const now = new Date()
-    const eligible = (subs || []).filter(s => {
-      const renewalDate = nextRenewalDate(s.renewal_month, now)
-      return renewalDate.getTime() - now.getTime() <= WINDOW_MS
-    })
 
-    if (!eligible.length) {
+    if (!eligible?.length) {
       return json({ ok: true, emailsSent: 0, subscriptionsConsidered: 0 })
-    }
-
-    // Batched requester lookup (one query, not one per subscription) — same
-    // audit_log 'requested'-action source as resendApprovalRequest()/
-    // buildRenewalReminderNotification() in src/lib/subscriptions.js, picked
-    // for the same reason: subscriptions.requested_by is a profiles uuid FK
-    // that a plain SELECT can't safely resolve to an email from here anyway,
-    // so staying consistent with the already-working lookup is simpler than
-    // introducing a second way to answer "who requested this."
-    const { data: auditRows, error: auditError } = await supabase
-      .from('audit_log')
-      .select('subscription_id, performed_by, created_at')
-      .in('subscription_id', eligible.map(s => s.id))
-      .eq('action', 'requested')
-      .order('created_at', { ascending: false })
-    if (auditError) throw auditError
-    const requesterBySubId = new Map<string, string>()
-    for (const row of auditRows || []) {
-      if (!requesterBySubId.has(row.subscription_id)) requesterBySubId.set(row.subscription_id, row.performed_by)
     }
 
     // Grouped by lowercased email — user_email carries whatever case Google's
     // OAuth handed back at signup (see current_profile_email() in
     // schema_licenses.sql / commit 9ea3c0d), so comparing/keying on it
     // verbatim can silently split one person's digest across two "different"
-    // owners over a pure case difference.
-    const byOwner = new Map<string, { cardsHtml: string[]; cc: Set<string> }>()
+    // owners over a pure case difference. Grouping still matters here even
+    // though each subscription belongs to exactly one owner, since one
+    // person can have multiple annual licenses (or multiple seats of the
+    // same one — see allow_multiple_per_person) with open periods at once.
+    const byOwner = new Map<string, string[]>()
     for (const sub of eligible) {
       const owner = sub.user_email.toLowerCase()
-      if (!byOwner.has(owner)) byOwner.set(owner, { cardsHtml: [], cc: new Set() })
-      const entry = byOwner.get(owner)!
+      if (!byOwner.has(owner)) byOwner.set(owner, [])
 
       const renewalDate = nextRenewalDate(sub.renewal_month, now)
       const renewalLabel = `${MONTHS[renewalDate.getMonth()]} 1, ${renewalDate.getFullYear()}`
       const priceLabel = sub.price_at_signup != null ? `$${Number(sub.price_at_signup).toFixed(2)}/yr` : null
       const suiteKeyLabel = sub.billing_type === 'gtis' ? 'GTIS' : sub.billing_type === 'ministry' ? `Ministry ID ${sub.ministry_id}` : sub.suite_key
 
-      entry.cardsHtml.push(renewalCardHtml({
+      byOwner.get(owner)!.push(renewalCardHtml({
         licenseName: sub.license?.name || 'License',
         suiteKey: suiteKeyLabel,
         priceLabel,
         renewalLabel,
         reminderMessage: sub.license?.reminder_message,
       }))
-
-      const requester = requesterBySubId.get(sub.id)
-      if (requester && requester.toLowerCase() !== owner) entry.cc.add(requester.toLowerCase())
     }
 
     const ownerEntries = typeof limit === 'number' ? [...byOwner].slice(0, limit) : [...byOwner]
 
     let emailsSent = 0
     const errors: { email: string; error: string }[] = []
-    for (const [owner, { cardsHtml, cc }] of ownerEntries) {
+    for (const [owner, cardsHtml] of ownerEntries) {
       try {
         // Explicit Authorization header — supabase-js's implicit default
         // (from the key passed to createClient) doesn't reliably reach
@@ -141,7 +110,6 @@ Deno.serve(async (req) => {
           headers: { Authorization: `Bearer ${serviceRoleKey}` },
           body: {
             to: owner,
-            cc: cc.size ? [...cc] : undefined,
             subject: 'Action Required: Software License Renewal',
             html: renewalDigestHtml(cardsHtml.join('')),
             template: 'renewal_reminder',

@@ -15,11 +15,16 @@ export async function getAuditLog({ suiteKey, limit = 200 } = {}) {
 
 // Admin-only. RLS lets an admin read every suite_keys row directly, so no RPC
 // needed for the list itself; "pending" status is computed by cross-referencing
-// subscriptions still awaiting verification (admins can read all of those too).
-// Also surfaces the suggested approver's email for pending keys, so the admin
-// page can offer a one-click "confirm on their behalf" action — for the real-
-// world case where the actual owner replies "yes, that's my key" outside the
-// app (email, verbally) instead of completing the self-service confirm flow.
+// subscriptions still awaiting verification (admins can read all of those too),
+// falling back to the key's own pending_owner_email when there's no such
+// subscription — set by admin_update_subscription_suite_key() when an admin
+// repoints a subscription onto an unclaimed key and supplies a suggested
+// approver, which (unlike request_subscription()) never puts a subscription
+// into pending_sk_verification. Also surfaces the suggested approver's email
+// for pending keys, so the admin page can offer a one-click "confirm on their
+// behalf" action — for the real-world case where the actual owner replies
+// "yes, that's my key" outside the app (email, verbally) instead of
+// completing the self-service confirm flow.
 export async function getSuiteKeys() {
   const [{ data: keys, error: keysError }, { data: pending, error: pendingError }] = await Promise.all([
     supabase.from('suite_keys').select('*').order('suite_key'),
@@ -32,11 +37,14 @@ export async function getSuiteKeys() {
   // suggested approvers, this just picks one — the admin confirm button is a
   // convenience for the normal case, not a substitute for the edit modal.
   const pendingApproverByKey = new Map((pending || []).map(s => [s.suite_key, s.pending_approver_email]))
-  return (keys || []).map(k => ({
-    ...k,
-    status: pendingApproverByKey.has(k.suite_key) ? 'pending' : (k.owner_email || k.owner_group_email) ? 'confirmed' : 'unassigned',
-    pendingApproverEmail: pendingApproverByKey.get(k.suite_key) || null,
-  }))
+  return (keys || []).map(k => {
+    const pendingApproverEmail = pendingApproverByKey.get(k.suite_key) || k.pending_owner_email || null
+    return {
+      ...k,
+      status: pendingApproverEmail ? 'pending' : (k.owner_email || k.owner_group_email) ? 'confirmed' : 'unassigned',
+      pendingApproverEmail,
+    }
+  })
 }
 
 // Returns the subscriptions re-pointed/advanced by the new owner (id, user_email,
@@ -106,7 +114,7 @@ export async function getAllSubscriptions() {
   for (let offset = 0, total = null; total === null || offset < total; offset += pageSize) {
     const { data, count, error } = await supabase
       .from('subscriptions')
-      .select('*, license:licenses(name, vendor, category, activation_url, onboarding_message, reminder_message, more_info_url, service_manager_emails, extra_field_label, extra_field_required, provisioning_email_show_name, provisioning_email_show_job_title, provisioning_email_show_department)', { count: 'exact' })
+      .select('*, license:licenses(name, vendor, category, activation_url, onboarding_message, reminder_message, more_info_url, service_manager_emails, extra_field_label, extra_field_required, provisioning_email_show_name, provisioning_email_show_job_title, provisioning_email_show_department), renewals(fiscal_year, reminder_sent_at, decision, decided_at)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + pageSize - 1)
     if (error) throw error
@@ -192,10 +200,25 @@ export async function importScoCodes(rows) {
 }
 
 // Admin-only. Lists every profile (email, role) for the Admin Users page.
+// Paginated like getAllSubscriptions()/getFinanceExport() above: PostgREST
+// caps a single response at 1000 rows, and profiles is ordered by email, so
+// an unpaginated select here would silently drop everyone alphabetically
+// past the cutoff.
 export async function getProfiles() {
-  const { data, error } = await supabase.from('profiles').select('id, display_name, primary_email, role').order('primary_email')
-  if (error) throw error
-  return data
+  const pageSize = 1000
+  const rows = []
+  for (let offset = 0, total = null; total === null || offset < total; offset += pageSize) {
+    const { data, count, error } = await supabase
+      .from('profiles')
+      .select('id, display_name, primary_email, role', { count: 'exact' })
+      .order('primary_email')
+      .range(offset, offset + pageSize - 1)
+    if (error) throw error
+    if (data.length === 0) break
+    rows.push(...data)
+    total = count
+  }
+  return rows
 }
 
 // The only sanctioned way to change a profile's role — see admin_set_role()

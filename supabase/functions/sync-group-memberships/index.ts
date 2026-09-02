@@ -2,9 +2,15 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 
 // Refreshes the group_memberships cache table from Google's Admin SDK
 // Directory API — the only way suite_keys.owner_group_email authorization
-// checks work, since Postgres RLS can't make live calls to Google.
+// checks work, since Postgres RLS can't make live calls to Google. Also
+// backs the group-suggested-approver confirmation path (subscriptions.
+// pending_approver_is_group) — a suite key with no owner yet can have a
+// group named as its suggested approver, and get_my_pending_sk_verifications()/
+// confirm_sk_ownership() need a live-ish roster to check "is the caller
+// currently a member of that group" before it's ever been claimed.
 //
-// Only syncs groups actually referenced as a suite_keys.owner_group_email —
+// Syncs groups referenced as a suite_keys.owner_group_email, plus any group
+// currently named as a pending_sk_verification row's suggested approver —
 // never the whole organization's group directory. Call this on a schedule
 // (Supabase Scheduled Functions, or pg_cron + pg_net if that's not available)
 // — every 15-60 min is plenty given how infrequently these rosters change.
@@ -43,15 +49,25 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const { data: rows, error: groupsError } = await supabase
+    const { data: ownedRows, error: ownedError } = await supabase
       .from('suite_keys')
       .select('owner_group_email')
       .not('owner_group_email', 'is', null)
-    if (groupsError) throw groupsError
+    if (ownedError) throw ownedError
 
-    const groupEmails = [...new Set((rows || []).map(r => r.owner_group_email).filter(Boolean))]
+    const { data: pendingRows, error: pendingError } = await supabase
+      .from('subscriptions')
+      .select('pending_approver_email')
+      .eq('status', 'pending_sk_verification')
+      .eq('pending_approver_is_group', true)
+    if (pendingError) throw pendingError
+
+    const groupEmails = [...new Set([
+      ...(ownedRows || []).map(r => r.owner_group_email),
+      ...(pendingRows || []).map(r => r.pending_approver_email),
+    ].filter(Boolean))]
     if (!groupEmails.length) {
-      return json({ ok: true, groupsSynced: 0, message: 'No suite_keys currently have a Google Group owner.' })
+      return json({ ok: true, groupsSynced: 0, message: 'No suite_keys currently have a Google Group owner or suggested group approver.' })
     }
 
     const accessToken = await getAccessToken()

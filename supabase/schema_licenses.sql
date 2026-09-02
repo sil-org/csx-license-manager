@@ -64,6 +64,8 @@ do $$ begin
   );
 exception when duplicate_object then null; end $$;
 
+alter type audit_action add value if not exists 'suite_key_updated';
+
 -- Which billing path a subscription used. Replaces the original GAS-ported
 -- design of overloading suite_key with the literal strings 'GTIS' /
 -- 'MIN:XXXXXX' — that broke the suite_key FK below, since neither value is
@@ -106,7 +108,18 @@ create table if not exists suite_keys (
   owner_email     text,
   owner_group_email text,
   description     text,
-  created_at      timestamptz not null default now()
+  created_at      timestamptz not null default now(),
+  -- A key-level pending ownership claim — set by
+  -- admin_update_subscription_suite_key() when an admin repoints a
+  -- subscription onto a SuiteKey with no owner on file and supplies a
+  -- suggested approver. Distinct from subscriptions.pending_approver_email
+  -- (which gates that one subscription's own status): this can't live on
+  -- the subscription, since that RPC deliberately never changes the
+  -- subscription's status. admin_confirm_sk_ownership()/
+  -- admin_update_suite_key_owner() resolve and clear these once ownership
+  -- is actually established.
+  pending_owner_email    text,
+  pending_owner_is_group boolean not null default false
 );
 
 -- Belt-and-suspenders against the class of bug where a case-mismatched
@@ -122,9 +135,11 @@ create unique index if not exists suite_keys_lower_suite_key_idx on suite_keys (
 -- Workspace admin role directly, narrowly scoped to
 -- admin.directory.group[.member].readonly).
 -- RLS can't make live calls to Google's API, so authorization checks read
--- this cache rather than querying Directory API per-request. Only ever
--- populated for groups actually referenced as a suite_keys.owner_group_email —
--- not a sync of the whole organization's group directory.
+-- this cache rather than querying Directory API per-request. Populated for
+-- groups referenced as a suite_keys.owner_group_email, and (since
+-- pending_approver_is_group) also for any group named as a suite key's
+-- suggested approver while still awaiting confirmation — never a sync of
+-- the whole organization's group directory.
 create table if not exists group_memberships (
   group_email  text not null,
   member_email text not null,
@@ -192,10 +207,26 @@ create table if not exists subscriptions (
   fy                    int not null,
   status                subscription_status not null default 'pending',
   renewal_status        renewal_status not null default 'none',
+  -- Non-null while a renewal decision is pending, holding the FY being
+  -- decided — set by start_renewal_period(), cleared by opt_in_renewal()/
+  -- opt_out_renewal(). Distinct from renewal_status = 'none', which can also
+  -- mean "never asked" (no period has ever been opened).
+  open_renewal_fy       int,
   billing_cycle         billing_cycle,
   renewal_month         int,
   renewal_reminder      boolean,
   pending_approver_email text,
+  -- True when pending_approver_email is a Google Group address rather than
+  -- an individual — set at request time by request_subscription() (based on
+  -- a Directory API classification done client-side before submitting, see
+  -- classify-approver-email Edge Function). Changes how confirmation is
+  -- matched: get_my_pending_sk_verifications()/confirm_sk_ownership()/
+  -- deny_sk_ownership() accept any current member of the named group
+  -- (via group_memberships), not just an exact profile-email match — see
+  -- 2026-09-01's operations_gslt@sil.org / alan_yam@sil.org incident, where
+  -- a group address typed into "suggested approver" could never satisfy the
+  -- individual exact-match check no matter who in that group signed in.
+  pending_approver_is_group boolean not null default false,
   price_at_signup       numeric,
   requested_by          uuid references profiles(id),
   legacy_id             text,   -- GAS Subscriptions sheet's ID (e.g. "SUB-XXXXXXXX"), set only by admin_import_subscriptions_full()
@@ -211,13 +242,21 @@ create index if not exists subscriptions_suite_key_idx on subscriptions (suite_k
 create index if not exists subscriptions_license_id_idx on subscriptions (license_id);
 create unique index if not exists subscriptions_legacy_id_idx on subscriptions (legacy_id) where legacy_id is not null;
 
--- FY renewal opt-in log (append-only; opt-outs are not logged here, only as
--- subscriptions.renewal_status = 'opted_out').
+-- Per-fiscal-year renewal period log: one row per (subscription, fy) opened
+-- by start_renewal_period(), tracking when the reminder went out and what
+-- was decided. opt_in_date/opted_in_by are set only on a real opt-in (kept
+-- around because get_finance_export's renewed_date reads max(opt_in_date));
+-- decision/decided_at/decided_by are the general-purpose equivalent that
+-- also covers opt-outs and the still-undecided ('none') state.
 create table if not exists renewals (
   id             uuid primary key default gen_random_uuid(),
   subscription_id uuid not null references subscriptions(id) on delete cascade,
   fiscal_year    int not null,
-  opt_in_date    date not null default current_date,
+  reminder_sent_at timestamptz,
+  decision       renewal_status not null default 'none',
+  decided_at     timestamptz,
+  decided_by     text,
+  opt_in_date    date,
   opted_in_by    text,
   unique (subscription_id, fiscal_year)
 );
@@ -525,6 +564,8 @@ create policy "department_approvals: admin only" on department_approvals for all
 drop function if exists request_subscription(uuid, text, text, text, int);
 -- Adds a 7th parameter (p_acknowledged) — same reason, drop the 6-arg overload.
 drop function if exists request_subscription(uuid, text, text, text, int, text);
+-- Adds a 9th parameter (p_suggested_approver_is_group) — same reason, drop the 8-arg overload.
+drop function if exists request_subscription(uuid, text, text, text, int, text, boolean, text);
 
 create or replace function request_subscription(
   p_license_id uuid,
@@ -534,7 +575,12 @@ create or replace function request_subscription(
   p_fy int,
   p_recipient_email text default null,
   p_acknowledged boolean default false,
-  p_extra_field_value text default null
+  p_extra_field_value text default null,
+  -- Classified client-side (classify-approver-email Edge Function, a
+  -- Directory API groups.get lookup) before this RPC is called — Postgres
+  -- can't make that call itself. Only meaningful when this lands in the
+  -- "unclaimed suite key" branch below; ignored otherwise.
+  p_suggested_approver_is_group boolean default false
 ) returns uuid language plpgsql security definer as $$
 declare
   v_license licenses%rowtype;
@@ -554,6 +600,7 @@ declare
   v_owner text;
   v_owner_group text;
   v_pending_approver text := null;
+  v_is_group boolean := false;
   v_sco text;
 begin
   if v_actor_email is null then raise exception 'not authenticated'; end if;
@@ -696,6 +743,7 @@ begin
         v_pending_approver := null;
       else
         v_status := 'pending_sk_verification';
+        v_is_group := coalesce(p_suggested_approver_is_group, false);
       end if;
     elsif lower(v_owner) = lower(v_actor_email) then
       v_status := 'approved';
@@ -711,10 +759,10 @@ begin
   -- what triggers the provisioning-required notification below.
   insert into subscriptions (
     user_email, license_id, suite_key, billing_type, ministry_id, fy, status, billing_cycle,
-    renewal_month, renewal_reminder, price_at_signup, pending_approver_email, requested_by, extra_field_value
+    renewal_month, renewal_reminder, price_at_signup, pending_approver_email, pending_approver_is_group, requested_by, extra_field_value
   ) values (
     v_recipient_email, p_license_id, v_suite_key, v_billing_type, v_ministry_id, p_fy, v_status, v_license.billing_cycle,
-    v_license.renewal_month, v_license.renewal_reminder, v_license.price, v_pending_approver, current_profile_id(),
+    v_license.renewal_month, v_license.renewal_reminder, v_license.price, v_pending_approver, v_is_group, current_profile_id(),
     nullif(trim(p_extra_field_value), '')
   ) returning id into v_sub_id;
 
@@ -755,25 +803,61 @@ drop function if exists confirm_sk_ownership(text);
 create or replace function confirm_sk_ownership(p_suite_key text)
 returns table(id uuid, user_email text, license_name text, more_info_url text)
 language plpgsql security definer as $$
-declare v_email text := current_profile_email();
+declare
+  v_email text := current_profile_email();
+  -- What this suite key's pending_sk_verification row(s) actually name as
+  -- the approver — the caller's own email for an individual suggestion, or
+  -- a group's address when the caller is just a current member of it (see
+  -- pending_approver_is_group). Prefer the exact-match individual case
+  -- first so today's common path is untouched; only fall back to "is the
+  -- caller a member of a suggested group" when no row names them directly.
+  v_approver text;
+  v_is_group boolean;
 begin
-  -- Also succeeds if already owned by the caller (idempotent) — an admin
-  -- may have already assigned this key to them via admin_update_suite_key_owner(),
-  -- in which case they're just confirming/advancing re-pointed requests, not
-  -- claiming an unowned key.
-  update suite_keys set owner_email = v_email
-  where suite_key = p_suite_key and (owner_email is null or owner_email = v_email);
+  select pending_approver_email, false into v_approver, v_is_group
+  from subscriptions
+  where suite_key = p_suite_key and status = 'pending_sk_verification' and pending_approver_email = v_email
+  limit 1;
+
+  if v_approver is null then
+    select s.pending_approver_email, true into v_approver, v_is_group
+    from subscriptions s
+    where s.suite_key = p_suite_key and s.status = 'pending_sk_verification' and s.pending_approver_is_group
+      and exists (
+        select 1 from group_memberships gm
+        where gm.group_email = s.pending_approver_email and lower(gm.member_email) = v_email
+      )
+    limit 1;
+  end if;
+
+  if v_approver is null then raise exception 'suite key not found or owned by someone else'; end if;
+
+  -- Also succeeds if already owned by the resolved approver (idempotent) —
+  -- an admin may have already assigned this key via
+  -- admin_update_suite_key_owner(), in which case this just
+  -- confirms/advances re-pointed requests, not claiming an unowned key.
+  if v_is_group then
+    update suite_keys set owner_group_email = v_approver, owner_email = null
+    where suite_key = p_suite_key and owner_email is null and (owner_group_email is null or owner_group_email = v_approver);
+  else
+    update suite_keys set owner_email = v_approver, owner_group_email = null
+    where suite_key = p_suite_key and (owner_email is null or owner_email = v_approver);
+  end if;
   if not found then raise exception 'suite key not found or owned by someone else'; end if;
 
-  insert into audit_log (action, suite_key, performed_by, ip_address)
-  values ('sk_verified', p_suite_key, v_email, current_client_ip());
+  insert into audit_log (action, suite_key, performed_by, notes, ip_address)
+  values (
+    'sk_verified', p_suite_key, v_email,
+    case when v_is_group then 'confirmed as a current member of ' || v_approver else null end,
+    current_client_ip()
+  );
 
   return query
     update subscriptions s
-    set status = 'pending', pending_approver_email = null
+    set status = 'pending', pending_approver_email = null, pending_approver_is_group = false
     from licenses l
     where s.suite_key = p_suite_key and s.status = 'pending_sk_verification'
-      and s.pending_approver_email = v_email and l.id = s.license_id
+      and s.pending_approver_email = v_approver and l.id = s.license_id
     returning s.id, s.user_email, l.name, l.more_info_url;
 end;
 $$;
@@ -804,13 +888,35 @@ language plpgsql security definer as $$
 declare
   v_owner text := nullif(lower(trim(p_owner_email)), '');
   v_admin text := current_profile_email();
+  -- p_owner_email is whatever the quick-confirm button showed, i.e. the
+  -- pending_approver_email value verbatim — that can itself be a Google
+  -- Group address (pending_approver_is_group), in which case the claim
+  -- belongs on owner_group_email, not owner_email.
+  v_is_group boolean;
 begin
   if not is_admin() then raise exception 'admin only'; end if;
   p_suite_key := trim(p_suite_key);
   if v_owner is null then raise exception 'owner email is required'; end if;
 
-  update suite_keys set owner_email = v_owner, owner_group_email = null
-  where suite_key = p_suite_key;
+  select bool_or(pending_approver_is_group) into v_is_group
+  from subscriptions
+  where suite_key = p_suite_key and status = 'pending_sk_verification' and pending_approver_email = v_owner;
+
+  -- No subscription was waiting on this — check for a key-level pending
+  -- claim instead (admin_update_subscription_suite_key(), which can't park
+  -- the claim on a subscription's own status since it never changes it).
+  if v_is_group is null then
+    select pending_owner_is_group into v_is_group
+    from suite_keys where suite_key = p_suite_key and pending_owner_email = v_owner;
+  end if;
+
+  if coalesce(v_is_group, false) then
+    update suite_keys set owner_group_email = v_owner, owner_email = null, pending_owner_email = null, pending_owner_is_group = false
+    where suite_key = p_suite_key;
+  else
+    update suite_keys set owner_email = v_owner, owner_group_email = null, pending_owner_email = null, pending_owner_is_group = false
+    where suite_key = p_suite_key;
+  end if;
   if not found then raise exception 'suite key not found'; end if;
 
   insert into audit_log (action, suite_key, performed_by, ip_address)
@@ -818,7 +924,7 @@ begin
 
   return query
     update subscriptions s
-    set status = 'pending', pending_approver_email = null
+    set status = 'pending', pending_approver_email = null, pending_approver_is_group = false
     from licenses l
     where s.suite_key = p_suite_key and s.status = 'pending_sk_verification'
       and s.pending_approver_email = v_owner and l.id = s.license_id
@@ -831,8 +937,30 @@ drop function if exists deny_sk_ownership(text);
 create or replace function deny_sk_ownership(p_suite_key text)
 returns table(id uuid, user_email text, license_name text)
 language plpgsql security definer as $$
-declare v_email text := current_profile_email();
+declare
+  v_email text := current_profile_email();
+  -- Same individual-first, then-group-membership resolution as
+  -- confirm_sk_ownership() above — a group member declining a group's
+  -- suggested-approver row can't match on their own email, only via
+  -- group_memberships.
+  v_approver text;
 begin
+  select pending_approver_email into v_approver
+  from subscriptions
+  where suite_key = p_suite_key and status = 'pending_sk_verification' and pending_approver_email = v_email
+  limit 1;
+
+  if v_approver is null then
+    select s.pending_approver_email into v_approver
+    from subscriptions s
+    where s.suite_key = p_suite_key and s.status = 'pending_sk_verification' and s.pending_approver_is_group
+      and exists (
+        select 1 from group_memberships gm
+        where gm.group_email = s.pending_approver_email and lower(gm.member_email) = v_email
+      )
+    limit 1;
+  end if;
+
   insert into audit_log (action, suite_key, performed_by, notes, ip_address)
   values ('declined', p_suite_key, v_email, 'suite key ownership declined', current_client_ip());
 
@@ -841,7 +969,7 @@ begin
     set status = 'declined'
     from licenses l
     where s.suite_key = p_suite_key and s.status = 'pending_sk_verification'
-      and s.pending_approver_email = v_email and l.id = s.license_id
+      and s.pending_approver_email = v_approver and l.id = s.license_id
     returning s.id, s.user_email, l.name;
 end;
 $$;
@@ -951,7 +1079,13 @@ language sql stable security definer as $$
   select s.id, s.user_email, s.suite_key, l.name
   from subscriptions s join licenses l on l.id = s.license_id
   where s.status = 'pending_sk_verification'
-    and s.pending_approver_email = current_profile_email()
+    and (
+      s.pending_approver_email = current_profile_email()
+      or (s.pending_approver_is_group and exists (
+        select 1 from group_memberships gm
+        where gm.group_email = s.pending_approver_email and lower(gm.member_email) = current_profile_email()
+      ))
+    )
   order by s.created_at
 $$;
 
@@ -1024,9 +1158,15 @@ begin
   insert into suite_keys (suite_key, owner_email, owner_group_email, description)
   values (p_suite_key, v_owner, v_group, p_description)
   on conflict (suite_key) do update
+    -- An explicit admin-assigned owner supersedes any still-outstanding
+    -- key-level pending claim (see admin_update_subscription_suite_key()) —
+    -- left untouched when unassigning (both v_owner/v_group null), since
+    -- that doesn't actually resolve anything.
     set owner_email = v_owner,
         owner_group_email = v_group,
-        description = coalesce(p_description, suite_keys.description);
+        description = coalesce(p_description, suite_keys.description),
+        pending_owner_email = case when v_owner is not null or v_group is not null then null else suite_keys.pending_owner_email end,
+        pending_owner_is_group = case when v_owner is not null or v_group is not null then false else suite_keys.pending_owner_is_group end;
 
   if v_group is not null then
     return query
@@ -1043,6 +1183,99 @@ begin
       where s.suite_key = p_suite_key and s.status = 'pending_sk_verification' and l.id = s.license_id
       returning s.id, s.user_email, l.name;
   end if;
+end;
+$$;
+
+-- ─── RPC: admin_update_subscription_suite_key ──────────────────────────────────
+-- Lets an admin repoint an existing subscription onto a different SuiteKey
+-- from Admin -> All Subscriptions' details modal — e.g. it was billed
+-- against the wrong key, or the underlying budget moved to a new one.
+-- Deliberately never touches the subscription's status or activated_at — an
+-- admin fixing which key pays for an already-active subscription isn't the
+-- same as re-requesting/re-approving it, and nothing about its provisioning
+-- state should reset. It still emails the new key's owner (or, if unclaimed,
+-- a suggested approver the caller supplies, client-side classified as an
+-- individual or Google Group same as request_subscription()) so they're
+-- aware a request now sits against their key — the subscription itself
+-- never waits on their response.
+--
+-- An unclaimed new key's pending claim can't live on this subscription's own
+-- pending_approver_email/status = 'pending_sk_verification' the way
+-- request_subscription() tracks it, since (again) this subscription's status
+-- must not change — it lives on suite_keys.pending_owner_email/
+-- pending_owner_is_group instead. admin_confirm_sk_ownership()/
+-- admin_update_suite_key_owner() above already know to resolve and clear it.
+
+create or replace function admin_update_subscription_suite_key(
+  p_subscription_id uuid,
+  p_suite_key text,
+  p_suggested_approver_email text default null,
+  p_suggested_approver_is_group boolean default false
+) returns table(suite_key text, owner_email text, owner_group_email text, pending_verification boolean)
+language plpgsql security definer as $$
+declare
+  v_admin text := current_profile_email();
+  v_old_key text;
+  v_billing_type subscription_billing_type;
+  v_new_key text;
+  v_canonical text;
+  v_owner text;
+  v_owner_group text;
+  v_suggested text := nullif(lower(trim(p_suggested_approver_email)), '');
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+
+  select s.suite_key, s.billing_type into v_old_key, v_billing_type
+  from subscriptions s where s.id = p_subscription_id;
+  if not found then raise exception 'subscription not found'; end if;
+  if v_billing_type <> 'suite_key' then raise exception 'this subscription is not billed by SuiteKey'; end if;
+
+  -- Anything from "~" onward is stray pasted text, not part of the real key —
+  -- same normalization as request_subscription().
+  v_new_key := regexp_replace(trim(p_suite_key), '~.*$', '');
+  if v_new_key = '' then raise exception 'a suite key is required'; end if;
+  if lower(v_new_key) = lower(coalesce(v_old_key, '')) then
+    raise exception 'subscription already uses this suite key';
+  end if;
+
+  select sk.suite_key, sk.owner_email, sk.owner_group_email into v_canonical, v_owner, v_owner_group
+  from suite_keys sk where lower(sk.suite_key) = lower(v_new_key);
+
+  if v_canonical is not null then
+    v_new_key := v_canonical;
+  else
+    insert into suite_keys (suite_key, owner_email) values (v_new_key, null);
+  end if;
+
+  if v_owner is null and v_owner_group is null and v_suggested is null then
+    raise exception 'suite key % has no owner on file — provide a suggested approver email', v_new_key;
+  end if;
+
+  update subscriptions set suite_key = v_new_key where id = p_subscription_id;
+
+  if v_owner is not null or v_owner_group is not null then
+    insert into audit_log (action, subscription_id, suite_key, performed_by, notes, ip_address)
+    values (
+      'suite_key_updated', p_subscription_id, v_new_key, v_admin,
+      'changed from ' || coalesce(v_old_key, '(none)') || ' to ' || v_new_key, current_client_ip()
+    );
+    return query select v_new_key, v_owner, v_owner_group, false;
+    return;
+  end if;
+
+  update suite_keys
+  set pending_owner_email = v_suggested, pending_owner_is_group = coalesce(p_suggested_approver_is_group, false)
+  where suite_key = v_new_key;
+
+  insert into audit_log (action, subscription_id, suite_key, performed_by, notes, ip_address)
+  values (
+    'suite_key_updated', p_subscription_id, v_new_key, v_admin,
+    'changed from ' || coalesce(v_old_key, '(none)') || ' to ' || v_new_key ||
+      '; awaiting ownership confirmation from ' || v_suggested,
+    current_client_ip()
+  );
+
+  return query select v_new_key, null::text, null::text, true;
 end;
 $$;
 
@@ -1266,7 +1499,61 @@ begin
 end;
 $$;
 
+-- ─── RPC: start_renewal_period ──────────────────────────────────────────────
+-- Admin-only. Opens a renewal period for every eligible active annual
+-- subscription of one license, for one fiscal year: stamps
+-- subscriptions.open_renewal_fy and inserts a 'none'-decision renewals row.
+-- Idempotent — re-running for the same (license, fy) only picks up
+-- subscriptions that don't already have a renewals row for that fy, so it
+-- never re-opens someone who already opted in/out for this exact year.
+-- Returns what the caller needs to send the reminder email itself (this app
+-- always sends email from the client via lib/email.js's sendEmail(), never
+-- from a write RPC) — see AllSubscriptions.jsx's handleSendRenewalReminder
+-- for the single-subscription equivalent this generalizes.
+create or replace function start_renewal_period(p_license_id uuid, p_fiscal_year int)
+returns table(
+  subscription_id uuid, user_email text, license_name text, billing_label text,
+  price_at_signup numeric, renewal_month int, reminder_message text
+) language plpgsql security definer as $$
+begin
+  if not is_admin() then raise exception 'admin only'; end if;
+
+  return query
+  with opened as (
+    update subscriptions s set open_renewal_fy = p_fiscal_year
+    where s.license_id = p_license_id
+      and s.status = 'active'
+      and s.billing_cycle = 'annual'
+      and s.renewal_reminder = true
+      and s.billing_type != 'gtis'
+      and s.open_renewal_fy is null
+      and s.fy < p_fiscal_year
+      and not exists (
+        select 1 from renewals r where r.subscription_id = s.id and r.fiscal_year = p_fiscal_year
+      )
+    returning s.id, s.user_email, s.suite_key, s.ministry_id, s.billing_type,
+      s.price_at_signup, s.renewal_month, s.license_id
+  ), logged as (
+    insert into renewals (subscription_id, fiscal_year, reminder_sent_at, decision)
+    select o.id, p_fiscal_year, now(), 'none' from opened o
+    returning subscription_id
+  )
+  select
+    o.id, o.user_email, l.name,
+    case
+      when o.billing_type = 'gtis' then 'GTIS'
+      when o.billing_type = 'ministry' then 'Ministry ID ' || o.ministry_id
+      else o.suite_key
+    end,
+    o.price_at_signup, o.renewal_month, l.reminder_message
+  from opened o
+  join licenses l on l.id = o.license_id;
+end;
+$$;
+
 -- ─── RPC: opt_in_renewal / opt_out_renewal ─────────────────────────────────────
+-- Both resolve against open_renewal_fy: a decision can only be made while a
+-- period is actually open (started via start_renewal_period), never ad-hoc.
 
 create or replace function opt_in_renewal(p_subscription_id uuid)
 returns void language plpgsql security definer as $$
@@ -1277,10 +1564,16 @@ begin
   select * into v_sub from subscriptions where id = p_subscription_id;
   if v_sub.id is null then raise exception 'subscription not found'; end if;
   if not (is_admin() or v_sub.user_email = v_email) then raise exception 'not authorized'; end if;
+  if v_sub.open_renewal_fy is null then raise exception 'no open renewal period'; end if;
 
-  update subscriptions set renewal_status = 'opted_in' where id = p_subscription_id;
-  insert into renewals (subscription_id, fiscal_year, opted_in_by)
-  values (p_subscription_id, v_sub.fy, v_email);
+  update subscriptions
+    set fy = v_sub.open_renewal_fy, renewal_status = 'opted_in', open_renewal_fy = null
+    where id = p_subscription_id;
+
+  update renewals
+    set decision = 'opted_in', decided_at = now(), decided_by = v_email,
+        opt_in_date = current_date, opted_in_by = v_email
+    where subscription_id = p_subscription_id and fiscal_year = v_sub.open_renewal_fy;
 end;
 $$;
 
@@ -1293,8 +1586,15 @@ begin
   select * into v_sub from subscriptions where id = p_subscription_id;
   if v_sub.id is null then raise exception 'subscription not found'; end if;
   if not (is_admin() or v_sub.user_email = v_email) then raise exception 'not authorized'; end if;
+  if v_sub.open_renewal_fy is null then raise exception 'no open renewal period'; end if;
 
-  update subscriptions set renewal_status = 'opted_out' where id = p_subscription_id;
+  update subscriptions
+    set renewal_status = 'opted_out', open_renewal_fy = null
+    where id = p_subscription_id;
+
+  update renewals
+    set decision = 'opted_out', decided_at = now(), decided_by = v_email
+    where subscription_id = p_subscription_id and fiscal_year = v_sub.open_renewal_fy;
 end;
 $$;
 

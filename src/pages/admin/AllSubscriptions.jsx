@@ -6,25 +6,52 @@ import { getLinks } from '../../navLinks'
 import { useAuth } from '../../context/AuthContext'
 import { getAllSubscriptions } from '../../lib/admin'
 import { activateSubscription } from '../../lib/approvals'
-import { resendApprovalRequest, resendProvisioningRequest, cancelSubscription, buildRenewalReminderNotification, updateSubscriptionDetails } from '../../lib/subscriptions'
+import {
+  resendApprovalRequest, resendProvisioningRequest, cancelSubscription, buildRenewalReminderNotification,
+  updateSubscriptionDetails, updateSubscriptionSuiteKey,
+} from '../../lib/subscriptions'
 import { supabase } from '../../lib/supabase'
 import {
   sendEmail, activationEmailSubject, activationEmailHtml, approvalRequestEmailSubject, approvalRequestEmailHtml,
   provisioningRequiredEmailSubject, provisioningRequiredEmailHtml, cancelledEmailSubject, cancelledEmailHtml,
   renewalReminderEmailSubject, renewalReminderEmailHtml, renewalReminderCardHtml,
+  skVerificationEmailSubject, skVerificationEmailHtml,
 } from '../../lib/email'
-import { billingLabel, fyLabel, nextRenewalLabel, STATUS_LABEL, STATUS_COLOR } from '../../lib/subscriptionDisplay'
+import { billingLabel, fyLabel, nextRenewalLabel, STATUS_LABEL, STATUS_COLOR, RENEWAL_LABEL, RENEWAL_COLOR, shouldShowRenewal } from '../../lib/subscriptionDisplay'
 
-// Mirrors Emails.gs's per-license reminder eligibility (gas-legacy/src/Emails.gs):
-// only active annual subscriptions with the per-license reminder toggle on,
-// that haven't already opted in/out for the year. GTIS-sponsored subscriptions
-// are excluded outright — GTIS foots the whole bill, so there's never a
+// Gates the bell "resend this reminder" icon: only while there's an actual
+// open renewal period (started via Admin -> Catalog's "Start renewal
+// period") does resending make sense. GTIS-sponsored subscriptions are
+// excluded outright — GTIS foots the whole bill, so there's never a
 // renew/cancel decision for the seat holder to make (unlike department-gated,
 // which is free per-seat but still opt-in per-license via renewal_reminder —
 // see 48_gemini_renewal_reminder_fix.sql).
 function isRenewalReminderEligible(sub) {
   return sub.status === 'active' && sub.billing_cycle === 'annual' && sub.renewal_reminder
-    && sub.renewal_status === 'none' && sub.billing_type !== 'gtis'
+    && sub.open_renewal_fy != null && sub.billing_type !== 'gtis'
+}
+
+// Most-recent-FY renewals row for a subscription — at most one row is ever
+// "open" (decision='none') at a time, enforced by start_renewal_period()'s
+// eligibility check, so the open period (if any) is always the latest one.
+function latestRenewal(sub) {
+  return (sub.renewals || []).slice().sort((a, b) => b.fiscal_year - a.fiscal_year)[0]
+}
+
+// { text, color } for the Renewal column: an open period shows the FY being
+// decided and when the reminder went out; otherwise the latest resolved
+// period's decision; '—' for licenses renewal doesn't apply to, or ones that
+// have never had a period opened.
+function renewalCell(sub) {
+  if (!shouldShowRenewal(sub)) return { text: '—', color: 'text-gray-300' }
+  if (sub.open_renewal_fy != null) {
+    const sentAt = latestRenewal(sub)?.reminder_sent_at
+    const sentLabel = sentAt ? ` — sent ${new Date(sentAt).toLocaleDateString()}` : ''
+    return { text: `FY${sub.open_renewal_fy}: Awaiting decision${sentLabel}`, color: RENEWAL_COLOR.none }
+  }
+  const latest = latestRenewal(sub)
+  if (!latest) return { text: '—', color: 'text-gray-300' }
+  return { text: `FY${latest.fiscal_year}: ${RENEWAL_LABEL[latest.decision] || latest.decision}`, color: RENEWAL_COLOR[latest.decision] }
 }
 
 // Statuses cancel_subscription() will actually accept — mirrors the same
@@ -40,6 +67,7 @@ const COLUMNS = [
   { key: 'billing', label: 'Billing', sort: s => billingLabel(s).toLowerCase() },
   { key: 'fy', label: 'FY', sort: s => s.fy || 0 },
   { key: 'status', label: 'Status', sort: s => STATUS_LABEL[s.status] || s.status },
+  { key: 'renewal', label: 'Renewal', sort: s => (shouldShowRenewal(s) ? (s.open_renewal_fy ?? latestRenewal(s)?.fiscal_year ?? 0) : -1) },
   { key: 'started', label: 'Provisioned', sort: s => s.activated_at || '' },
 ]
 
@@ -59,7 +87,7 @@ export default function AdminAllSubscriptions() {
   const [resendState, setResendState] = useState({})
   const [editingSub, setEditingSub] = useState(null)
   const [activateMode, setActivateMode] = useState(false)
-  const [editForm, setEditForm] = useState({ notes: '', productKey: '', invoiceNumber: '', pricePaid: '', extraFieldValue: '' })
+  const [editForm, setEditForm] = useState({ notes: '', productKey: '', invoiceNumber: '', pricePaid: '', extraFieldValue: '', suiteKey: '', suggestedApproverEmail: '' })
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState(null)
 
@@ -188,6 +216,8 @@ export default function AdminAllSubscriptions() {
       invoiceNumber: sub.invoice_number || '',
       pricePaid: sub.price_at_signup ?? '',
       extraFieldValue: sub.extra_field_value || '',
+      suiteKey: sub.suite_key || '',
+      suggestedApproverEmail: '',
     })
     setActivateMode(activate)
     setEditingSub(sub)
@@ -206,6 +236,41 @@ export default function AdminAllSubscriptions() {
     const sub = editingSub
     try {
       await updateSubscriptionDetails(sub.id, editForm)
+
+      const newSuiteKey = editForm.suiteKey.trim()
+      if (sub.suite_key && newSuiteKey && newSuiteKey.toLowerCase() !== sub.suite_key.toLowerCase()) {
+        const notify = await updateSubscriptionSuiteKey(sub.id, newSuiteKey, editForm.suggestedApproverEmail.trim())
+        if (notify) {
+          try {
+            if (notify.type === 'sk_verification') {
+              await sendEmail({
+                to: notify.to,
+                subject: skVerificationEmailSubject(notify.suiteKey),
+                html: skVerificationEmailHtml({
+                  suiteKey: notify.suiteKey, licenseName: sub.license?.name,
+                  requesterEmail: profile?.primary_email, recipientEmail: sub.user_email,
+                }),
+                template: 'sk_verification',
+                subscriptionId: sub.id,
+              })
+            } else {
+              await sendEmail({
+                to: notify.to,
+                subject: approvalRequestEmailSubject(notify.suiteKey),
+                html: approvalRequestEmailHtml({
+                  suiteKey: notify.suiteKey, licenseName: sub.license?.name,
+                  userEmail: sub.user_email, moreInfoUrl: sub.license?.more_info_url,
+                }),
+                template: 'approval_request',
+                subscriptionId: sub.id,
+              })
+            }
+          } catch (err) {
+            console.error('suite key change notification failed:', err.message)
+          }
+        }
+      }
+
       if (activateMode) {
         await activateSubscription(sub.id, null)
         try {
@@ -379,6 +444,7 @@ export default function AdminAllSubscriptions() {
             <tbody className="divide-y">
               {visibleSubs?.map(sub => {
                 const hasDetails = sub.notes || sub.product_key || sub.invoice_number || sub.extra_field_value
+                const renewal = renewalCell(sub)
                 return (
                 <tr key={sub.id} className="hover:bg-gray-50 transition-colors">
                   <td className="p-3">{sub.user_email}</td>
@@ -386,6 +452,7 @@ export default function AdminAllSubscriptions() {
                   <td className="p-3 text-gray-500">{billingLabel(sub)}</td>
                   <td className="p-3 text-gray-500">{fyLabel(sub) || '—'}</td>
                   <td className={`p-3 ${STATUS_COLOR[sub.status]}`}>{STATUS_LABEL[sub.status]}</td>
+                  <td className={`p-3 whitespace-nowrap ${renewal.color}`}>{renewal.text}</td>
                   <td className="p-3 text-gray-500 whitespace-nowrap">{sub.activated_at || '—'}</td>
                   <td className="p-3">
                     <button
@@ -495,6 +562,33 @@ export default function AdminAllSubscriptions() {
             )}
             {editError && <p className="text-sil-red text-sm mb-3">{editError}</p>}
             <div className="space-y-3">
+              {editingSub.suite_key && (
+                <>
+                  <label className="block text-sm text-gray-700">
+                    SuiteKey
+                    <input
+                      type="text"
+                      value={editForm.suiteKey}
+                      onChange={e => setEditForm(f => ({ ...f, suiteKey: e.target.value }))}
+                      className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </label>
+                  {editForm.suiteKey.trim().toLowerCase() !== editingSub.suite_key.toLowerCase() && (
+                    <label className="block text-sm text-gray-700">
+                      Suggested approver (only used if the new SuiteKey has no owner on file)
+                      <input
+                        type="email"
+                        value={editForm.suggestedApproverEmail}
+                        onChange={e => setEditForm(f => ({ ...f, suggestedApproverEmail: e.target.value }))}
+                        className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                      <span className="block text-xs text-gray-400 mt-1">
+                        Changing the SuiteKey emails its owner that a request now sits against their key — it does not change this subscription's status.
+                      </span>
+                    </label>
+                  )}
+                </>
+              )}
               {editingSub.license?.extra_field_label && (
                 <label className="block text-sm text-gray-700">
                   {editingSub.license.extra_field_label}

@@ -57,14 +57,39 @@ export async function buildProvisioningNotifications(sub) {
   return notifications
 }
 
+// Classifies a suggested-approver email as a Google Group or an individual
+// via the classify-approver-email Edge Function (a Directory API groups.get
+// lookup) — request_subscription() can't make that call itself, so it's done
+// here, client-side, right before submitting. A group address typed into
+// "suggested approver" needs this tag (pending_approver_is_group) so
+// get_my_pending_sk_verifications()/confirm_sk_ownership() accept any
+// current member of that group instead of only an exact profile-email
+// match nobody in the group could ever satisfy — see 2026-09-01's
+// operations_gslt@sil.org / alan_yam@sil.org incident. Falls back to
+// treating it as an individual on any classification failure (network
+// error, Directory API hiccup) — that's today's existing behavior, not a
+// new failure mode, just missing the group fast-path.
+async function classifyApproverEmail(email) {
+  try {
+    const { data, error } = await supabase.functions.invoke('classify-approver-email', { body: { email } })
+    if (error) throw error
+    return data?.type === 'group'
+  } catch {
+    return false
+  }
+}
+
 // Returns { id, status, notify } — notify is null unless someone needs to be
 // emailed as a result, otherwise an array of { type, to, ... } entries (see
 // notifyForRequest() in src/pages/Catalog.jsx, which dispatches on type).
 export async function requestSubscription({ licenseId, suiteKey, suggestedApproverEmail, ministryId, fy, recipientEmail, extraFieldValue, acknowledged }) {
+  const suggestedApproverIsGroup = suggestedApproverEmail ? await classifyApproverEmail(suggestedApproverEmail) : false
+
   const { data: id, error } = await supabase.rpc('request_subscription', {
     p_license_id: licenseId,
     p_suite_key: suiteKey || null,
     p_suggested_approver_email: suggestedApproverEmail || null,
+    p_suggested_approver_is_group: suggestedApproverIsGroup,
     p_ministry_id: ministryId || null,
     p_fy: fy,
     p_recipient_email: recipientEmail || null,
@@ -182,6 +207,20 @@ export async function buildRenewalReminderNotification(sub) {
   return { to: sub.user_email, cc, licenseName: sub.license.name }
 }
 
+// Admin-only. Opens a renewal period for every eligible active annual
+// subscription of one license/fiscal-year — see start_renewal_period() in
+// supabase/schema_licenses.sql. Returns one row per subscription with
+// everything needed to build the reminder email; caller groups by owner and
+// sends (see Catalog.jsx's handleStartRenewalPeriod), same shape as
+// send-renewal-reminders/index.ts's weekly nag.
+export async function startRenewalPeriod(licenseId, fiscalYear) {
+  const { data, error } = await supabase.rpc('start_renewal_period', {
+    p_license_id: licenseId, p_fiscal_year: fiscalYear,
+  })
+  if (error) throw error
+  return data
+}
+
 export async function optInRenewal(subscriptionId) {
   const { error } = await supabase.rpc('opt_in_renewal', { p_subscription_id: subscriptionId })
   if (error) throw error
@@ -190,6 +229,35 @@ export async function optInRenewal(subscriptionId) {
 export async function optOutRenewal(subscriptionId) {
   const { error } = await supabase.rpc('opt_out_renewal', { p_subscription_id: subscriptionId })
   if (error) throw error
+}
+
+// Admin-only repoint of an already-existing subscription onto a different
+// SuiteKey (Admin -> All Subscriptions' details modal) — e.g. it was billed
+// against the wrong key, or the underlying budget moved to a new one. Unlike
+// requestSubscription(), never touches status/activated_at: this is "fix
+// which key pays for it," not a fresh request, so the subscription keeps
+// running exactly as it was. Still notifies the new key's owner (or, if
+// unclaimed, the suggestedApproverEmail the caller supplies) that a request
+// now sits against their key — see admin_update_subscription_suite_key() for
+// why that's a heads-up rather than a gate on this subscription. Returns
+// null if there's nobody to notify (shouldn't normally happen — the RPC
+// itself requires either a resolved owner or a suggested approver).
+export async function updateSubscriptionSuiteKey(subscriptionId, suiteKey, suggestedApproverEmail) {
+  const suggestedApproverIsGroup = suggestedApproverEmail ? await classifyApproverEmail(suggestedApproverEmail) : false
+  const { data, error } = await supabase.rpc('admin_update_subscription_suite_key', {
+    p_subscription_id: subscriptionId,
+    p_suite_key: suiteKey,
+    p_suggested_approver_email: suggestedApproverEmail || null,
+    p_suggested_approver_is_group: suggestedApproverIsGroup,
+  })
+  if (error) throw error
+  const row = data?.[0]
+  if (!row) return null
+  if (row.pending_verification) {
+    return { type: 'sk_verification', to: suggestedApproverEmail, suiteKey: row.suite_key }
+  }
+  const to = row.owner_group_email || row.owner_email
+  return to ? { type: 'approval_request', to, suiteKey: row.suite_key } : null
 }
 
 // Notes/product key/invoice number/price paid — the "purchase details" set
