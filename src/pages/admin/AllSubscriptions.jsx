@@ -6,6 +6,7 @@ import { getLinks } from '../../navLinks'
 import { useAuth } from '../../context/AuthContext'
 import { getAllSubscriptions } from '../../lib/admin'
 import { activateSubscription } from '../../lib/approvals'
+import { searchSuiteKeys } from '../../lib/suiteKeys'
 import {
   resendApprovalRequest, resendProvisioningRequest, cancelSubscription, buildRenewalReminderNotification,
   updateSubscriptionDetails, updateSubscriptionSuiteKey,
@@ -90,12 +91,30 @@ export default function AdminAllSubscriptions() {
   const [editForm, setEditForm] = useState({ notes: '', productKey: '', invoiceNumber: '', pricePaid: '', extraFieldValue: '', suiteKey: '', suggestedApproverEmail: '' })
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState(null)
+  const [suiteKeySelected, setSuiteKeySelected] = useState(true)
+  const [suiteKeySuggestions, setSuiteKeySuggestions] = useState([])
+  const [showSuiteKeySuggestions, setShowSuiteKeySuggestions] = useState(false)
 
   function reload() {
     getAllSubscriptions().then(setSubs).catch(e => setError(e.message))
   }
 
   useEffect(reload, [])
+
+  // Debounced typeahead for the Details modal's SuiteKey repoint field —
+  // mirrors Catalog's request form, since suite_keys is now refreshed daily
+  // from the Finance system and a hand-typed key that isn't in that list is
+  // a typo rather than a legitimate one.
+  useEffect(() => {
+    if (!editingSub || !editForm.suiteKey.trim()) { setSuiteKeySuggestions([]); return }
+    let cancelled = false
+    const timer = setTimeout(() => {
+      searchSuiteKeys(editForm.suiteKey)
+        .then(results => { if (!cancelled) setSuiteKeySuggestions(results) })
+        .catch(() => { if (!cancelled) setSuiteKeySuggestions([]) })
+    }, 250)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [editForm.suiteKey, editingSub])
 
   function handleSort(key) {
     if (key === sortKey) {
@@ -219,6 +238,8 @@ export default function AdminAllSubscriptions() {
       suiteKey: sub.suite_key || '',
       suggestedApproverEmail: '',
     })
+    setSuiteKeySelected(true)
+    setSuiteKeySuggestions([])
     setActivateMode(activate)
     setEditingSub(sub)
   }
@@ -229,16 +250,27 @@ export default function AdminAllSubscriptions() {
     setEditError(null)
   }
 
+  function selectSuiteKeySuggestion(s) {
+    setEditForm(f => ({ ...f, suiteKey: s.suite_key }))
+    setSuiteKeySelected(true)
+    setShowSuiteKeySuggestions(false)
+  }
+
   async function handleSaveDetails(e) {
     e.preventDefault()
+    const sub = editingSub
+    const newSuiteKey = editForm.suiteKey.trim()
+    const suiteKeyChanged = sub.suite_key && newSuiteKey && newSuiteKey.toLowerCase() !== sub.suite_key.toLowerCase()
+    if (suiteKeyChanged && !suiteKeySelected) {
+      setEditError('Please pick a SuiteKey from the dropdown list.')
+      return
+    }
     setEditSaving(true)
     setEditError(null)
-    const sub = editingSub
     try {
       await updateSubscriptionDetails(sub.id, editForm)
 
-      const newSuiteKey = editForm.suiteKey.trim()
-      if (sub.suite_key && newSuiteKey && newSuiteKey.toLowerCase() !== sub.suite_key.toLowerCase()) {
+      if (suiteKeyChanged) {
         const notify = await updateSubscriptionSuiteKey(sub.id, newSuiteKey, editForm.suggestedApproverEmail.trim())
         if (notify) {
           try {
@@ -564,18 +596,40 @@ export default function AdminAllSubscriptions() {
             <div className="space-y-3">
               {editingSub.suite_key && (
                 <>
-                  <label className="block text-sm text-gray-700">
-                    SuiteKey
+                  <div className="relative">
+                    <label className="block text-sm text-gray-700 mb-1">SuiteKey</label>
+                    <p className="text-xs text-gray-400 mb-1">These are the SuiteKeys available in the Finance System.</p>
                     <input
                       type="text"
                       value={editForm.suiteKey}
-                      onChange={e => setEditForm(f => ({ ...f, suiteKey: e.target.value }))}
-                      className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      onChange={e => { setEditForm(f => ({ ...f, suiteKey: e.target.value })); setSuiteKeySelected(false) }}
+                      onFocus={() => setShowSuiteKeySuggestions(true)}
+                      onBlur={() => setTimeout(() => setShowSuiteKeySuggestions(false), 150)}
+                      autoComplete="off"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                     />
-                  </label>
+                    {showSuiteKeySuggestions && suiteKeySuggestions.length > 0 && (
+                      <ul className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-md max-h-48 overflow-y-auto">
+                        {suiteKeySuggestions.map(s => (
+                          <li key={s.suite_key}>
+                            <button
+                              type="button"
+                              onMouseDown={() => selectSuiteKeySuggestion(s)}
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between gap-2"
+                            >
+                              <span className="font-medium text-brand">{s.suite_key}</span>
+                              <span className="text-xs text-gray-400 truncate">
+                                {s.has_owner ? (s.description || 'Has an owner') : 'No owner yet'}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                   {editForm.suiteKey.trim().toLowerCase() !== editingSub.suite_key.toLowerCase() && (
                     <label className="block text-sm text-gray-700">
-                      Suggested approver (only used if the new SuiteKey has no owner on file)
+                      Suggested approver (only used if this SuiteKey has no owner on file)
                       <input
                         type="email"
                         value={editForm.suggestedApproverEmail}
