@@ -8,7 +8,7 @@ import { getAllSubscriptions } from '../../lib/admin'
 import { activateSubscription } from '../../lib/approvals'
 import { searchSuiteKeys } from '../../lib/suiteKeys'
 import {
-  resendApprovalRequest, resendProvisioningRequest, cancelSubscription, buildRenewalReminderNotification,
+  resendApprovalRequest, resendSkVerification, resendProvisioningRequest, cancelSubscription, buildRenewalReminderNotification,
   updateSubscriptionDetails, updateSubscriptionSuiteKey,
 } from '../../lib/subscriptions'
 import { supabase } from '../../lib/supabase'
@@ -146,6 +146,30 @@ export default function AdminAllSubscriptions() {
       setResendState(s => ({ ...s, [sub.id]: 'sent' }))
     } catch (err) {
       console.error('resend approval request failed:', err.message)
+      setResendState(s => ({ ...s, [sub.id]: 'failed' }))
+    }
+  }
+
+  // Covers a pending SuiteKey verification whose original email never
+  // reached the suggested approver (bounced, wrong inbox, etc).
+  async function handleResendSkVerification(sub) {
+    setResendState(s => ({ ...s, [sub.id]: 'sending' }))
+    try {
+      const notify = resendSkVerification(sub)
+      if (!notify) throw new Error('No pending approver on file')
+      await sendEmail({
+        to: notify.to,
+        subject: skVerificationEmailSubject(notify.suiteKey),
+        html: skVerificationEmailHtml({
+          suiteKey: notify.suiteKey, licenseName: sub.license?.name,
+          requesterEmail: profile?.primary_email, recipientEmail: sub.user_email,
+        }),
+        template: 'sk_verification',
+        subscriptionId: sub.id,
+      })
+      setResendState(s => ({ ...s, [sub.id]: 'sent' }))
+    } catch (err) {
+      console.error('resend sk verification failed:', err.message)
       setResendState(s => ({ ...s, [sub.id]: 'failed' }))
     }
   }
@@ -481,7 +505,12 @@ export default function AdminAllSubscriptions() {
                 <tr key={sub.id} className="hover:bg-gray-50 transition-colors">
                   <td className="p-3">{sub.user_email}</td>
                   <td className="p-3 font-medium text-brand">{sub.license?.name}</td>
-                  <td className="p-3 text-gray-500">{billingLabel(sub)}</td>
+                  <td
+                    className={`p-3 ${sub.suite_key_row?.deprecated_at ? 'text-sil-red' : 'text-gray-500'}`}
+                    title={sub.suite_key_row?.deprecated_at ? 'This SuiteKey has been deprecated' : undefined}
+                  >
+                    {billingLabel(sub)}
+                  </td>
                   <td className="p-3 text-gray-500">{fyLabel(sub) || '—'}</td>
                   <td className={`p-3 ${STATUS_COLOR[sub.status]}`}>{STATUS_LABEL[sub.status]}</td>
                   <td className={`p-3 whitespace-nowrap ${renewal.color}`}>{renewal.text}</td>
@@ -521,6 +550,22 @@ export default function AdminAllSubscriptions() {
                             </button>
                           )}
                         </>
+                      )}
+                      {sub.status === 'pending_sk_verification' && sub.pending_approver_email && (
+                        resendState[sub.id] === 'sent' ? (
+                          <span className="text-xs text-sil-green">Sent</span>
+                        ) : resendState[sub.id] === 'failed' ? (
+                          <span className="text-xs text-sil-red">Failed</span>
+                        ) : (
+                          <button
+                            onClick={() => handleResendSkVerification(sub)}
+                            disabled={resendState[sub.id] === 'sending'}
+                            title="Resend SuiteKey verification email"
+                            className="p-1 rounded hover:bg-gray-100 text-brand disabled:opacity-50"
+                          >
+                            <RefreshCw size={16} className={resendState[sub.id] === 'sending' ? 'animate-spin' : ''} />
+                          </button>
+                        )
                       )}
                       {sub.status === 'pending' && sub.suite_key && (
                         resendState[sub.id] === 'sent' ? (

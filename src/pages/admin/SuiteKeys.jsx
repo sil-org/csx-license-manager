@@ -9,7 +9,7 @@ import {
   approvalRequestEmailSubject, approvalRequestEmailHtml,
 } from '../../lib/email'
 
-const BLANK = { suite_key: '', owner_email: '', owner_group_email: '', description: '' }
+const BLANK = { suite_key: '', owner_email: '', owner_group_email: '' }
 
 const STATUS_LABEL = { unassigned: 'Unassigned', pending: 'Pending verification', confirmed: 'Confirmed' }
 const STATUS_PILL = {
@@ -35,10 +35,10 @@ export default function AdminSuiteKeys() {
   // owner (individual or group) and, if it actually changed, notifies the
   // new owner by email. Group ownership always goes straight to 'confirmed'
   // (no verification step) — see admin_update_suite_key_owner() for why.
-  async function applyOwner({ suiteKey, ownerEmail, ownerGroupEmail, description, previous }) {
+  async function applyOwner({ suiteKey, ownerEmail, ownerGroupEmail, previous }) {
     const to = ownerGroupEmail || ownerEmail
     const isNewOwner = to && to !== previous
-    const advanced = await updateSuiteKeyOwner({ suiteKey, newOwnerEmail: ownerEmail, ownerGroupEmail, description })
+    const advanced = await updateSuiteKeyOwner({ suiteKey, newOwnerEmail: ownerEmail, ownerGroupEmail })
     if (isNewOwner) {
       try {
         await sendEmail({
@@ -62,7 +62,6 @@ export default function AdminSuiteKeys() {
         suiteKey: editing.suite_key,
         ownerEmail: editing.is_group ? '' : editing.owner_input,
         ownerGroupEmail: editing.is_group ? editing.owner_input : '',
-        description: editing.description,
         previous: editing._originalOwner,
       })
       setEditing(null)
@@ -186,7 +185,12 @@ export default function AdminSuiteKeys() {
               <tbody className="divide-y">
                 {visibleKeys.map(k => (
                   <tr key={k.suite_key}>
-                    <td className="p-3 font-medium text-brand whitespace-nowrap">{k.suite_key}</td>
+                    <td
+                      className={`p-3 font-medium whitespace-nowrap ${k.deprecated_at ? 'text-sil-red' : 'text-brand'}`}
+                      title={k.deprecated_at ? 'This SuiteKey has been deprecated' : undefined}
+                    >
+                      {k.suite_key}
+                    </td>
                     <td className="p-3">
                       <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_PILL[k.status]}`}>
                         {STATUS_LABEL[k.status]}
@@ -270,14 +274,15 @@ export default function AdminSuiteKeys() {
                 : "Takes effect immediately — no confirmation needed from them. Any requests still awaiting verification on this key move into their Action Center queue and they're notified by email."}
             </span>
 
-            <label className="block text-sm text-gray-700">
-              Description
-              <input
-                value={editing.description || ''}
-                onChange={e => setEditing({ ...editing, description: e.target.value })}
-                className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-              />
-            </label>
+            {!editing.isNew && (
+              <div className="block text-sm text-gray-700">
+                Description
+                <p className="mt-1 text-gray-500">{editing.description || '—'}</p>
+                <span className="block text-xs text-gray-400">
+                  Set from the finance system's daily sync, not editable here.
+                </span>
+              </div>
+            )}
 
             {error && <p className="text-sil-red text-sm">{error}</p>}
 

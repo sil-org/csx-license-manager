@@ -155,6 +155,16 @@ export async function resendApprovalRequest(sub) {
   }
 }
 
+// Re-sends the 'sk_verification' email to whoever's being asked to confirm
+// ownership of the subscription's SuiteKey. Unlike resendApprovalRequest()'s
+// resolved-owner lookup, the pending approver for this status is tracked
+// directly on the subscription (subscriptions.pending_approver_email), so
+// there's nothing to query — this is synchronous.
+export function resendSkVerification(sub) {
+  if (!sub.pending_approver_email) return null
+  return { type: 'sk_verification', to: sub.pending_approver_email, suiteKey: sub.suite_key }
+}
+
 // Re-sends the "someone needs to provision this" notification for an
 // already-'approved' subscription — same service-manager-or-admins routing
 // as the original request-time email (buildProvisioningNotifications

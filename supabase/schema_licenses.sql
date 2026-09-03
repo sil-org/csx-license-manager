@@ -1128,7 +1128,7 @@ $$;
 -- Either way, the affected subscriptions are returned so the caller can notify.
 
 create or replace function admin_update_suite_key_owner(
-  p_suite_key text, p_new_owner_email text, p_description text default null, p_owner_group_email text default null
+  p_suite_key text, p_new_owner_email text, p_owner_group_email text default null
 ) returns table(id uuid, user_email text, license_name text)
 language plpgsql security definer as $$
 declare
@@ -1155,16 +1155,18 @@ begin
     p_suite_key := v_canonical_key;
   end if;
 
-  insert into suite_keys (suite_key, owner_email, owner_group_email, description)
-  values (p_suite_key, v_owner, v_group, p_description)
+  insert into suite_keys (suite_key, owner_email, owner_group_email)
+  values (p_suite_key, v_owner, v_group)
   on conflict (suite_key) do update
     -- An explicit admin-assigned owner supersedes any still-outstanding
     -- key-level pending claim (see admin_update_subscription_suite_key()) —
     -- left untouched when unassigning (both v_owner/v_group null), since
-    -- that doesn't actually resolve anything.
+    -- that doesn't actually resolve anything. description is deliberately
+    -- untouched here — it's exclusively driven by the daily
+    -- suite_keys_current sync (reconcile_suite_keys_from_current()), not
+    -- admin-settable at all.
     set owner_email = v_owner,
         owner_group_email = v_group,
-        description = coalesce(p_description, suite_keys.description),
         pending_owner_email = case when v_owner is not null or v_group is not null then null else suite_keys.pending_owner_email end,
         pending_owner_is_group = case when v_owner is not null or v_group is not null then false else suite_keys.pending_owner_is_group end;
 
@@ -1265,7 +1267,7 @@ begin
 
   update suite_keys
   set pending_owner_email = v_suggested, pending_owner_is_group = coalesce(p_suggested_approver_is_group, false)
-  where suite_key = v_new_key;
+  where suite_keys.suite_key = v_new_key;
 
   insert into audit_log (action, subscription_id, suite_key, performed_by, notes, ip_address)
   values (
@@ -1536,7 +1538,12 @@ begin
   ), logged as (
     insert into renewals (subscription_id, fiscal_year, reminder_sent_at, decision)
     select o.id, p_fiscal_year, now(), 'none' from opened o
-    returning subscription_id
+    -- Table-qualified: this function's RETURNS TABLE declares an OUT
+    -- parameter also named subscription_id, which plpgsql exposes as an
+    -- ordinary variable in scope here — an unqualified `returning
+    -- subscription_id` is ambiguous between that variable and
+    -- renewals.subscription_id (raises "column reference is ambiguous").
+    returning renewals.subscription_id
   )
   select
     o.id, o.user_email, l.name,
