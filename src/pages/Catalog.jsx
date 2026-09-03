@@ -215,6 +215,7 @@ function RequestModal({ license, onClose }) {
   const [mode, setMode] = useState('suite_key') // 'suite_key' | 'ministry_id'
   const [suiteKey, setSuiteKey] = useState('')
   const [suiteKeyHasOwner, setSuiteKeyHasOwner] = useState(false)
+  const [suiteKeySelected, setSuiteKeySelected] = useState(false)
   const [suggestions, setSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestedApproverEmail, setSuggestedApproverEmail] = useState('')
@@ -245,12 +246,21 @@ function RequestModal({ license, onClose }) {
   function selectSuggestion(s) {
     setSuiteKey(s.suite_key)
     setSuiteKeyHasOwner(s.has_owner)
+    setSuiteKeySelected(true)
     if (s.has_owner) setSuggestedApproverEmail('')
     setShowSuggestions(false)
   }
 
   async function submit(e) {
     e.preventDefault()
+    // The suite_keys table is now refreshed daily from the Finance system,
+    // so a SuiteKey that doesn't already appear in the dropdown isn't a
+    // legitimate new key — it's a typo. Require an actual pick rather than
+    // letting request_subscription() silently insert whatever was typed.
+    if (mode === 'suite_key' && !license.gtis_sponsored && !license.department_gated && !suiteKeySelected) {
+      setError('Please pick a SuiteKey from the dropdown list.')
+      return
+    }
     setSubmitting(true)
     setError(null)
     try {
@@ -386,9 +396,10 @@ function RequestModal({ license, onClose }) {
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         SuiteKey <span className="text-sil-red">*</span>
                       </label>
+                      <p className="text-xs text-gray-400 mb-1">These are the SuiteKeys available in the Finance System.</p>
                       <input
                         value={suiteKey}
-                        onChange={e => { setSuiteKey(e.target.value); setSuiteKeyHasOwner(false) }}
+                        onChange={e => { setSuiteKey(e.target.value); setSuiteKeyHasOwner(false); setSuiteKeySelected(false) }}
                         onFocus={() => setShowSuggestions(true)}
                         onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                         required
@@ -418,7 +429,7 @@ function RequestModal({ license, onClose }) {
                     {!suiteKeyHasOwner && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Suggested approver email <span className="text-gray-400">(only needed if this is a new SuiteKey)</span>
+                          Suggested approver email <span className="text-gray-400">(only needed if this SuiteKey has no owner on file)</span>
                         </label>
                         <input type="email" value={suggestedApproverEmail} onChange={e => setSuggestedApproverEmail(e.target.value)}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
