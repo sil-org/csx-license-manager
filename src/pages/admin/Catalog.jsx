@@ -13,7 +13,7 @@ import {
   renewalPriceLabel, sendEmail,
 } from '../../lib/email'
 import { startRenewalPeriod } from '../../lib/subscriptions'
-import { nextRenewalLabel } from '../../lib/subscriptionDisplay'
+import { nextRenewalLabel, PRICE_UNIT_LABEL } from '../../lib/subscriptionDisplay'
 
 const BLANK = {
   id: null, name: '', vendor: '', category: '', price: '', notes: '',
@@ -45,8 +45,6 @@ const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ]
-
-const PRICE_UNITS = { annual: 'per year', monthly: 'per month', one_time: 'one-time' }
 
 function billingLabel(license) {
   if (license.billing_cycle === 'monthly') return 'Monthly'
@@ -138,7 +136,7 @@ export default function AdminCatalog() {
       await saveLicense({
         ...editing,
         price: editing.price === '' ? null : Number(editing.price),
-        price_unit: PRICE_UNITS[editing.billing_cycle],
+        price_unit: PRICE_UNIT_LABEL[editing.billing_cycle],
         renewal_month: renewalMonth,
         provisioning_config: configText || null,
         service_manager_emails: editing.service_manager_emails.split(',').map(e => e.trim()).filter(Boolean),

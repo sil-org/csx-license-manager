@@ -59,6 +59,15 @@ export function shouldShowRenewal(sub) {
   return sub.billing_cycle === 'annual' && sub.billing_type !== 'gtis'
 }
 
+// billing_cycle -> unit text for a price. Keyed off the *subscription's own*
+// billing_cycle snapshot (copied from the license at request time — see
+// request_license() in schema_licenses.sql), never the license's current
+// price_unit column: a license's price/billing_cycle can change after
+// signup (e.g. Claude moving from $40/month to $600/year), and pairing an
+// old price_at_signup with the license's now-different price_unit produces
+// nonsense like "$40 per year" for someone who actually signed up monthly.
+export const PRICE_UNIT_LABEL = { annual: 'per year', monthly: 'per month', one_time: 'one-time' }
+
 export function billingLabel(sub) {
   if (sub.billing_type === 'gtis') return 'GTIS'
   if (sub.billing_type === 'ministry') return `Ministry ID ${sub.ministry_id}`

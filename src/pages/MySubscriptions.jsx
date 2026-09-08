@@ -5,7 +5,7 @@ import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { getMySubscriptions, cancelSubscription, optInRenewal, optOutRenewal } from '../lib/subscriptions'
-import { fyLabel, STATUS_LABEL, STATUS_BADGE, INACTIVE_STATUSES } from '../lib/subscriptionDisplay'
+import { fyLabel, STATUS_LABEL, STATUS_BADGE, INACTIVE_STATUSES, PRICE_UNIT_LABEL } from '../lib/subscriptionDisplay'
 
 // "SuiteKey: X" / "Ministry ID: X" / "GTIS-funded" — same underlying data as
 // subscriptionDisplay.js's billingLabel(), phrased as prose for this page's
@@ -97,7 +97,10 @@ export default function MySubscriptions() {
                 <p className="font-semibold text-gray-900">{sub.license?.name}</p>
                 <p className="text-sm text-gray-500">
                   {billingDescription(sub)}{fyLabel(sub) && ` • ${fyLabel(sub)}`} • {sub.activated_at ? `Started ${sub.activated_at}` : `Requested ${sub.start_date}`}
-                  {sub.price_at_signup != null && ` • ${formatPrice(sub.price_at_signup)}${sub.license?.price_unit ? ` ${sub.license.price_unit}` : ''}`}
+                  {/* PRICE_UNIT_LABEL[sub.billing_cycle], not sub.license?.price_unit — the license's
+                      current price/unit can drift after signup, but price_at_signup is a snapshot
+                      of what this subscription was actually charged under its own billing_cycle. */}
+                  {sub.price_at_signup != null && ` • ${formatPrice(sub.price_at_signup)}${PRICE_UNIT_LABEL[sub.billing_cycle] ? ` ${PRICE_UNIT_LABEL[sub.billing_cycle]}` : ''}`}
                 </p>
                 {sub.status === 'active' && sub.open_renewal_fy != null && sub.billing_cycle === 'annual' && (
                   <div className="flex gap-3 mt-1.5">
