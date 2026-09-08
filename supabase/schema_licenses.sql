@@ -510,6 +510,16 @@ create policy "subscriptions: read own or authority" on subscriptions for select
     -- 0 rows under RLS and .single() throws PGRST116, even though the
     -- subscription itself was created successfully.
     or requested_by = current_profile_id()
+    -- Lets a department approver (pending_approver_email — see
+    -- department_gated licenses, pending/40) read back a row they just
+    -- acted on. approve_subscription()/decline_subscription() already
+    -- authorize the write via this same field; without the matching read
+    -- clause, the client-side re-select in approveSubscription()/
+    -- declineSubscription() (src/lib/approvals.js) that builds the
+    -- notification email hits 0 rows under RLS and .single() throws
+    -- PGRST116 "cannot coerce the result to a single JSON object" — see
+    -- pending/69_department_approver_readback.sql.
+    or pending_approver_email = current_profile_email()
   );
 -- All writes go through the security-definer RPCs below, which enforce
 -- status-transition and authority checks themselves; no direct write
@@ -1512,10 +1522,16 @@ $$;
 -- always sends email from the client via lib/email.js's sendEmail(), never
 -- from a write RPC) — see AllSubscriptions.jsx's handleSendRenewalReminder
 -- for the single-subscription equivalent this generalizes.
+-- renewal_price is the license's *current* full annual price (l.price),
+-- not the subscription's price_at_signup — a renewal always bills at full
+-- price, and that snapshot can be pro-rated or hand-corrected to a one-time
+-- invoice amount. Column deliberately renamed from the original
+-- price_at_signup so it can't be confused with the signup snapshot again —
+-- see pending/68_start_renewal_period_full_price.sql.
 create or replace function start_renewal_period(p_license_id uuid, p_fiscal_year int)
 returns table(
   subscription_id uuid, user_email text, license_name text, billing_label text,
-  price_at_signup numeric, renewal_month int, reminder_message text
+  renewal_price numeric, renewal_month int, reminder_message text
 ) language plpgsql security definer as $$
 begin
   if not is_admin() then raise exception 'admin only'; end if;
@@ -1534,7 +1550,7 @@ begin
         select 1 from renewals r where r.subscription_id = s.id and r.fiscal_year = p_fiscal_year
       )
     returning s.id, s.user_email, s.suite_key, s.ministry_id, s.billing_type,
-      s.price_at_signup, s.renewal_month, s.license_id
+      s.renewal_month, s.license_id
   ), logged as (
     insert into renewals (subscription_id, fiscal_year, reminder_sent_at, decision)
     select o.id, p_fiscal_year, now(), 'none' from opened o
@@ -1552,7 +1568,7 @@ begin
       when o.billing_type = 'ministry' then 'Ministry ID ' || o.ministry_id
       else o.suite_key
     end,
-    o.price_at_signup, o.renewal_month, l.reminder_message
+    l.price, o.renewal_month, l.reminder_message
   from opened o
   join licenses l on l.id = o.license_id;
 end;
