@@ -54,7 +54,9 @@ Deno.serve(async (req) => {
 
     const { data: eligible, error: subsError } = await supabase
       .from('subscriptions')
-      .select('id, user_email, suite_key, ministry_id, billing_type, renewal_month, price_at_signup, license:licenses(name, reminder_message)')
+      // licenses.price (the current full annual price), not the
+      // subscription's price_at_signup — see priceLabel below.
+      .select('id, user_email, suite_key, ministry_id, billing_type, renewal_month, license:licenses(name, price, reminder_message)')
       .eq('status', 'active')
       .eq('billing_cycle', 'annual')
       .eq('renewal_reminder', true)
@@ -83,7 +85,13 @@ Deno.serve(async (req) => {
 
       const renewalDate = nextRenewalDate(sub.renewal_month, now)
       const renewalLabel = `${MONTHS[renewalDate.getMonth()]} 1, ${renewalDate.getFullYear()}`
-      const priceLabel = sub.price_at_signup != null ? `$${Number(sub.price_at_signup).toFixed(2)}/yr` : null
+      // Quotes the license's *current* full annual price, never the
+      // subscription's price_at_signup: that snapshot is what was charged for
+      // the initial purchase (possibly pro-rated by calc_prorated_cost(), or
+      // hand-edited to the real invoice amount via
+      // update_subscription_details()), while a renewal is always billed at
+      // full price. Mirrors renewalPriceLabel() in src/lib/email.js.
+      const priceLabel = sub.license?.price != null ? `$${Number(sub.license.price).toFixed(2)}/yr` : null
       const suiteKeyLabel = sub.billing_type === 'gtis' ? 'GTIS' : sub.billing_type === 'ministry' ? `Ministry ID ${sub.ministry_id}` : sub.suite_key
 
       byOwner.get(owner)!.push(renewalCardHtml({
@@ -150,7 +158,7 @@ function renewalCardHtml({ licenseName, suiteKey, priceLabel, renewalLabel, remi
       <div style="font-weight:600;font-size:15px;color:#202124">${licenseName}</div>
       <p style="margin:8px 0;font-size:14px">${intro}</p>
       <div style="color:#666666;font-size:13px;margin:4px 0 12px">
-        SuiteKey: ${suiteKey}${renewalLabel ? ` • Renews ${renewalLabel}` : ''}${priceLabel ? ` • ${priceLabel}` : ''}
+        SuiteKey: ${suiteKey}${renewalLabel ? ` • Renews ${renewalLabel}` : ''}${priceLabel ? ` • Renewal cost: <strong>${priceLabel}</strong>` : ''}
       </div>
       <div style="margin:20px 0">
         <a href="${APP_ORIGIN}/subscriptions" style="background:#1e8e3e;color:#ffffff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block;margin:4px 10px 4px 0;font-size:14px">✓ Yes, Renew</a>
@@ -165,6 +173,11 @@ function renewalDigestHtml(cardsHtml: string) {
   <h2 style="color: #005CB9; margin: 0 0 16px; font-size: 20px;">Software License Renewal Reminder</h2>
   <p>The following annual licenses are coming up for renewal. Please indicate whether you'd like to continue each subscription:</p>
   ${cardsHtml}
+  <p style="color:#666666;font-size:13px;margin-top:24px">
+    <strong>Note:</strong> renewal costs shown are the full annual price of each license. Any
+    pro-rated or one-time amount from your initial purchase applied to that first term only —
+    renewals are charged at the full price above.
+  </p>
   <p style="color:#666666;font-size:13px;margin-top:24px">
     You'll receive weekly reminders until you respond for each license. Once you reply, no further
     reminders will be sent for that subscription. Questions? Contact the License Manager team.

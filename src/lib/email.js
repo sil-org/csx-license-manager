@@ -209,6 +209,18 @@ export function renewalReminderEmailSubject() {
   return 'Action Required: Software License Renewal'
 }
 
+// Renewal price label for a renewal-reminder card. Deliberately built from
+// the license's *current* price (licenses.price), never from the
+// subscription's price_at_signup: that snapshot is what was actually charged
+// for the INITIAL purchase — possibly pro-rated (calc_prorated_cost()) or
+// hand-edited to the real invoice amount via update_subscription_details() —
+// and a renewal is always billed at the license's full current annual price.
+// Renewal reminders only ever cover annual subscriptions (every sender
+// filters billing_cycle = 'annual'), hence the fixed /yr suffix.
+export function renewalPriceLabel(licensePrice) {
+  return licensePrice != null ? `$${Number(licensePrice).toFixed(2)}/yr` : null
+}
+
 // One license's card within a renewal-reminder email — mirrors Emails.gs's
 // sendPerLicenseReminders(), which batches one card per upcoming-renewal
 // license into a single email per user. Used both by Admin → Catalog's
@@ -218,6 +230,8 @@ export function renewalReminderEmailSubject() {
 // README's "not ported yet" list). `reminderMessage` is the per-license
 // override (licenses.reminder_message); falls back to a generic default when
 // unset, same pattern as activationEmailHtml's onboardingMessage.
+// `priceLabel` comes from renewalPriceLabel() above — the full renewal cost,
+// which is what the owner is agreeing to pay by renewing.
 export function renewalReminderCardHtml({ licenseName, suiteKey, priceLabel, renewalLabel, reminderMessage }) {
   const intro = reminderMessage || `Your <strong>${licenseName}</strong> subscription is coming up for renewal.`
   return `
@@ -225,7 +239,7 @@ export function renewalReminderCardHtml({ licenseName, suiteKey, priceLabel, ren
       <div style="font-weight:600;font-size:15px;color:#202124">${licenseName}</div>
       <p style="margin:8px 0;font-size:14px">${intro}</p>
       <div style="color:#666666;font-size:13px;margin:4px 0 12px">
-        SuiteKey: ${suiteKey}${renewalLabel ? ` • Renews ${renewalLabel}` : ''}${priceLabel ? ` • ${priceLabel}` : ''}
+        SuiteKey: ${suiteKey}${renewalLabel ? ` • Renews ${renewalLabel}` : ''}${priceLabel ? ` • Renewal cost: <strong>${priceLabel}</strong>` : ''}
       </div>
       ${ctaButtons([
         { label: '✓ Yes, Renew', href: appUrl('/subscriptions'), color: 'green' },
@@ -242,6 +256,11 @@ export function renewalReminderEmailHtml({ cardsHtml }) {
   return wrapEmail('Software License Renewal Reminder', `
     <p>The following annual licenses are coming up for renewal. Please indicate whether you'd like to continue each subscription:</p>
     ${cardsHtml}
+    <p style="font-size:13px;color:#666666">
+      <strong>Note:</strong> renewal costs shown are the full annual price of each license. Any
+      pro-rated or one-time amount from your initial purchase applied to that first term only —
+      renewals are charged at the full price above.
+    </p>
     <p style="font-size:13px;color:#666666">
       You'll receive weekly reminders until you respond for each license. Once you reply, no further
       reminders will be sent for that subscription. Questions? Contact the License Manager team.

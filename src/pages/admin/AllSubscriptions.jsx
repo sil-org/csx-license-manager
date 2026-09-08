@@ -15,7 +15,7 @@ import { supabase } from '../../lib/supabase'
 import {
   sendEmail, activationEmailSubject, activationEmailHtml, approvalRequestEmailSubject, approvalRequestEmailHtml,
   provisioningRequiredEmailSubject, provisioningRequiredEmailHtml, cancelledEmailSubject, cancelledEmailHtml,
-  renewalReminderEmailSubject, renewalReminderEmailHtml, renewalReminderCardHtml,
+  renewalReminderEmailSubject, renewalReminderEmailHtml, renewalReminderCardHtml, renewalPriceLabel,
   skVerificationEmailSubject, skVerificationEmailHtml,
 } from '../../lib/email'
 import { billingLabel, fyLabel, nextRenewalLabel, STATUS_LABEL, STATUS_COLOR, RENEWAL_LABEL, RENEWAL_COLOR, shouldShowRenewal } from '../../lib/subscriptionDisplay'
@@ -373,7 +373,9 @@ export default function AdminAllSubscriptions() {
       const card = renewalReminderCardHtml({
         licenseName: notify.licenseName,
         suiteKey: billingLabel(sub),
-        priceLabel: sub.price_at_signup != null ? `$${Number(sub.price_at_signup).toFixed(2)}/yr` : null,
+        // The license's current price, not sub.price_at_signup — renewals are
+        // billed at full price (see renewalPriceLabel in lib/email.js).
+        priceLabel: renewalPriceLabel(sub.license?.price),
         renewalLabel: nextRenewalLabel(sub.renewal_month),
         reminderMessage: sub.license?.reminder_message,
       })

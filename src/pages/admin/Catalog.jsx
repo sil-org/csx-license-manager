@@ -9,7 +9,8 @@ import {
   sizeAwareSort,
 } from '../../lib/licenses'
 import {
-  activationEmailHtml, renewalReminderCardHtml, renewalReminderEmailHtml, renewalReminderEmailSubject, sendEmail,
+  activationEmailHtml, renewalReminderCardHtml, renewalReminderEmailHtml, renewalReminderEmailSubject,
+  renewalPriceLabel, sendEmail,
 } from '../../lib/email'
 import { startRenewalPeriod } from '../../lib/subscriptions'
 import { nextRenewalLabel } from '../../lib/subscriptionDisplay'
@@ -204,7 +205,11 @@ export default function AdminCatalog() {
         byOwner.get(owner).push(renewalReminderCardHtml({
           licenseName: row.license_name,
           suiteKey: row.billing_label,
-          priceLabel: row.price_at_signup != null ? `$${Number(row.price_at_signup).toFixed(2)}/yr` : null,
+          // row.renewal_price is the license's current full annual price
+          // (start_renewal_period() joins licenses for it) — a renewal is
+          // billed at that, never at the original signup snapshot. See
+          // renewalPriceLabel in lib/email.js.
+          priceLabel: renewalPriceLabel(row.renewal_price),
           renewalLabel: nextRenewalLabel(row.renewal_month),
           reminderMessage: editing.reminder_message,
         }))
@@ -247,7 +252,7 @@ export default function AdminCatalog() {
     const card = renewalReminderCardHtml({
       licenseName: editing.name || 'Sample License',
       suiteKey: PREVIEW_SUB.suite_key,
-      priceLabel: editing.price ? `$${Number(editing.price).toFixed(2)}/${editing.billing_cycle === 'monthly' ? 'mo' : 'yr'}` : null,
+      priceLabel: renewalPriceLabel(editing.price),
       renewalLabel: 'October 1, 2026',
       reminderMessage: editing.reminder_message || null,
     })
