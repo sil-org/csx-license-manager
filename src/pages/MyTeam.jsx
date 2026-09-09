@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronUp, ChevronDown, ChevronsUpDown, XCircle } from 'lucide-react'
 import AppLayout from '../components/AppLayout'
+import TeamSpendCard from '../components/TeamSpendCard'
 import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
 import { getTeamSubscriptions, getLastTeamImport } from '../lib/team'
@@ -121,6 +122,8 @@ export default function MyTeam() {
             ? `Team last imported on ${new Date(lastImport.created_at).toLocaleDateString()}`
             : 'Team hierarchy has never been imported'}
         </p>
+
+        <TeamSpendCard />
 
         {error && <p className="text-sil-red mb-4">{error}</p>}
         {!subs && !error && <p className="text-gray-400">Loading…</p>}

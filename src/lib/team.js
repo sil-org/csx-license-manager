@@ -31,6 +31,24 @@ export async function getTeamSubscriptions(currentUserEmail) {
   return data
 }
 
+// Per-billing-type spend totals (suite_key / ministry / gtis) for the
+// caller's own + reports' subscriptions in one fiscal year — see
+// get_team_spend() in supabase/pending/70_team_spend.sql for how `actual`
+// (exact, from price_at_signup + decided renewals) and `projected` (not-yet-
+// decided renewals estimated at current price + 10%) are computed. Returns
+// one row per category, both always present even when $0, so callers don't
+// need to guess which categories exist.
+export async function getTeamSpend(fiscalYear) {
+  const { data, error } = await supabase.rpc('get_team_spend', { p_fiscal_year: fiscalYear })
+  if (error) throw error
+  const byType = Object.fromEntries((data || []).map(r => [r.billing_type, r]))
+  return {
+    suiteKey: byType.suite_key || { actual: 0, projected: 0 },
+    ministry: byType.ministry || { actual: 0, projected: 0 },
+    gtis: byType.gtis || { actual: 0, projected: 0 },
+  }
+}
+
 // When the org-hierarchy CSV (profiles.manager_email) was last imported —
 // see supabase/pending/32_team_hierarchy_import.sql. Not admin-gated: the
 // timestamp/count aren't sensitive, and My Team itself isn't role-gated either.
