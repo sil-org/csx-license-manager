@@ -105,6 +105,14 @@ export default function TeamSpendCard() {
           </div>
         </div>
       )}
+
+      {projected && (
+        <p className="text-xs text-gray-400 border border-dashed border-gray-200 rounded-lg px-3.5 py-2.5 mt-4">
+          <span className="font-semibold text-gray-500">Projected</span> — some subscriptions here haven't
+          renewed for FY{fy} yet. Their share of this total is estimated at current price + 10%,
+          pro-rated to the fiscal year, alongside the exact pro-rated tail of renewals already decided.
+        </p>
+      )}
     </div>
   )
 }
