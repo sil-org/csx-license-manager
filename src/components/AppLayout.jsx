@@ -1,12 +1,18 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { Menu, X, LogOut, ChevronDown } from 'lucide-react'
+import { Menu, X, LogOut, ChevronDown, LayoutGrid } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { signOut } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import { getActionCenterCount } from '../lib/approvals'
 import FeedbackWidget from './FeedbackWidget'
 import InstallPrompt from './InstallPrompt'
+
+// Other SIL software, surfaced from the app-switcher dropdown under the
+// sidebar header. Add an entry here to list another app.
+const OTHER_APPS = [
+  { name: 'Cover', url: 'https://cover.sil.org', logo: '/cover-logo.svg' },
+]
 
 // Left sidebar shell. `links` is:
 //   [{ to?, label, icon: LucideIcon, adminOnly?, badge?, children?: [{to,label}] }]
@@ -21,6 +27,7 @@ export default function AppLayout({ appName, links, children }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [openSections, setOpenSections] = useState(new Set())
   const [actionCount, setActionCount] = useState(0)
+  const [appMenuOpen, setAppMenuOpen] = useState(false)
 
   // Refetches on every AppLayout mount, i.e. every page navigation — no
   // realtime subscription, but good enough to stay roughly fresh without
@@ -76,12 +83,44 @@ export default function AppLayout({ appName, links, children }) {
           fixed md:sticky top-0 h-screen z-30 transition-transform duration-200
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}
       >
-        <div className="px-4 py-4 flex items-center gap-2 border-b border-gray-100">
-          <img src="/sil-logo.png" alt="" className="h-6" />
-          <div className="leading-tight">
-            <span className="font-display font-bold text-brand text-sm block">{appName}</span>
-            <span className="text-[10px] font-bold text-sil-red uppercase tracking-wide">Beta</span>
-          </div>
+        <div className="relative border-b border-gray-100">
+          <button
+            onClick={() => setAppMenuOpen(o => !o)}
+            className="w-full px-4 py-4 flex items-center gap-2 text-left hover:bg-gray-50"
+            aria-haspopup="true"
+            aria-expanded={appMenuOpen}
+          >
+            <img src="/sil-logo.png" alt="" className="h-6" />
+            <div className="leading-tight flex-1 min-w-0">
+              <span className="font-display font-bold text-brand text-sm block truncate">{appName}</span>
+              <span className="text-[10px] font-bold text-sil-red uppercase tracking-wide">Beta</span>
+            </div>
+            <ChevronDown size={14} className={`flex-shrink-0 text-gray-400 transition-transform ${appMenuOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {appMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setAppMenuOpen(false)} />
+              <div className="absolute left-2 right-2 mt-0.5 z-40 bg-white border border-gray-200 rounded-lg shadow-md overflow-hidden">
+                <p className="px-3 pt-2 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Other SIL Software</p>
+                {OTHER_APPS.map(app => (
+                  <a
+                    key={app.name}
+                    href={app.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setAppMenuOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    {app.logo
+                      ? <img src={app.logo} alt="" className="h-4 w-4 object-contain flex-shrink-0" />
+                      : <LayoutGrid size={14} className="text-gray-400 flex-shrink-0" />}
+                    <span className="truncate">{app.name}</span>
+                  </a>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         <div className="flex-1 py-2 flex flex-col overflow-y-auto">
