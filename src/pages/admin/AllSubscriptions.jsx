@@ -139,6 +139,7 @@ export default function AdminAllSubscriptions() {
         html: approvalRequestEmailHtml({
           suiteKey: notify.suiteKey, licenseName: notify.licenseName,
           userEmail: notify.requesterEmail, recipientEmail: notify.recipientEmail, moreInfoUrl: notify.moreInfoUrl,
+          price: notify.price, priceUnit: notify.priceUnit,
         }),
         template: 'approval_request',
         subscriptionId: sub.id,
@@ -163,6 +164,7 @@ export default function AdminAllSubscriptions() {
         html: skVerificationEmailHtml({
           suiteKey: notify.suiteKey, licenseName: sub.license?.name,
           requesterEmail: profile?.primary_email, recipientEmail: sub.user_email,
+          price: sub.license?.price, priceUnit: sub.license?.price_unit,
         }),
         template: 'sk_verification',
         subscriptionId: sub.id,
@@ -305,6 +307,7 @@ export default function AdminAllSubscriptions() {
                 html: skVerificationEmailHtml({
                   suiteKey: notify.suiteKey, licenseName: sub.license?.name,
                   requesterEmail: profile?.primary_email, recipientEmail: sub.user_email,
+                  price: sub.license?.price, priceUnit: sub.license?.price_unit,
                 }),
                 template: 'sk_verification',
                 subscriptionId: sub.id,
@@ -316,6 +319,7 @@ export default function AdminAllSubscriptions() {
                 html: approvalRequestEmailHtml({
                   suiteKey: notify.suiteKey, licenseName: sub.license?.name,
                   userEmail: sub.user_email, moreInfoUrl: sub.license?.more_info_url,
+                  price: sub.license?.price, priceUnit: sub.license?.price_unit,
                 }),
                 template: 'approval_request',
                 subscriptionId: sub.id,

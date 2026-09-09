@@ -50,7 +50,7 @@ export default function ActionCenter() {
           await sendEmail({
             to: profile?.primary_email,
             subject: approvalRequestEmailSubject(suiteKey),
-            html: approvalRequestEmailHtml({ suiteKey, licenseName: sub.license_name, userEmail: sub.user_email, moreInfoUrl: sub.more_info_url }),
+            html: approvalRequestEmailHtml({ suiteKey, licenseName: sub.license_name, userEmail: sub.user_email, moreInfoUrl: sub.more_info_url, price: sub.price, priceUnit: sub.price_unit }),
             template: 'approval_request',
             subscriptionId: sub.id,
           })

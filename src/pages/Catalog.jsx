@@ -151,14 +151,14 @@ export default function Catalog() {
 // _notifySubscriberApprovedPending/_notifyAdminsOfPendingActivation calls. Never lets one
 // failed send block the request or the others — same restraint GAS used (try/catch +
 // console.error around every MailApp.sendEmail call).
-async function notifyForRequest({ notify, id, suiteKey, licenseName, requesterEmail, recipientEmail, moreInfoUrl }) {
+async function notifyForRequest({ notify, id, suiteKey, licenseName, requesterEmail, recipientEmail, moreInfoUrl, price, priceUnit }) {
   for (const n of notify || []) {
     try {
       if (n.type === 'sk_verification') {
         await sendEmail({
           to: n.to,
           subject: skVerificationEmailSubject(suiteKey),
-          html: skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail, recipientEmail }),
+          html: skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail, recipientEmail, price, priceUnit }),
           template: 'sk_verification',
           subscriptionId: id,
         })
@@ -167,7 +167,7 @@ async function notifyForRequest({ notify, id, suiteKey, licenseName, requesterEm
           to: n.to,
           bcc: n.bcc,
           subject: approvalRequestEmailSubject(suiteKey),
-          html: approvalRequestEmailHtml({ suiteKey, licenseName, userEmail: requesterEmail, recipientEmail, moreInfoUrl }),
+          html: approvalRequestEmailHtml({ suiteKey, licenseName, userEmail: requesterEmail, recipientEmail, moreInfoUrl, price, priceUnit }),
           template: 'approval_request',
           subscriptionId: id,
         })
@@ -282,6 +282,8 @@ function RequestModal({ license, onClose }) {
         requesterEmail: myEmail,
         recipientEmail: recipientEmail.trim(),
         moreInfoUrl: license.more_info_url,
+        price: license.price,
+        priceUnit: license.price_unit,
       })
       setDone(true)
     } catch (err) {

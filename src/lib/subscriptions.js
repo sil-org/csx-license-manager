@@ -152,6 +152,7 @@ export async function resendApprovalRequest(sub) {
     type: 'approval_request', to, suiteKey: sub.suite_key,
     licenseName: sub.license?.name, requesterEmail, recipientEmail: sub.user_email,
     moreInfoUrl: sub.license?.more_info_url,
+    price: sub.license?.price, priceUnit: sub.license?.price_unit,
   }
 }
 

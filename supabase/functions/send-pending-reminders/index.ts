@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
 async function sendVerificationReminders(supabase: any, serviceRoleKey: string, limit?: number) {
   const { data: subs, error } = await supabase
     .from('subscriptions')
-    .select('id, suite_key, pending_approver_email, license:licenses(name)')
+    .select('id, suite_key, pending_approver_email, license:licenses(name, price, price_unit)')
     .eq('status', 'pending_sk_verification')
     .not('pending_approver_email', 'is', null)
   if (error) throw error
@@ -76,11 +76,15 @@ async function sendVerificationReminders(supabase: any, serviceRoleKey: string, 
   // Group by approver, then by SuiteKey — one row (and one action link) per
   // SuiteKey even if multiple people requested against the same unverified
   // key, mirroring GAS's bySK grouping.
-  const byApprover = new Map<string, Map<string, { licenseName: string }>>()
+  const byApprover = new Map<string, Map<string, { licenseName: string; price: number | string | null; priceUnit: string | null }>>()
   for (const sub of subs || []) {
     const approver = sub.pending_approver_email!.toLowerCase()
     if (!byApprover.has(approver)) byApprover.set(approver, new Map())
-    byApprover.get(approver)!.set(sub.suite_key, { licenseName: sub.license?.name || 'License' })
+    byApprover.get(approver)!.set(sub.suite_key, {
+      licenseName: sub.license?.name || 'License',
+      price: sub.license?.price ?? null,
+      priceUnit: sub.license?.price_unit ?? null,
+    })
   }
 
   const approverEntries = typeof limit === 'number' ? [...byApprover].slice(0, limit) : [...byApprover]
@@ -89,10 +93,11 @@ async function sendVerificationReminders(supabase: any, serviceRoleKey: string, 
   const errors: { email: string; error: string }[] = []
   for (const [approver, bySK] of approverEntries) {
     try {
-      const rowsHtml = [...bySK.entries()].map(([suiteKey, { licenseName }]) => `
+      const rowsHtml = [...bySK.entries()].map(([suiteKey, { licenseName, price, priceUnit }]) => `
         <tr>
           <td style="padding:10px 12px;border-bottom:1px solid #e0e0e0"><strong>${suiteKey}</strong></td>
           <td style="padding:10px 12px;border-bottom:1px solid #e0e0e0">${licenseName}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid #e0e0e0">${priceLabel(price, priceUnit)}</td>
         </tr>`).join('')
       const count = bySK.size
 
@@ -107,7 +112,7 @@ async function sendVerificationReminders(supabase: any, serviceRoleKey: string, 
           html: pendingDigestHtml({
             heading: 'License Manager — Action Required',
             intro: `Do you manage the following SuiteKey${count === 1 ? '' : 's'}? Please confirm or deny so the associated license request${count === 1 ? ' can' : 's can'} proceed.`,
-            columns: ['SuiteKey', 'License'],
+            columns: ['SuiteKey', 'License', 'Cost'],
             rowsHtml,
           }),
           template: 'sk_verification_reminder',
@@ -127,7 +132,7 @@ async function sendVerificationReminders(supabase: any, serviceRoleKey: string, 
 async function sendApprovalReminders(supabase: any, serviceRoleKey: string, limit?: number) {
   const { data: subs, error } = await supabase
     .from('subscriptions')
-    .select('id, user_email, suite_key, license:licenses(name)')
+    .select('id, user_email, suite_key, license:licenses(name, price, price_unit)')
     .eq('status', 'pending')
     .not('suite_key', 'is', null)
   if (error) throw error
@@ -176,7 +181,7 @@ async function sendApprovalReminders(supabase: any, serviceRoleKey: string, limi
   // one email per row — self-service was the only path back then. The new
   // app supports requesting on behalf of someone else, so an owner approving
   // a request-for-others case genuinely needs to see both.
-  const byOwner = new Map<string, { suiteKey: string; licenseName: string; userEmail: string; requesterEmail: string }[]>()
+  const byOwner = new Map<string, { suiteKey: string; licenseName: string; userEmail: string; requesterEmail: string; price: number | string | null; priceUnit: string | null }[]>()
   for (const sub of subs || []) {
     const owner = ownerBySK.get(sub.suite_key)
     if (!owner) continue
@@ -186,6 +191,8 @@ async function sendApprovalReminders(supabase: any, serviceRoleKey: string, limi
       licenseName: sub.license?.name || 'License',
       userEmail: sub.user_email,
       requesterEmail: requesterBySubId.get(sub.id) || sub.user_email,
+      price: sub.license?.price ?? null,
+      priceUnit: sub.license?.price_unit ?? null,
     })
   }
 
@@ -199,6 +206,7 @@ async function sendApprovalReminders(supabase: any, serviceRoleKey: string, limi
         <tr>
           <td style="padding:10px 12px;border-bottom:1px solid #e0e0e0">${r.suiteKey}</td>
           <td style="padding:10px 12px;border-bottom:1px solid #e0e0e0">${r.licenseName}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid #e0e0e0">${priceLabel(r.price, r.priceUnit)}</td>
           <td style="padding:10px 12px;border-bottom:1px solid #e0e0e0">${r.requesterEmail}</td>
           <td style="padding:10px 12px;border-bottom:1px solid #e0e0e0">${r.userEmail.toLowerCase() === r.requesterEmail.toLowerCase() ? '(self)' : r.userEmail}</td>
         </tr>`).join('')
@@ -212,7 +220,7 @@ async function sendApprovalReminders(supabase: any, serviceRoleKey: string, limi
           html: pendingDigestHtml({
             heading: 'License Manager — Approval Required',
             intro: `The following license request${count === 1 ? ' is' : 's are'} waiting for your approval.`,
-            columns: ['SuiteKey', 'License', 'Requested by', 'For'],
+            columns: ['SuiteKey', 'License', 'Cost', 'Requested by', 'For'],
             rowsHtml,
           }),
           template: 'approval_reminder',
@@ -227,6 +235,17 @@ async function sendApprovalReminders(supabase: any, serviceRoleKey: string, limi
     }
   }
   return { emailsSent, ownersNotified: byOwner.size, errors }
+}
+
+// Deliberate duplicate of priceLabel()/formatPrice() in src/lib/email.js —
+// see this file's header comment on why it can't import that module. The
+// Number() is load-bearing: Postgres numeric columns come through
+// supabase-js as strings, which have no .toFixed().
+function priceLabel(price: number | string | null, priceUnit: string | null): string {
+  if (price == null) return '—'
+  const n = Number(price)
+  const formatted = n % 1 === 0 ? `$${n}` : `$${n.toFixed(2)}`
+  return priceUnit ? `${formatted} ${priceUnit}` : formatted
 }
 
 function pendingDigestHtml({ heading, intro, columns, rowsHtml }: { heading: string; intro: string; columns: string[]; rowsHtml: string }) {

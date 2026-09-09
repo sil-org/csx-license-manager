@@ -83,11 +83,24 @@ function ctaButtons(buttons) {
   return `<div style="margin:20px 0">${items}</div>`
 }
 
+// Matches formatPrice() in Catalog.jsx/MySubscriptions.jsx — Postgres numeric
+// columns come through supabase-js as strings, hence the Number(). Used for
+// the *license's current* price, not a subscription's price_at_signup
+// snapshot, since these emails fire before any subscription is priced.
+function formatPrice(price) {
+  const n = Number(price)
+  return n % 1 === 0 ? `$${n}` : `$${n.toFixed(2)}`
+}
+
+function priceLabel(price, priceUnit) {
+  return price != null ? `${formatPrice(price)}${priceUnit ? ` ${priceUnit}` : ''}` : null
+}
+
 export function skVerificationEmailSubject(suiteKey) {
   return `Action Required: SuiteKey Ownership Confirmation — ${suiteKey}`
 }
 
-export function skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail, recipientEmail }) {
+export function skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail, recipientEmail, price, priceUnit }) {
   return wrapEmail('SuiteKey Ownership Confirmation', `
     <p>You've been identified as the potential owner of SuiteKey <strong>${suiteKey}</strong> in
        <a href="${appUrl('/')}" style="color:#005CB9">License Manager</a>. A license request has been
@@ -95,6 +108,7 @@ export function skVerificationEmailHtml({ suiteKey, licenseName, requesterEmail,
     ${detailsTable([
       ['SuiteKey', `<strong>${suiteKey}</strong>`],
       ['License', licenseName],
+      ...(price != null ? [['Cost', priceLabel(price, priceUnit)]] : []),
       ['Requested by', `<a href="mailto:${requesterEmail}" style="color:#005CB9">${requesterEmail}</a>`],
       ...(recipientEmail && recipientEmail !== requesterEmail ? [['License is for', recipientEmail]] : []),
     ])}
@@ -115,12 +129,13 @@ export function approvalRequestEmailSubject(suiteKey) {
   return `Action Required: License request for SuiteKey ${suiteKey}`
 }
 
-export function approvalRequestEmailHtml({ suiteKey, licenseName, userEmail, recipientEmail, moreInfoUrl }) {
+export function approvalRequestEmailHtml({ suiteKey, licenseName, userEmail, recipientEmail, moreInfoUrl, price, priceUnit }) {
   return wrapEmail('License Request Needs Your Approval', `
     <p>A software license has been requested against your SuiteKey and needs your approval.</p>
     ${detailsTable([
       ['SuiteKey', `<strong>${suiteKey}</strong>`],
       ['License', licenseName],
+      ...(price != null ? [['Cost', priceLabel(price, priceUnit)]] : []),
       ['Requested by', `<a href="mailto:${userEmail}" style="color:#005CB9">${userEmail}</a>`],
       ...(recipientEmail && recipientEmail !== userEmail ? [['License is for', recipientEmail]] : []),
       ...(moreInfoUrl ? [['More info', `<a href="${moreInfoUrl}" style="color:#005CB9">${moreInfoUrl}</a>`]] : []),
