@@ -21,3 +21,14 @@ export async function getMySuiteKeyCharges() {
   if (error) throw error
   return { charges: data, ownedKeys }
 }
+
+// Per-SuiteKey spend totals for one fiscal year, for every key the caller
+// owns (even ones with nothing charged that year) — see get_suite_key_spend()
+// in supabase/pending/71_suite_key_spend_and_actual_ledger.sql. Shares its
+// actual/projected math with My Team's get_team_spend(), just grouped by
+// suite_key instead of billing_type.
+export async function getSuiteKeySpend(fiscalYear) {
+  const { data, error } = await supabase.rpc('get_suite_key_spend', { p_fiscal_year: fiscalYear })
+  if (error) throw error
+  return data || []
+}

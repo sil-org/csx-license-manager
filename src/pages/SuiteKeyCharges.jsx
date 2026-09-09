@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { XCircle } from 'lucide-react'
 import AppLayout from '../components/AppLayout'
+import SuiteKeySpendCard from '../components/SuiteKeySpendCard'
 import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
@@ -72,6 +73,8 @@ export default function SuiteKeyCharges() {
         {ownedKeys.length > 0 && (
           <p className="text-sm text-gray-500 mb-6">SuiteKey{ownedKeys.length === 1 ? '' : 's'}: {ownedKeys.join(', ')}</p>
         )}
+
+        <SuiteKeySpendCard />
 
         {error && <p className="text-sil-red mb-4">{error}</p>}
         {!charges && !error && <p className="text-gray-400">Loading…</p>}
