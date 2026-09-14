@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase'
 import { getActionCenterCount } from '../lib/approvals'
 import FeedbackWidget from './FeedbackWidget'
 import InstallPrompt from './InstallPrompt'
+import { version as APP_VERSION } from '../../package.json'
 
 // Other SIL software, surfaced from the app-switcher dropdown under the
 // sidebar header. Add an entry here to list another app.
@@ -93,7 +94,7 @@ export default function AppLayout({ appName, links, children }) {
             <img src="/sil-logo.png" alt="" className="h-6" />
             <div className="leading-tight flex-1 min-w-0">
               <span className="font-display font-bold text-brand text-sm block truncate">{appName}</span>
-              <span className="text-[10px] font-bold text-sil-red uppercase tracking-wide">Beta</span>
+              <span className="text-[10px] font-bold text-sil-red uppercase tracking-wide">Beta · v{APP_VERSION}</span>
             </div>
             <ChevronDown size={14} className={`flex-shrink-0 text-gray-400 transition-transform ${appMenuOpen ? 'rotate-180' : ''}`} />
           </button>
