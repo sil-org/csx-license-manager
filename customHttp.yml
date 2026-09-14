@@ -1,0 +1,34 @@
+customHeaders:
+  # Vite content-hashes JS/CSS filenames, so a given filename's content never
+  # changes — safe to cache at the CDN and browser for a long time.
+  - pattern: '**/*.@(js|css)'
+    headers:
+      - key: 'Cache-Control'
+        value: 'public, max-age=31536000, immutable'
+  - pattern: '**/*.@(png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|ttf)'
+    headers:
+      - key: 'Cache-Control'
+        value: 'public, max-age=31536000, immutable'
+
+  # index.html is what NAMES the hashed JS/CSS files above. If the CDN or a
+  # browser serves a stale index.html after a deploy, it points at filenames
+  # that no longer exist — that 404 (with no error surfaced) is what shows up
+  # as a white screen on load. These must always revalidate against origin.
+  # Listed after the broad *.js rule above so their no-cache wins the merge
+  # for sw.js/registerSW.js specifically.
+  - pattern: '/index.html'
+    headers:
+      - key: 'Cache-Control'
+        value: 'no-cache'
+  - pattern: '/sw.js'
+    headers:
+      - key: 'Cache-Control'
+        value: 'no-cache'
+  - pattern: '/registerSW.js'
+    headers:
+      - key: 'Cache-Control'
+        value: 'no-cache'
+  - pattern: '/manifest.webmanifest'
+    headers:
+      - key: 'Cache-Control'
+        value: 'no-cache'
