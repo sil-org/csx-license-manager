@@ -110,9 +110,9 @@ export default function MySubscriptions() {
                     : sub.price_at_signup != null && ` • ${formatPrice(sub.price_at_signup)}${PRICE_UNIT_LABEL[sub.billing_cycle] ? ` ${PRICE_UNIT_LABEL[sub.billing_cycle]}` : ''}`}
                 </p>
                 {sub.status === 'active' && sub.open_renewal_fy != null && sub.billing_cycle === 'annual' && (
-                  <div className="flex gap-3 mt-1.5">
-                    <button onClick={() => handle(optInRenewal, sub.id)} className="text-xs font-medium text-sil-green">Opt in to renew</button>
-                    <button onClick={() => handle(optOutRenewal, sub.id)} className="text-xs font-medium text-gray-400">Opt out</button>
+                  <div className="flex gap-2 mt-2">
+                    <button onClick={() => handle(optInRenewal, sub.id)} className="text-xs font-medium text-white bg-sil-green rounded-lg px-2.5 py-1 hover:opacity-90 transition">Yes, renew</button>
+                    <button onClick={() => handle(optOutRenewal, sub.id)} className="text-xs font-medium text-white bg-gray-400 rounded-lg px-2.5 py-1 hover:opacity-90 transition">No, don't renew</button>
                   </div>
                 )}
               </div>
