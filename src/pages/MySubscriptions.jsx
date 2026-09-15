@@ -5,7 +5,7 @@ import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { getMySubscriptions, cancelSubscription, optInRenewal, optOutRenewal } from '../lib/subscriptions'
-import { fyLabel, STATUS_LABEL, STATUS_BADGE, INACTIVE_STATUSES, PRICE_UNIT_LABEL } from '../lib/subscriptionDisplay'
+import { fyLabel, STATUS_LABEL, STATUS_BADGE, INACTIVE_STATUSES, PRICE_UNIT_LABEL, suiteKeyKeepsBillingAfterCancel } from '../lib/subscriptionDisplay'
 
 // "SuiteKey: X" / "Ministry ID: X" / "GTIS-funded" — same underlying data as
 // subscriptionDisplay.js's billingLabel(), phrased as prose for this page's
@@ -48,7 +48,10 @@ export default function MySubscriptions() {
   }
 
   async function handleCancel(sub) {
-    if (!confirm(`Cancel your subscription to ${sub.license?.name}? This can't be undone — you'd need to request it again from the Catalog.`)) return
+    const billingWarning = suiteKeyKeepsBillingAfterCancel(sub)
+      ? ` This license will continue to be charged to the committed SuiteKey or Ministry ID until a new requestor purchases this license.`
+      : ''
+    if (!confirm(`Cancel your subscription to ${sub.license?.name}? This can't be undone — you'd need to request it again from the Catalog.${billingWarning}`)) return
     try {
       await cancelSubscription(sub.id, null, { silent: true })
       reload()

@@ -59,6 +59,17 @@ export function shouldShowRenewal(sub) {
   return sub.billing_cycle === 'annual' && sub.billing_type !== 'gtis'
 }
 
+// True when cancelling this subscription leaves a recurring charge behind —
+// an annual, non-free subscription billed to a SuiteKey or Ministry ID keeps
+// charging that key until someone else requests the license. GTIS-funded and
+// department-approved billing have no committed key on the hook, so they're
+// excluded even though shouldShowRenewal() above only excludes GTIS.
+export function suiteKeyKeepsBillingAfterCancel(sub) {
+  return sub.billing_cycle === 'annual'
+    && (sub.billing_type === 'suite_key' || sub.billing_type === 'ministry')
+    && Number(sub.license?.price) > 0
+}
+
 // billing_cycle -> unit text for a price. Keyed off the *subscription's own*
 // billing_cycle snapshot (copied from the license at request time — see
 // request_license() in schema_licenses.sql), never the license's current

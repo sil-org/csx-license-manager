@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { billingLabel, fyLabel } from './subscriptionDisplay'
+import { billingLabel, fyLabel, suiteKeyKeepsBillingAfterCancel } from './subscriptionDisplay'
 
 // Mirrors Emails.gs / the inline MailApp.sendEmail() calls in Subscriptions.gs
 // and Approvals.gs. Unlike the GAS originals, none of these embed one-click
@@ -462,6 +462,8 @@ export function cancelledEmailHtml({ sub, licenseName, performedBy, reason }) {
     <div style="background:#fce8e6;border-left:4px solid #D52227;border-radius:4px;padding:10px 14px;margin:16px 0;font-size:14px">
       <strong style="color:#D52227">Reason given:</strong><br>${escapeHtml(reason)}
     </div>` : ''}
+    ${suiteKeyKeepsBillingAfterCancel(sub) ? `
+    <p>This license will continue to be charged to the committed SuiteKey or Ministry ID until a new requestor purchases this license.</p>` : ''}
     ${detailsTable([
       ['License', licenseName],
       ['Billing', billingLabel(sub)],

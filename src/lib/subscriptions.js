@@ -26,7 +26,7 @@ export async function getMySubscriptions(email) {
 
 // Shared re-select shape for RPCs (here and in lib/approvals.js) that need to
 // build a notification descriptor after a status-changing RPC call.
-export const SUB_EMAIL_FIELDS = 'user_email, fy, billing_cycle, billing_type, suite_key, ministry_id, license:licenses(name, activation_url, service_manager_emails, provisioning_email_show_name, provisioning_email_show_job_title, provisioning_email_show_department)'
+export const SUB_EMAIL_FIELDS = 'user_email, fy, billing_cycle, billing_type, suite_key, ministry_id, license:licenses(name, price, activation_url, service_manager_emails, provisioning_email_show_name, provisioning_email_show_job_title, provisioning_email_show_department)'
 
 // Both request_subscription and approve_subscription (src/lib/approvals.js)
 // can land a subscription straight in 'approved' (auto-approved or manually
