@@ -1,16 +1,59 @@
 import { supabase } from './supabase'
 
-export async function getAuditLog({ suiteKey, limit = 200 } = {}) {
+function applyAuditLogFilters(query, { userEmail, licenseName, action, suiteKey, dateFrom, dateTo } = {}) {
+  if (userEmail) query = query.ilike('user_email', `%${userEmail}%`)
+  if (licenseName) query = query.eq('license_name', licenseName)
+  if (action) query = query.eq('action', action)
+  if (suiteKey) query = query.ilike('suite_key', `%${suiteKey}%`)
+  if (dateFrom) query = query.gte('created_at', dateFrom)
+  if (dateTo) {
+    // dateTo is a plain "YYYY-MM-DD" from a date input; treat it as inclusive
+    // of the whole day by comparing against the start of the next day.
+    const end = new Date(dateTo + 'T00:00:00')
+    end.setDate(end.getDate() + 1)
+    query = query.lt('created_at', end.toISOString())
+  }
+  return query
+}
+
+// Paginated for the admin Audit Log page. Filters mirror the preset searches
+// offered there (user, license, action, suite key, date range) so the same
+// builder backs both the on-screen page and the "export everything matching
+// this filter" CSV below.
+export async function getAuditLog({ page = 0, pageSize = 50, ...filters } = {}) {
   let query = supabase
     .from('audit_log')
-    .select('*')
+    .select('*', { count: 'exact' })
     .order('created_at', { ascending: false })
-    .limit(limit)
-  if (suiteKey) query = query.eq('suite_key', suiteKey)
+  query = applyAuditLogFilters(query, filters)
 
-  const { data, error } = await query
+  const from = page * pageSize
+  const { data, error, count } = await query.range(from, from + pageSize - 1)
   if (error) throw error
-  return data
+  return { rows: data, count }
+}
+
+// Fetches every row matching the filters, ignoring pagination — for CSV
+// export. Paged internally in batches since PostgREST caps rows per request.
+export async function getAuditLogForExport(filters = {}) {
+  const batchSize = 1000
+  let page = 0
+  let all = []
+  while (true) {
+    let query = supabase
+      .from('audit_log')
+      .select('*')
+      .order('created_at', { ascending: false })
+    query = applyAuditLogFilters(query, filters)
+
+    const from = page * batchSize
+    const { data, error } = await query.range(from, from + batchSize - 1)
+    if (error) throw error
+    all = all.concat(data)
+    if (data.length < batchSize) break
+    page++
+  }
+  return all
 }
 
 // Admin-only. RLS lets an admin read every suite_keys row directly, so no RPC
