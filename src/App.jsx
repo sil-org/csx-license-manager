@@ -13,6 +13,7 @@ import AdminAuditLog from './pages/admin/AuditLog'
 import AdminFinanceExport from './pages/admin/FinanceExport'
 import AdminSuiteKeys from './pages/admin/SuiteKeys'
 import AdminMinistryIds from './pages/admin/MinistryIds'
+import AdminAnnouncements from './pages/admin/Announcements'
 import AdminImport from './pages/admin/Import'
 import AdminUsers from './pages/admin/AdminUsers'
 import RequireAuth from './components/RequireAuth'
@@ -79,6 +80,10 @@ export default function App() {
 
       <Route path="/admin/ministry-ids" element={
         <RequireAuth role="admin"><AdminMinistryIds /></RequireAuth>
+      } />
+
+      <Route path="/admin/announcements" element={
+        <RequireAuth role="admin"><AdminAnnouncements /></RequireAuth>
       } />
 
       <Route path="/admin/import" element={

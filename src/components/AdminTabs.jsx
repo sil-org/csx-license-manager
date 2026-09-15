@@ -12,11 +12,12 @@ const TABS = [
   { to: '/admin/ministry-ids', label: 'Ministry IDs' },
   { to: '/admin/import', label: 'Import' },
   { to: '/admin/users', label: 'Admin Users' },
+  { to: '/admin/announcements', label: 'Announcement' },
 ]
 
 // Rendered as the first child inside each admin page's `max-w-6xl mx-auto
 // p-6` wrapper — every admin page shares that same width specifically so
-// this always has room for all 8 tabs without scrolling; don't put this
+// this always has room for all 9 tabs without scrolling; don't put this
 // inside a narrower wrapper again without rechecking that.
 //
 // Deliberately NOT overflow-x-auto: per the CSS Overflow spec, setting

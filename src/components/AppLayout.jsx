@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabase'
 import { getActionCenterCount } from '../lib/approvals'
 import FeedbackWidget from './FeedbackWidget'
 import InstallPrompt from './InstallPrompt'
+import AnnouncementBanner from './AnnouncementBanner'
 import { version as APP_VERSION } from '../../package.json'
 
 // Other SIL software, surfaced from the app-switcher dropdown under the
@@ -186,7 +187,10 @@ export default function AppLayout({ appName, links, children }) {
         </div>
       </nav>
 
-      <main className="flex-1 min-w-0">{children}</main>
+      <main className="flex-1 min-w-0">
+        <AnnouncementBanner />
+        {children}
+      </main>
 
       <FeedbackWidget onSubmit={async ({ type, githubLabel, title, description }) => {
         const { error } = await supabase.functions.invoke('feedback', {
