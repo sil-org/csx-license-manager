@@ -232,6 +232,37 @@ export async function startRenewalPeriod(licenseId, fiscalYear) {
   return data
 }
 
+// Admin-only diagnostic for Catalog.jsx's handleStartRenewalPeriod: when
+// startRenewalPeriod() comes back empty, this re-checks the same criteria as
+// start_renewal_period()'s WHERE clause (schema_licenses.sql), in the same
+// order, so the "no eligible subscriptions" alert can say *why* instead of
+// just reporting zero. Each subscription is attributed to the first
+// condition it fails — a sub can fail more than one, but only the first
+// (the one the SQL would actually stop on) is counted, so the buckets sum to
+// the license's total subscription count.
+export async function getRenewalPeriodBlockers(licenseId, fiscalYear) {
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select('status, billing_cycle, billing_type, renewal_reminder, fy, open_renewal_fy, renewals(fiscal_year)')
+    .eq('license_id', licenseId)
+  if (error) throw error
+
+  const reasons = {
+    notActive: 0, notAnnual: 0, remindersOff: 0, gtis: 0,
+    midDecision: 0, alreadyRenewed: 0, alreadyDecided: 0,
+  }
+  for (const s of data) {
+    if (s.status !== 'active') reasons.notActive++
+    else if (s.billing_cycle !== 'annual') reasons.notAnnual++
+    else if (!s.renewal_reminder) reasons.remindersOff++
+    else if (s.billing_type === 'gtis') reasons.gtis++
+    else if (s.open_renewal_fy != null) reasons.midDecision++
+    else if (s.fy >= fiscalYear) reasons.alreadyRenewed++
+    else if (s.renewals?.some(r => r.fiscal_year === fiscalYear)) reasons.alreadyDecided++
+  }
+  return { total: data.length, reasons }
+}
+
 export async function optInRenewal(subscriptionId) {
   const { error } = await supabase.rpc('opt_in_renewal', { p_subscription_id: subscriptionId })
   if (error) throw error

@@ -6,13 +6,14 @@ import { getLinks } from '../../navLinks'
 import {
   getAllLicenses, saveLicense, deactivateLicense, reactivateLicense,
   listDepartmentApprovals, addDepartmentApproval, removeDepartmentApproval,
+  listAreaDiscounts, addAreaDiscount, removeAreaDiscount, listAreas,
   sizeAwareSort,
 } from '../../lib/licenses'
 import {
   activationEmailHtml, renewalReminderCardHtml, renewalReminderEmailHtml, renewalReminderEmailSubject,
   renewalPriceLabel, sendEmail,
 } from '../../lib/email'
-import { startRenewalPeriod } from '../../lib/subscriptions'
+import { startRenewalPeriod, getRenewalPeriodBlockers } from '../../lib/subscriptions'
 import { nextRenewalLabel, PRICE_UNIT_LABEL } from '../../lib/subscriptionDisplay'
 
 const BLANK = {
@@ -171,6 +172,28 @@ export default function AdminCatalog() {
     }
   }
 
+  // Builds the "no eligible subscriptions" alert body for
+  // handleStartRenewalPeriod by re-running start_renewal_period()'s
+  // eligibility checks client-side (see getRenewalPeriodBlockers) so the
+  // admin sees *why* — e.g. "18 have renewal reminders turned off" — instead
+  // of a single generic sentence covering five unrelated causes.
+  async function noEligibleSubscriptionsMessage(licenseId, fiscalYear) {
+    const { total, reasons } = await getRenewalPeriodBlockers(licenseId, fiscalYear)
+    if (total === 0) return `No subscriptions exist yet for this license.`
+
+    const lines = [
+      [reasons.notActive, 'not active'],
+      [reasons.notAnnual, 'not on annual billing'],
+      [reasons.remindersOff, 'have renewal reminders turned off'],
+      [reasons.gtis, 'are GTIS-sponsored (never go through opt-in renewal)'],
+      [reasons.midDecision, 'are already mid-decision for another fiscal year'],
+      [reasons.alreadyRenewed, `already renewed through FY${fiscalYear} or later`],
+      [reasons.alreadyDecided, `already have a decision logged for FY${fiscalYear}`],
+    ].filter(([count]) => count > 0).map(([count, label]) => `- ${count} ${label}`)
+
+    return `No eligible subscriptions for FY${fiscalYear} — of ${total} subscription(s) for this license:\n${lines.join('\n')}`
+  }
+
   // Opens a renewal period for this license/FY: stamps every eligible active
   // subscription's open_renewal_fy (see start_renewal_period() in
   // supabase/schema_licenses.sql) and emails each affected owner directly —
@@ -192,7 +215,7 @@ export default function AdminCatalog() {
     try {
       const rows = await startRenewalPeriod(editing.id, fiscalYear)
       if (!rows.length) {
-        alert('No eligible subscriptions — everyone is already renewed, mid-decision for another year, or not active/annual.')
+        alert(await noEligibleSubscriptionsMessage(editing.id, fiscalYear))
         return
       }
 
@@ -455,6 +478,8 @@ export default function AdminCatalog() {
                   </label>
 
                   {editing.id && editing.department_gated && <DepartmentApprovals licenseId={editing.id} />}
+
+                  {editing.id && !editing.gtis_sponsored && !editing.department_gated && <AreaDiscounts licenseId={editing.id} />}
 
                   <label className="flex items-center gap-2 text-sm text-gray-700">
                     <input type="checkbox" checked={editing.allow_multiple_per_person} onChange={e => setEditing({ ...editing, allow_multiple_per_person: e.target.checked })} />
@@ -733,6 +758,86 @@ function DepartmentApprovals({ licenseId }) {
             className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
         </label>
         <button type="button" onClick={handleAdd} disabled={!sco.trim() || !approverEmail.trim()}
+          className="text-sm font-medium bg-brand text-white rounded-lg px-3 py-1.5 disabled:opacity-40">
+          Add
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Inline list/add/remove UI for a license's area-level discounts (area ->
+// percent off catalog price) — see get_area_discounted_price() in
+// supabase/pending/73_area_pricing.sql. A suite key's area comes from the
+// OU-code join built there; a suite key with no resolvable area, or no
+// discount row for its area, is simply billed full price.
+function AreaDiscounts({ licenseId }) {
+  const [rows, setRows] = useState(null)
+  const [areas, setAreas] = useState([])
+  const [area, setArea] = useState('')
+  const [discountPercent, setDiscountPercent] = useState('')
+  const [error, setError] = useState(null)
+
+  function reload() {
+    listAreaDiscounts(licenseId).then(setRows).catch(e => setError(e.message))
+  }
+
+  useEffect(reload, [licenseId])
+  useEffect(() => { listAreas().then(setAreas).catch(e => setError(e.message)) }, [])
+
+  async function handleAdd(e) {
+    e.preventDefault()
+    setError(null)
+    try {
+      await addAreaDiscount(licenseId, area, Number(discountPercent))
+      setArea('')
+      setDiscountPercent('')
+      reload()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  async function handleRemove(id) {
+    try {
+      await removeAreaDiscount(id)
+      reload()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  return (
+    <div className="border border-gray-200 rounded-lg px-3 py-3">
+      <p className="text-sm font-medium text-gray-700 mb-2">Area discounts (% off catalog price)</p>
+      {error && <p className="text-sm text-sil-red mb-2">{error}</p>}
+      {rows?.length > 0 && (
+        <ul className="space-y-1 mb-3">
+          {rows.map(r => (
+            <li key={r.id} className="flex items-center justify-between text-sm bg-gray-50 rounded px-2 py-1">
+              <span><strong>{r.area}</strong> → {r.discount_percent}% off</span>
+              <button type="button" onClick={() => handleRemove(r.id)} className="text-gray-400 hover:text-sil-red" aria-label={`Remove ${r.area}`}>
+                <X size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2 items-end">
+        <label className="block text-xs text-gray-600">
+          Area
+          <select value={area} onChange={e => setArea(e.target.value)}
+            className="mt-1 w-40 border border-gray-300 rounded-lg px-2 py-1.5 text-sm">
+            <option value="">Select area…</option>
+            {areas.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </label>
+        <label className="text-xs text-gray-600">
+          Discount %
+          <input type="number" min="1" max="100" step="1" value={discountPercent} onChange={e => setDiscountPercent(e.target.value)}
+            className="mt-1 w-24 border border-gray-300 rounded-lg px-2 py-1.5 text-sm" />
+        </label>
+        <button type="button" onClick={handleAdd} disabled={!area.trim() || !discountPercent}
           className="text-sm font-medium bg-brand text-white rounded-lg px-3 py-1.5 disabled:opacity-40">
           Add
         </button>
