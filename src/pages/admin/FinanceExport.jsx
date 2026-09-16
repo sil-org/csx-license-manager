@@ -3,6 +3,7 @@ import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
 import { getFinanceExport } from '../../lib/admin'
+import { downloadCsv } from '../../lib/csv'
 
 function todayStr() {
   return new Date().toISOString().split('T')[0]
@@ -12,25 +13,13 @@ function firstOfMonthStr() {
   return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0]
 }
 
-function csvEscape(value) {
-  const s = String(value ?? '')
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-}
+const CSV_HEADER = ['User', 'License', 'Billed to', 'Cost', 'Price paid', 'Product key', 'Invoice #', 'Started', 'Renewed', 'Status', 'Notes']
 
-function downloadCsv(rows, filename) {
-  const header = ['User', 'License', 'Billed to', 'Cost', 'Price paid', 'Product key', 'Invoice #', 'Started', 'Renewed', 'Status', 'Notes']
-  const lines = [header, ...rows.map(r => [
+function toCsvRow(r) {
+  return [
     r.user_email, r.license_name, r.billing_label, r.cost, r.price_paid, r.product_key, r.invoice_number,
     r.start_date, r.renewed_date, r.status, r.notes,
-  ])]
-  const csv = lines.map(line => line.map(csvEscape).join(',')).join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  ]
 }
 
 // Mirrors GAS's Admin Panel "Finance Export" tab. Pro-rated cost math lives
@@ -59,7 +48,7 @@ export default function AdminFinanceExport() {
     setError(null)
     try {
       const data = await getFinanceExport({ from, to })
-      downloadCsv(data, `finance-export-${from}-to-${to}.csv`)
+      downloadCsv(CSV_HEADER, data.map(toCsvRow), `finance-export-${from}-to-${to}.csv`)
     } catch (err) {
       setError(err.message)
     }

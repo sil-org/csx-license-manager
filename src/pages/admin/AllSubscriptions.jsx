@@ -19,6 +19,7 @@ import {
   skVerificationEmailSubject, skVerificationEmailHtml,
 } from '../../lib/email'
 import { billingLabel, fyLabel, nextRenewalLabel, STATUS_LABEL, STATUS_COLOR, RENEWAL_LABEL, RENEWAL_COLOR, shouldShowRenewal } from '../../lib/subscriptionDisplay'
+import { downloadCsv } from '../../lib/csv'
 
 // Gates the bell "resend this reminder" icon: only while there's an actual
 // open renewal period (started via Admin -> Catalog's "Start renewal
@@ -53,6 +54,26 @@ function renewalCell(sub) {
   const latest = latestRenewal(sub)
   if (!latest) return { text: '—', color: 'text-gray-300' }
   return { text: `FY${latest.fiscal_year}: ${RENEWAL_LABEL[latest.decision] || latest.decision}`, color: RENEWAL_COLOR[latest.decision] }
+}
+
+// Notes column for CSV export: folds extra_field_value in alongside notes
+// (e.g. a Shared Drive's name) — same convention get_finance_export() uses
+// server-side, since it's often the only record of that answer.
+function subscriptionNotes(sub) {
+  const extra = sub.extra_field_value
+    ? `${sub.license?.extra_field_label || 'Extra field'}: ${sub.extra_field_value}`
+    : null
+  return [sub.notes, extra].filter(Boolean).join('; ')
+}
+
+const CSV_HEADER = ['User', 'License', 'Billing', 'FY', 'Status', 'Renewal', 'Provisioned', 'Price paid', 'Product key', 'Invoice #', 'Notes']
+
+function toCsvRow(sub) {
+  return [
+    sub.user_email, sub.license?.name, billingLabel(sub), fyLabel(sub), STATUS_LABEL[sub.status],
+    renewalCell(sub).text, sub.activated_at, sub.price_at_signup, sub.product_key, sub.invoice_number,
+    subscriptionNotes(sub),
+  ]
 }
 
 // Statuses cancel_subscription() will actually accept — mirrors the same
@@ -448,6 +469,15 @@ export default function AdminAllSubscriptions() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredSubs, sortKey, sortDir])
 
+  // Exports whatever the table currently shows — search/license/FY/status
+  // filters and all — rather than every subscription regardless of filters,
+  // matching how Audit Log's export respects its own filters. All rows are
+  // already loaded client-side (getAllSubscriptions() paginates past
+  // PostgREST's 1000-row cap up front), so no separate export fetch is needed.
+  function handleExportCsv() {
+    downloadCsv(CSV_HEADER, (visibleSubs || []).map(toCsvRow), `all-subscriptions-${new Date().toISOString().split('T')[0]}.csv`)
+  }
+
   return (
     <AppLayout appName="License Manager" links={getLinks()}>
       <div className="max-w-7xl mx-auto p-6">
@@ -493,6 +523,15 @@ export default function AdminAllSubscriptions() {
                 <option key={value} value={value}>{label}</option>
               ))}
             </select>
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              disabled={visibleSubs.length === 0}
+              title="Export the rows currently shown (respects the filters above)"
+              className="text-sm font-medium text-brand border border-brand rounded-lg px-4 py-2 disabled:opacity-50"
+            >
+              Export CSV
+            </button>
           </div>
         )}
         {subs?.length > 0 && visibleSubs.length === 0 && (

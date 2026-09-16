@@ -4,6 +4,7 @@ import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
 import { getAuditLog, getAuditLogForExport } from '../../lib/admin'
 import { getAllLicenses } from '../../lib/licenses'
+import { downloadCsv } from '../../lib/csv'
 
 const PAGE_SIZE = 50
 
@@ -18,24 +19,10 @@ function actionLabel(action) {
   return action.replace(/_/g, ' ')
 }
 
-function csvEscape(value) {
-  const s = String(value ?? '')
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-}
+const CSV_HEADER = ['When', 'Action', 'License', 'User', 'SuiteKey', 'By', 'Notes']
 
-function downloadCsv(rows, filename) {
-  const header = ['When', 'Action', 'License', 'User', 'SuiteKey', 'By', 'Notes']
-  const lines = [header, ...rows.map(r => [
-    new Date(r.created_at).toLocaleString(), r.action, r.license_name, r.user_email, r.suite_key, r.performed_by, r.notes,
-  ])]
-  const csv = lines.map(line => line.map(csvEscape).join(',')).join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+function toCsvRow(r) {
+  return [new Date(r.created_at).toLocaleString(), r.action, r.license_name, r.user_email, r.suite_key, r.performed_by, r.notes]
 }
 
 export default function AdminAuditLog() {
@@ -76,7 +63,7 @@ export default function AdminAuditLog() {
     setError(null)
     try {
       const data = await getAuditLogForExport(filters)
-      downloadCsv(data, `audit-log-${new Date().toISOString().split('T')[0]}.csv`)
+      downloadCsv(CSV_HEADER, data.map(toCsvRow), `audit-log-${new Date().toISOString().split('T')[0]}.csv`)
     } catch (err) {
       setError(err.message)
     } finally {
