@@ -9,7 +9,7 @@ import { activateSubscription } from '../../lib/approvals'
 import { searchSuiteKeys } from '../../lib/suiteKeys'
 import {
   resendApprovalRequest, resendSkVerification, resendProvisioningRequest, cancelSubscription, buildRenewalReminderNotification,
-  updateSubscriptionDetails, updateSubscriptionSuiteKey,
+  updateSubscriptionDetails, updateSubscriptionSuiteKey, optInRenewal, optOutRenewal,
 } from '../../lib/subscriptions'
 import { supabase } from '../../lib/supabase'
 import {
@@ -398,6 +398,23 @@ export default function AdminAllSubscriptions() {
     }
   }
 
+  // Records a renew/cancel decision an owner reported outside the app (e.g.
+  // emailed their answer directly) instead of clicking through MySubscriptions
+  // themselves. Same opt_in_renewal()/opt_out_renewal() RPCs that page uses —
+  // already admin-authorized for any subscription — so this just adds the
+  // missing UI. decided_by ends up as the admin's email, not the owner's:
+  // matches how every other admin-performed action here (cancel, resend,
+  // etc.) is attributed to whoever actually clicked, not the affected user.
+  async function handleRenewalDecision(action, sub, label) {
+    if (!window.confirm(`Record "${label}" for ${sub.user_email} (${sub.license?.name}, FY${sub.open_renewal_fy})? Only do this if they told you their decision outside the app.`)) return
+    try {
+      await action(sub.id)
+      reload()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   const licenseOptions = useMemo(() => (
     [...new Set((subs || []).map(s => s.license?.name).filter(Boolean))].sort()
   ), [subs])
@@ -519,7 +536,27 @@ export default function AdminAllSubscriptions() {
                   </td>
                   <td className="p-3 text-gray-500">{fyLabel(sub) || '—'}</td>
                   <td className={`p-3 ${STATUS_COLOR[sub.status]}`}>{STATUS_LABEL[sub.status]}</td>
-                  <td className={`p-3 whitespace-nowrap ${renewal.color}`}>{renewal.text}</td>
+                  <td className={`p-3 whitespace-nowrap ${renewal.color}`}>
+                    <div>{renewal.text}</div>
+                    {sub.open_renewal_fy != null && (
+                      <div className="flex gap-2 mt-1">
+                        <button
+                          onClick={() => handleRenewalDecision(optInRenewal, sub, 'Renew')}
+                          title="Record that they decided to renew (e.g. they emailed their answer)"
+                          className="text-xs font-medium text-white bg-sil-green rounded px-2 py-0.5 hover:opacity-90 transition"
+                        >
+                          Renew
+                        </button>
+                        <button
+                          onClick={() => handleRenewalDecision(optOutRenewal, sub, "Don't renew")}
+                          title="Record that they decided not to renew (e.g. they emailed their answer)"
+                          className="text-xs font-medium text-white bg-gray-400 rounded px-2 py-0.5 hover:opacity-90 transition"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+                  </td>
                   <td className="p-3 text-gray-500 whitespace-nowrap">{sub.activated_at || '—'}</td>
                   <td className="p-3">
                     <button
