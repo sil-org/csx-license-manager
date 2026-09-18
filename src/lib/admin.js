@@ -153,7 +153,11 @@ export async function updateMinistryId({ email, ministryId }) {
 export async function getAllSubscriptions() {
   const pageSize = 1000
   const rows = []
-  for (let offset = 0, total = null; total === null || offset < total; offset += pageSize) {
+  // Advance by data.length, not pageSize: if the project's PostgREST max-rows
+  // setting is below pageSize, each request silently gets capped to fewer
+  // rows than asked for — advancing by the nominal pageSize would then skip
+  // straight past the un-fetched remainder of every page.
+  for (let offset = 0, total = null; total === null || offset < total;) {
     const { data, count, error } = await supabase
       .from('subscriptions')
       .select('*, license:licenses(name, vendor, category, price, price_unit, activation_url, onboarding_message, reminder_message, more_info_url, service_manager_emails, extra_field_label, extra_field_required, provisioning_email_show_name, provisioning_email_show_job_title, provisioning_email_show_department), renewals(fiscal_year, reminder_sent_at, decision, decided_at), suite_key_row:suite_keys(deprecated_at)', { count: 'exact' })
@@ -163,6 +167,7 @@ export async function getAllSubscriptions() {
     if (data.length === 0) break
     rows.push(...data)
     total = count
+    offset += data.length
   }
   return rows
 }
@@ -176,10 +181,11 @@ export async function getAllSubscriptions() {
 export async function getFinanceExport({ from, to }) {
   const pageSize = 1000
   const rows = []
-  // Loop by exact total count rather than "got back fewer than pageSize" —
-  // if the project's PostgREST max-rows setting is ever below pageSize, a
-  // full page would look identical to a final partial one.
-  for (let offset = 0, total = null; total === null || offset < total; offset += pageSize) {
+  // Advance by data.length, not pageSize: if the project's PostgREST max-rows
+  // setting is ever below pageSize, a full page would look identical to a
+  // final partial one, and advancing by the nominal pageSize would skip
+  // straight past the un-fetched remainder of every page.
+  for (let offset = 0, total = null; total === null || offset < total;) {
     const { data, count, error } = await supabase
       .rpc('get_finance_export', { p_start_date: from, p_end_date: to }, { count: 'exact' })
       .range(offset, offset + pageSize - 1)
@@ -187,6 +193,7 @@ export async function getFinanceExport({ from, to }) {
     if (data.length === 0) break
     rows.push(...data)
     total = count
+    offset += data.length
   }
   return rows
 }
@@ -249,7 +256,8 @@ export async function importScoCodes(rows) {
 export async function getProfiles() {
   const pageSize = 1000
   const rows = []
-  for (let offset = 0, total = null; total === null || offset < total; offset += pageSize) {
+  // Advance by data.length, not pageSize — see getAllSubscriptions() above.
+  for (let offset = 0, total = null; total === null || offset < total;) {
     const { data, count, error } = await supabase
       .from('profiles')
       .select('id, display_name, primary_email, role', { count: 'exact' })
@@ -259,6 +267,7 @@ export async function getProfiles() {
     if (data.length === 0) break
     rows.push(...data)
     total = count
+    offset += data.length
   }
   return rows
 }
