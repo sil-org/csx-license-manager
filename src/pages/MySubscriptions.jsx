@@ -23,17 +23,37 @@ function formatPrice(price) {
   return n % 1 === 0 ? `$${n}` : `$${n.toFixed(2)}`
 }
 
+// Same Oct-1 fiscal-year boundary used throughout (see currentFiscalYear()
+// in SuiteKeySpendCard.jsx/TeamSpendCard.jsx), applied to a specific date
+// instead of "now" — the fiscal year this subscription was originally
+// signed up in.
+function fiscalYearOf(dateStr) {
+  const d = new Date(dateStr)
+  return d.getMonth() + 1 >= 10 ? d.getFullYear() + 1 : d.getFullYear()
+}
+
 // price_at_signup is frozen at whatever it was the day the subscription was
 // first created — opt_in_renewal() bumps sub.fy to the new fiscal year but
-// never updates it. The actual price for that later FY lives on the
-// matching renewals row instead (opt_in_renewal() snapshots the license's
-// price there at decision time), so once a subscription has renewed at
-// least once, price_at_signup is stale and this is the number to show
-// instead. Falls back to price_at_signup for a subscription still in its
-// original signup term (no renewal decided yet).
+// never updates price_at_signup itself. The real price for a later FY lives
+// on the matching renewals row instead (opt_in_renewal() snapshots the
+// license's price there at decision time), so once a subscription has
+// renewed at least once, price_at_signup is stale.
+//
+// Only request_subscription() and opt_in_renewal() ever set sub.fy, and the
+// latter always writes a matching renewals row in the same breath — so
+// sub.fy outrunning both a renewals row AND its own signup year only
+// happens for legacy-imported subscriptions, whose fy was carried straight
+// over from the old GAS sheet across years with no renewals trail at all.
+// For those (and for anything else that's simply outlived its first term
+// with no tracked renewal), the license's current price is a far better
+// answer than a possibly years-stale price_at_signup — a SuiteKey/Ministry
+// annual subscription is always billed at the current catalog price on
+// renewal anyway (same principle as the open_renewal_fy branch below).
 function currentPeriodPrice(sub) {
-  const renewal = sub.renewals?.find(r => r.fiscal_year === sub.fy && r.decision === 'opted_in' && r.renewal_price != null)
-  return renewal ? renewal.renewal_price : sub.price_at_signup
+  const decided = sub.renewals?.find(r => r.fiscal_year === sub.fy && r.decision === 'opted_in' && r.renewal_price != null)
+  if (decided) return decided.renewal_price
+  if (sub.price_at_signup != null && sub.fy === fiscalYearOf(sub.start_date)) return sub.price_at_signup
+  return sub.license?.price ?? null
 }
 
 export default function MySubscriptions() {
