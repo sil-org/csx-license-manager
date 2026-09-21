@@ -5,6 +5,12 @@ import { signInWithGoogle, signInWithSSO } from '../lib/auth'
 
 const REDIRECT_HINT = "If your browser blocked a redirect, allow redirects for sil.org (and accounts.google.com, if signing in with Google), then try again."
 
+// Hidden for now (Kate, 2026-09-21) while the shared-project auth trigger
+// gap (handle_new_auth_user() bypassing is_eligible_staff_email()) is
+// unresolved — signInWithSSO() and its wiring are untouched, so re-enabling
+// is just flipping this back to true.
+const SSO_SIGNIN_ENABLED = false
+
 export default function Home() {
   const { session, profile, loading, authError, refreshProfile } = useAuth()
   const navigate = useNavigate()
@@ -52,12 +58,14 @@ export default function Home() {
           Sign in with Google
         </button>
 
-        <button
-          onClick={() => handleSignIn(signInWithSSO)}
-          className="mt-3 w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition"
-        >
-          Sign in with SSO
-        </button>
+        {SSO_SIGNIN_ENABLED && (
+          <button
+            onClick={() => handleSignIn(signInWithSSO)}
+            className="mt-3 w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition"
+          >
+            Sign in with SSO
+          </button>
+        )}
 
         {signInError && (
           <p className="mt-4 text-xs text-red-600">{REDIRECT_HINT}</p>
