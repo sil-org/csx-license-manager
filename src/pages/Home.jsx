@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { signInWithGoogle } from '../lib/auth'
+import { signInWithGoogle, signInWithSSO } from '../lib/auth'
 
-const REDIRECT_HINT = "If your browser blocked a redirect, allow redirects for sil.org and accounts.google.com, then try again."
+const REDIRECT_HINT = "If your browser blocked a redirect, allow redirects for sil.org (and accounts.google.com, if signing in with Google), then try again."
 
 export default function Home() {
   const { session, profile, loading, authError, refreshProfile } = useAuth()
@@ -26,10 +26,10 @@ export default function Home() {
     )
   }
 
-  async function handleSignIn() {
+  async function handleSignIn(signIn) {
     setSignInError(null)
     try {
-      await signInWithGoogle()
+      await signIn()
     } catch (err) {
       setSignInError(err)
     }
@@ -45,11 +45,18 @@ export default function Home() {
         <p className="text-gray-500 mb-8 text-sm">Request and manage software license subscriptions</p>
 
         <button
-          onClick={handleSignIn}
+          onClick={() => handleSignIn(signInWithGoogle)}
           className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition"
         >
           <GoogleIcon />
           Sign in with Google
+        </button>
+
+        <button
+          onClick={() => handleSignIn(signInWithSSO)}
+          className="mt-3 w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition"
+        >
+          Sign in with SSO
         </button>
 
         {signInError && (

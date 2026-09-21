@@ -10,6 +10,21 @@ export async function signInWithGoogle() {
   if (error) throw error
 }
 
+// Same shared Supabase project's SAML provider Finance already signs in
+// through (auth.sso_providers/auth.saml_providers — one provider serves
+// every app in this project, not one per app), so this needs its own
+// button/function but no new provider setup. VITE_SSO_PROVIDER_ID must be
+// set in the deployed environment (Amplify), not just .env locally.
+export async function signInWithSSO() {
+  const { error } = await supabase.auth.signInWithSSO({
+    providerId: import.meta.env.VITE_SSO_PROVIDER_ID,
+    options: {
+      redirectTo: `${window.location.origin}/auth/callback`,
+    },
+  })
+  if (error) throw error
+}
+
 export async function signOut() {
   const { error } = await supabase.auth.signOut()
   if (error) throw error
