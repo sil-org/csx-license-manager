@@ -23,6 +23,19 @@ function formatPrice(price) {
   return n % 1 === 0 ? `$${n}` : `$${n.toFixed(2)}`
 }
 
+// price_at_signup is frozen at whatever it was the day the subscription was
+// first created — opt_in_renewal() bumps sub.fy to the new fiscal year but
+// never updates it. The actual price for that later FY lives on the
+// matching renewals row instead (opt_in_renewal() snapshots the license's
+// price there at decision time), so once a subscription has renewed at
+// least once, price_at_signup is stale and this is the number to show
+// instead. Falls back to price_at_signup for a subscription still in its
+// original signup term (no renewal decided yet).
+function currentPeriodPrice(sub) {
+  const renewal = sub.renewals?.find(r => r.fiscal_year === sub.fy && r.decision === 'opted_in' && r.renewal_price != null)
+  return renewal ? renewal.renewal_price : sub.price_at_signup
+}
+
 export default function MySubscriptions() {
   const { profile } = useAuth()
   const [subs, setSubs] = useState(null)
@@ -102,16 +115,21 @@ export default function MySubscriptions() {
                   {billingDescription(sub)}{fyLabel(sub) && ` • ${fyLabel(sub)}`} • {sub.activated_at ? `Started ${sub.activated_at}` : `Requested ${sub.start_date}`}
                   {/* While a renewal decision is open, show the license's current full price (what
                       renewing actually costs — matches renewalPriceLabel() in lib/email.js, which is
-                      what the renewal-reminder email already quoted) rather than price_at_signup,
-                      which is just a snapshot of the original — possibly pro-rated — purchase and can
-                      differ from the real renewal cost. PRICE_UNIT_LABEL[sub.billing_cycle], not
-                      sub.license?.price_unit — the license's current price/unit can drift after
-                      signup, but price_at_signup is a snapshot of what this subscription was actually
-                      charged under its own billing_cycle. */}
+                      what the renewal-reminder email already quoted). Otherwise currentPeriodPrice()
+                      picks the decided renewal_price for sub.fy if one's on file, else falls back to
+                      price_at_signup for a subscription still in its original signup term.
+                      PRICE_UNIT_LABEL[sub.billing_cycle], not sub.license?.price_unit — the license's
+                      current price/unit can drift after signup, but billing_cycle is a snapshot of
+                      what this subscription was actually charged under. */}
                   {sub.open_renewal_fy != null && sub.license?.price != null
                     ? ` • ${formatPrice(sub.license.price)}/yr`
-                    : sub.price_at_signup != null && ` • ${formatPrice(sub.price_at_signup)}${PRICE_UNIT_LABEL[sub.billing_cycle] ? ` ${PRICE_UNIT_LABEL[sub.billing_cycle]}` : ''}`}
+                    : currentPeriodPrice(sub) != null && ` • ${formatPrice(currentPeriodPrice(sub))}${PRICE_UNIT_LABEL[sub.billing_cycle] ? ` ${PRICE_UNIT_LABEL[sub.billing_cycle]}` : ''}`}
                 </p>
+                {sub.extra_field_value && (
+                  <p className="text-sm text-gray-500">
+                    {sub.license?.extra_field_label || 'Extra field'}: {sub.extra_field_value}
+                  </p>
+                )}
                 {sub.status === 'active' && sub.open_renewal_fy != null && sub.billing_cycle === 'annual' && (
                   <div className="flex gap-2 mt-2">
                     <button onClick={() => handle(optInRenewal, sub.id)} className="text-xs font-medium text-white bg-sil-green rounded-lg px-2.5 py-1 hover:opacity-90 transition">Yes, renew</button>

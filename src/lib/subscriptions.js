@@ -17,7 +17,7 @@ async function getSeatProvisioningFields(email) {
 export async function getMySubscriptions(email) {
   const { data, error } = await supabase
     .from('subscriptions')
-    .select('*, license:licenses(name, vendor, category, logo_url, price)')
+    .select('*, license:licenses(name, vendor, category, logo_url, price, extra_field_label), renewals(fiscal_year, decision, renewal_price)')
     .eq('user_email', email)
     .order('created_at', { ascending: false })
   if (error) throw error
