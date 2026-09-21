@@ -145,11 +145,22 @@ export async function updateMinistryId({ email, ministryId }) {
   if (error) throw error
 }
 
+// Shared shape for both getAllSubscriptions() and searchSubscriptions()
+// below — no renewals embed: that was only ever fetched for All
+// Subscriptions' now-removed Renewal column, and pulling every
+// subscription's renewal history on every load (a to-many join, evaluated
+// under RLS for every row) was a meaningful chunk of why loading this page
+// took so long.
+const SUBSCRIPTION_SELECT = '*, license:licenses(name, vendor, category, price, price_unit, activation_url, onboarding_message, reminder_message, more_info_url, service_manager_emails, extra_field_label, extra_field_required, provisioning_email_show_name, provisioning_email_show_job_title, provisioning_email_show_department), suite_key_row:suite_keys(deprecated_at)'
+
 // Admin-only. Every subscription, every user — mirrors GAS's getAllSubscriptions().
 // Relies on RLS (admins can already read every subscriptions/licenses row).
 // Paginated like getFinanceExport() below: PostgREST caps a single response
 // at 1000 rows, and this org has already blown past that — an unpaginated
 // select here silently drops every subscription older than the newest 1000.
+// Only used for All Subscriptions' explicit "Export all" button now — the
+// on-screen table itself uses searchSubscriptions() instead, since loading
+// and joining all 2,000+ rows just to render a page was the whole problem.
 export async function getAllSubscriptions() {
   const pageSize = 1000
   const rows = []
@@ -160,7 +171,7 @@ export async function getAllSubscriptions() {
   for (let offset = 0, total = null; total === null || offset < total;) {
     const { data, count, error } = await supabase
       .from('subscriptions')
-      .select('*, license:licenses(name, vendor, category, price, price_unit, activation_url, onboarding_message, reminder_message, more_info_url, service_manager_emails, extra_field_label, extra_field_required, provisioning_email_show_name, provisioning_email_show_job_title, provisioning_email_show_department), renewals(fiscal_year, reminder_sent_at, decision, decided_at), suite_key_row:suite_keys(deprecated_at)', { count: 'exact' })
+      .select(SUBSCRIPTION_SELECT, { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + pageSize - 1)
     if (error) throw error
@@ -170,6 +181,67 @@ export async function getAllSubscriptions() {
     offset += data.length
   }
   return rows
+}
+
+// Server-side search/filter for Admin -> All Subscriptions, replacing the
+// old "load every subscription, filter client-side" approach — that meant
+// opening the page always paid for every row's RLS checks and joins before
+// the admin had even typed anything. Returns nothing until search/status/
+// license/fy actually narrows the query; capped at pageSize (the UI shows a
+// "narrow your search" hint rather than paging through everything, since an
+// admin hunting for a specific subscription rarely needs more than that).
+//
+// license name can't be searched inline via .or() (it lives on the joined
+// licenses table, and PostgREST's .or() only reaches the base table's own
+// columns) — so a name match is resolved to license ids first and folded
+// into the same .or() as an `in` clause. status is deliberately left out of
+// free-text search: it's a Postgres enum, and enums don't support ilike —
+// the dedicated status dropdown already covers exact-match status filtering.
+export async function searchSubscriptions({ search = '', status = '', licenseId = '', fy = '', page = 0, pageSize = 200 } = {}) {
+  let query = supabase
+    .from('subscriptions')
+    .select(SUBSCRIPTION_SELECT, { count: 'exact' })
+    .order('created_at', { ascending: false })
+
+  const q = search.trim()
+  if (q) {
+    // Commas/parens are .or()'s own clause delimiters — escape them so a
+    // search containing one can't be misread as extra filter clauses.
+    const escaped = q.replace(/[,()]/g, '\\$&')
+    const clauses = [`user_email.ilike.%${escaped}%`, `suite_key.ilike.%${escaped}%`, `ministry_id.ilike.%${escaped}%`]
+
+    const { data: matchedLicenses, error: licenseError } = await supabase.from('licenses').select('id').ilike('name', `%${q}%`)
+    if (licenseError) throw licenseError
+    if (matchedLicenses.length) clauses.push(`license_id.in.(${matchedLicenses.map(l => l.id).join(',')})`)
+
+    query = query.or(clauses.join(','))
+  }
+  if (status) query = query.eq('status', status)
+  if (licenseId) query = query.eq('license_id', licenseId)
+  if (fy) query = query.eq('fy', Number(fy))
+
+  const from = page * pageSize
+  const { data, error, count } = await query.range(from, from + pageSize - 1)
+  if (error) throw error
+  return { rows: data, count }
+}
+
+// License dropdown options for the search filters above — every license's
+// id/name. There's no longer a full subscriptions list loaded to derive
+// "licenses actually in use" from, so this just lists the catalog; licenses
+// is public-readable so this needs no special authority.
+export async function getLicenseOptions() {
+  const { data, error } = await supabase.from('licenses').select('id, name').order('name')
+  if (error) throw error
+  return data || []
+}
+
+// FY dropdown options. Still touches every subscription row (RLS-scoped,
+// same as before), but only the fy column — no joins — so it stays cheap.
+export async function getSubscriptionFyOptions() {
+  const { data, error } = await supabase.from('subscriptions').select('fy')
+  if (error) throw error
+  return [...new Set((data || []).map(r => r.fy).filter(fy => fy != null))].sort((a, b) => b - a)
 }
 
 // Mirrors GAS's getFinanceExport()/_calcProRatedCost() — see calc_prorated_cost()

@@ -4,7 +4,7 @@ import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
 import { useAuth } from '../../context/AuthContext'
-import { getAllSubscriptions } from '../../lib/admin'
+import { getAllSubscriptions, searchSubscriptions, getLicenseOptions, getSubscriptionFyOptions } from '../../lib/admin'
 import { activateSubscription } from '../../lib/approvals'
 import { searchSuiteKeys } from '../../lib/suiteKeys'
 import {
@@ -18,7 +18,7 @@ import {
   renewalReminderEmailSubject, renewalReminderEmailHtml, renewalReminderCardHtml, renewalPriceLabel,
   skVerificationEmailSubject, skVerificationEmailHtml,
 } from '../../lib/email'
-import { billingLabel, fyLabel, nextRenewalLabel, STATUS_LABEL, STATUS_COLOR, RENEWAL_LABEL, RENEWAL_COLOR, shouldShowRenewal } from '../../lib/subscriptionDisplay'
+import { billingLabel, fyLabel, nextRenewalLabel, STATUS_LABEL, STATUS_COLOR } from '../../lib/subscriptionDisplay'
 import { downloadCsv } from '../../lib/csv'
 
 // Gates the bell "resend this reminder" icon: only while there's an actual
@@ -33,29 +33,6 @@ function isRenewalReminderEligible(sub) {
     && sub.open_renewal_fy != null && sub.billing_type !== 'gtis'
 }
 
-// Most-recent-FY renewals row for a subscription — at most one row is ever
-// "open" (decision='none') at a time, enforced by start_renewal_period()'s
-// eligibility check, so the open period (if any) is always the latest one.
-function latestRenewal(sub) {
-  return (sub.renewals || []).slice().sort((a, b) => b.fiscal_year - a.fiscal_year)[0]
-}
-
-// { text, color } for the Renewal column: an open period shows the FY being
-// decided and when the reminder went out; otherwise the latest resolved
-// period's decision; '—' for licenses renewal doesn't apply to, or ones that
-// have never had a period opened.
-function renewalCell(sub) {
-  if (!shouldShowRenewal(sub)) return { text: '—', color: 'text-gray-300' }
-  if (sub.open_renewal_fy != null) {
-    const sentAt = latestRenewal(sub)?.reminder_sent_at
-    const sentLabel = sentAt ? ` — sent ${new Date(sentAt).toLocaleDateString()}` : ''
-    return { text: `FY${sub.open_renewal_fy}: Awaiting decision${sentLabel}`, color: RENEWAL_COLOR.none }
-  }
-  const latest = latestRenewal(sub)
-  if (!latest) return { text: '—', color: 'text-gray-300' }
-  return { text: `FY${latest.fiscal_year}: ${RENEWAL_LABEL[latest.decision] || latest.decision}`, color: RENEWAL_COLOR[latest.decision] }
-}
-
 // Notes column for CSV export: folds extra_field_value in alongside notes
 // (e.g. a Shared Drive's name) — same convention get_finance_export() uses
 // server-side, since it's often the only record of that answer.
@@ -66,12 +43,12 @@ function subscriptionNotes(sub) {
   return [sub.notes, extra].filter(Boolean).join('; ')
 }
 
-const CSV_HEADER = ['User', 'License', 'Billing', 'FY', 'Status', 'Renewal', 'Provisioned', 'Price paid', 'Product key', 'Invoice #', 'Notes']
+const CSV_HEADER = ['User', 'License', 'Billing', 'FY', 'Status', 'Provisioned', 'Price paid', 'Product key', 'Invoice #', 'Notes']
 
 function toCsvRow(sub) {
   return [
     sub.user_email, sub.license?.name, billingLabel(sub), fyLabel(sub), STATUS_LABEL[sub.status],
-    renewalCell(sub).text, sub.activated_at, sub.price_at_signup, sub.product_key, sub.invoice_number,
+    sub.activated_at, sub.price_at_signup, sub.product_key, sub.invoice_number,
     subscriptionNotes(sub),
   ]
 }
@@ -89,21 +66,25 @@ const COLUMNS = [
   { key: 'billing', label: 'Billing', sort: s => billingLabel(s).toLowerCase() },
   { key: 'fy', label: 'FY', sort: s => s.fy || 0 },
   { key: 'status', label: 'Status', sort: s => STATUS_LABEL[s.status] || s.status },
-  { key: 'renewal', label: 'Renewal', sort: s => (shouldShowRenewal(s) ? (s.open_renewal_fy ?? latestRenewal(s)?.fiscal_year ?? 0) : -1) },
   { key: 'started', label: 'Provisioned', sort: s => s.activated_at || '' },
 ]
 
 // Mirrors GAS's Admin Panel "All Subscriptions" tab — every subscription,
-// every user, every status, unfiltered. Admin: SuiteKey Charges/My Team are
-// scoped to what you own/manage; this is the one place to see everything.
+// every user, every status — searched rather than browsed. Admin: SuiteKey
+// Charges/My Team are scoped to what you own/manage; this is the one place
+// that can reach any subscription, any user.
 export default function AdminAllSubscriptions() {
   const { profile } = useAuth()
   const [subs, setSubs] = useState(null)
+  const [totalCount, setTotalCount] = useState(0)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [licenseFilter, setLicenseFilter] = useState('')
   const [fyFilter, setFyFilter] = useState('')
+  const [licenseOptions, setLicenseOptions] = useState([])
+  const [fyOptions, setFyOptions] = useState([])
   const [sortKey, setSortKey] = useState('started')
   const [sortDir, setSortDir] = useState('desc')
   const [resendState, setResendState] = useState({})
@@ -115,12 +96,51 @@ export default function AdminAllSubscriptions() {
   const [suiteKeySelected, setSuiteKeySelected] = useState(true)
   const [suiteKeySuggestions, setSuiteKeySuggestions] = useState([])
   const [showSuiteKeySuggestions, setShowSuiteKeySuggestions] = useState(false)
+  const [exportingAll, setExportingAll] = useState(false)
 
+  const hasFilter = !!(search.trim() || statusFilter || licenseFilter || fyFilter)
+
+  // Re-runs the current search — used both by the debounced effect below and
+  // by every mutating action (cancel, save details, record a renewal
+  // decision) to refresh in place afterward. No filter set at all means
+  // nothing to query: the page starts (and returns to) empty until the
+  // admin actually searches for something, rather than loading every
+  // subscription up front.
   function reload() {
-    getAllSubscriptions().then(setSubs).catch(e => setError(e.message))
+    if (!hasFilter) { setSubs(null); setTotalCount(0); return }
+    setLoading(true)
+    searchSubscriptions({ search, status: statusFilter, licenseId: licenseFilter, fy: fyFilter })
+      .then(({ rows, count }) => { setSubs(rows); setTotalCount(count) })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
   }
 
-  useEffect(reload, [])
+  // Debounced so typing in the search box doesn't fire a query per
+  // keystroke; the status/license/FY dropdowns are discrete choices and
+  // could fire immediately, but sharing one effect keeps this simple and
+  // 300ms is imperceptible for a click.
+  useEffect(() => {
+    const timer = setTimeout(reload, 300)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, statusFilter, licenseFilter, fyFilter])
+
+  useEffect(() => {
+    getLicenseOptions().then(setLicenseOptions).catch(e => setError(e.message))
+    getSubscriptionFyOptions().then(setFyOptions).catch(e => setError(e.message))
+  }, [])
+
+  async function handleExportAll() {
+    setExportingAll(true)
+    try {
+      const rows = await getAllSubscriptions()
+      downloadCsv(CSV_HEADER, rows.map(toCsvRow), `all-subscriptions-${new Date().toISOString().split('T')[0]}.csv`)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setExportingAll(false)
+    }
+  }
 
   // Debounced typeahead for the Details modal's SuiteKey repoint field —
   // mirrors Catalog's request form, since suite_keys is now refreshed daily
@@ -436,44 +456,25 @@ export default function AdminAllSubscriptions() {
     }
   }
 
-  const licenseOptions = useMemo(() => (
-    [...new Set((subs || []).map(s => s.license?.name).filter(Boolean))].sort()
-  ), [subs])
-  const fyOptions = useMemo(() => (
-    [...new Set((subs || []).map(s => s.fy).filter(fy => fy != null))].sort((a, b) => b - a)
-  ), [subs])
-
-  const q = search.trim().toLowerCase()
-  const filteredSubs = subs?.filter(s => {
-    if (q && !(
-      s.user_email.toLowerCase().includes(q) ||
-      (s.license?.name || '').toLowerCase().includes(q) ||
-      (s.suite_key || '').toLowerCase().includes(q) ||
-      (s.ministry_id || '').toLowerCase().includes(q) ||
-      s.status.toLowerCase().includes(q)
-    )) return false
-    if (statusFilter && s.status !== statusFilter) return false
-    if (licenseFilter && s.license?.name !== licenseFilter) return false
-    if (fyFilter && String(s.fy) !== fyFilter) return false
-    return true
-  })
-
+  // Filtering now happens server-side in searchSubscriptions() — subs is
+  // already exactly what matches. Sorting still happens here, since it's
+  // just reordering the (already-bounded, at most one page's worth of)
+  // rows already on hand.
   const visibleSubs = useMemo(() => {
-    if (!filteredSubs) return filteredSubs
+    if (!subs) return subs
     const col = COLUMNS.find(c => c.key === sortKey)
-    const sorted = [...filteredSubs].sort((a, b) => {
+    const sorted = [...subs].sort((a, b) => {
       const av = col.sort(a), bv = col.sort(b)
       return av < bv ? -1 : av > bv ? 1 : 0
     })
     return sortDir === 'desc' ? sorted.reverse() : sorted
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredSubs, sortKey, sortDir])
+  }, [subs, sortKey, sortDir])
 
-  // Exports whatever the table currently shows — search/license/FY/status
-  // filters and all — rather than every subscription regardless of filters,
-  // matching how Audit Log's export respects its own filters. All rows are
-  // already loaded client-side (getAllSubscriptions() paginates past
-  // PostgREST's 1000-row cap up front), so no separate export fetch is needed.
+  // Exports whatever the search currently returned — same "respects the
+  // filters" convention as Audit Log's export, just against the search
+  // results instead of a fully-preloaded table (see handleExportAll above
+  // for a true unfiltered export).
   function handleExportCsv() {
     downloadCsv(CSV_HEADER, (visibleSubs || []).map(toCsvRow), `all-subscriptions-${new Date().toISOString().split('T')[0]}.csv`)
   }
@@ -485,59 +486,77 @@ export default function AdminAllSubscriptions() {
         <h1 className="font-display text-2xl font-bold text-brand mb-6">Admin — All Subscriptions</h1>
         {error && <p className="text-sil-red mb-4">{error}</p>}
 
-        {subs?.length > 0 && (
-          <div className="flex flex-wrap gap-3 mb-4">
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Filter by user, license, SuiteKey, or Ministry ID…"
-              className="flex-1 min-w-[240px] border border-gray-300 rounded-lg px-3 py-2 text-sm"
-            />
-            <select
-              value={licenseFilter}
-              onChange={e => setLicenseFilter(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
-            >
-              <option value="">All licenses</option>
-              {licenseOptions.map(name => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
-            <select
-              value={fyFilter}
-              onChange={e => setFyFilter(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
-            >
-              <option value="">All FYs</option>
-              {fyOptions.map(fy => (
-                <option key={fy} value={String(fy)}>{`FY${fy}`}</option>
-              ))}
-            </select>
-            <select
-              value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
-            >
-              <option value="">All statuses</option>
-              {Object.entries(STATUS_LABEL).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={handleExportCsv}
-              disabled={visibleSubs.length === 0}
-              title="Export the rows currently shown (respects the filters above)"
-              className="text-sm font-medium text-brand border border-brand rounded-lg px-4 py-2 disabled:opacity-50"
-            >
-              Export CSV
-            </button>
-          </div>
+        <div className="flex flex-wrap gap-3 mb-4">
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search by user, license, SuiteKey, or Ministry ID…"
+            className="flex-1 min-w-[240px] border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          />
+          <select
+            value={licenseFilter}
+            onChange={e => setLicenseFilter(e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          >
+            <option value="">All licenses</option>
+            {licenseOptions.map(l => (
+              <option key={l.id} value={l.id}>{l.name}</option>
+            ))}
+          </select>
+          <select
+            value={fyFilter}
+            onChange={e => setFyFilter(e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          >
+            <option value="">All FYs</option>
+            {fyOptions.map(fy => (
+              <option key={fy} value={String(fy)}>{`FY${fy}`}</option>
+            ))}
+          </select>
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          >
+            <option value="">All statuses</option>
+            {Object.entries(STATUS_LABEL).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={!visibleSubs?.length}
+            title="Export the rows currently shown (respects the filters above)"
+            className="text-sm font-medium text-brand border border-brand rounded-lg px-4 py-2 disabled:opacity-50"
+          >
+            Export CSV
+          </button>
+          <button
+            type="button"
+            onClick={handleExportAll}
+            disabled={exportingAll}
+            title="Export every subscription, ignoring the filters above — slower, fetches the whole table"
+            className="text-sm font-medium text-gray-500 border border-gray-300 rounded-lg px-4 py-2 disabled:opacity-50"
+          >
+            {exportingAll ? 'Exporting…' : 'Export all'}
+          </button>
+        </div>
+
+        {!hasFilter && (
+          <p className="text-gray-400 mb-4">Search or choose a filter above to see subscriptions.</p>
         )}
-        {subs?.length > 0 && visibleSubs.length === 0 && (
+        {hasFilter && loading && (
+          <p className="text-gray-400 mb-4">Searching…</p>
+        )}
+        {hasFilter && !loading && subs?.length === 0 && (
           <p className="text-gray-400 mb-4">No subscriptions match the current filters.</p>
         )}
+        {hasFilter && !loading && subs?.length > 0 && totalCount > subs.length && (
+          <p className="text-gray-400 mb-4 text-sm">Showing {subs.length} of {totalCount} matches — narrow your search to see the rest.</p>
+        )}
 
+        {subs?.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-gray-400 border-b">
@@ -562,7 +581,6 @@ export default function AdminAllSubscriptions() {
             <tbody className="divide-y">
               {visibleSubs?.map(sub => {
                 const hasDetails = sub.notes || sub.product_key || sub.invoice_number || sub.extra_field_value
-                const renewal = renewalCell(sub)
                 return (
                 <tr key={sub.id} className="hover:bg-gray-50 transition-colors">
                   <td className="p-3">{sub.user_email}</td>
@@ -575,27 +593,6 @@ export default function AdminAllSubscriptions() {
                   </td>
                   <td className="p-3 text-gray-500">{fyLabel(sub) || '—'}</td>
                   <td className={`p-3 ${STATUS_COLOR[sub.status]}`}>{STATUS_LABEL[sub.status]}</td>
-                  <td className={`p-3 whitespace-nowrap ${renewal.color}`}>
-                    <div>{renewal.text}</div>
-                    {sub.open_renewal_fy != null && (
-                      <div className="flex gap-2 mt-1">
-                        <button
-                          onClick={() => handleRenewalDecision(optInRenewal, sub, 'Renew')}
-                          title="Record that they decided to renew (e.g. they emailed their answer)"
-                          className="text-xs font-medium text-white bg-sil-green rounded px-2 py-0.5 hover:opacity-90 transition"
-                        >
-                          Renew
-                        </button>
-                        <button
-                          onClick={() => handleRenewalDecision(optOutRenewal, sub, "Don't renew")}
-                          title="Record that they decided not to renew (e.g. they emailed their answer)"
-                          className="text-xs font-medium text-white bg-gray-400 rounded px-2 py-0.5 hover:opacity-90 transition"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    )}
-                  </td>
                   <td className="p-3 text-gray-500 whitespace-nowrap">{sub.activated_at || '—'}</td>
                   <td className="p-3">
                     <button
@@ -685,6 +682,24 @@ export default function AdminAllSubscriptions() {
                           <XCircle size={16} />
                         </button>
                       )}
+                      {sub.open_renewal_fy != null && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleRenewalDecision(optInRenewal, sub, 'Renew')}
+                            title={`Record that they decided to renew for FY${sub.open_renewal_fy} (e.g. they emailed their answer)`}
+                            className="text-xs font-medium text-white bg-sil-green rounded px-2 py-0.5 hover:opacity-90 transition"
+                          >
+                            Renew
+                          </button>
+                          <button
+                            onClick={() => handleRenewalDecision(optOutRenewal, sub, "Don't renew")}
+                            title={`Record that they decided not to renew for FY${sub.open_renewal_fy} (e.g. they emailed their answer)`}
+                            className="text-xs font-medium text-white bg-gray-400 rounded px-2 py-0.5 hover:opacity-90 transition"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -693,6 +708,7 @@ export default function AdminAllSubscriptions() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       {editingSub && (
