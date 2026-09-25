@@ -1,4 +1,20 @@
 customHeaders:
+  # HSTS: tells browsers to only ever reach this site over HTTPS. Browsers
+  # cache it for max-age seconds, so a mistake (e.g. a domain that turns out
+  # to need plain HTTP) can't be undone faster than that. Ramp up in stages,
+  # letting each one run cleanly before moving to the next:
+  #   1. 3600      (1 hour)   <- current
+  #   2. 86400     (1 day)
+  #   3. 604800    (1 week)
+  #   4. 2592000   (1 month)
+  #   5. 31536000  (1 year)   final
+  # Deliberately no includeSubDomains/preload — this app's hostname doesn't
+  # own the subdomains beneath it, and preload is effectively irreversible.
+  - pattern: '**'
+    headers:
+      - key: 'Strict-Transport-Security'
+        value: 'max-age=3600'
+
   # Vite content-hashes JS/CSS filenames, so a given filename's content never
   # changes — safe to cache at the CDN and browser for a long time.
   - pattern: '**/*.@(js|css)'
