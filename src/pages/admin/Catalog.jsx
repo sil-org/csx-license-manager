@@ -15,6 +15,7 @@ import {
 } from '../../lib/email'
 import { startRenewalPeriod, getRenewalPeriodBlockers } from '../../lib/subscriptions'
 import { nextRenewalLabel, PRICE_UNIT_LABEL } from '../../lib/subscriptionDisplay'
+import { currentFiscalYear } from '../../lib/fiscalYear'
 
 const BLANK = {
   id: null, name: '', vendor: '', category: '', price: '', notes: '',
@@ -32,7 +33,7 @@ const BLANK = {
 // Sample data for the Preview buttons in the email-overrides section — no
 // real subscription exists yet while editing a license, so this stands in
 // for one closely enough to render what the real thing would look like.
-const PREVIEW_SUB = { billing_type: 'suite_key', suite_key: 'SAMPLE-001', billing_cycle: 'annual', fy: new Date().getFullYear() }
+const PREVIEW_SUB = { billing_type: 'suite_key', suite_key: 'SAMPLE-001', billing_cycle: 'annual', fy: currentFiscalYear() }
 
 // Known sync-provisioning adapters (see supabase/functions/sync-provisioning/adapters/).
 // Adding a new one is just another entry here + an adapter file — no other
@@ -203,8 +204,7 @@ export default function AdminCatalog() {
   // opens a period on its own, only this action does; the weekly cron just
   // keeps nagging whoever it opened until they respond.
   async function handleStartRenewalPeriod() {
-    const now = new Date()
-    const currentFy = now.getFullYear() + (now.getMonth() >= 9 ? 1 : 0)
+    const currentFy = currentFiscalYear()
     const input = window.prompt(`Start a renewal period for ${editing.name} — which fiscal year?`, String(currentFy + 1))
     if (!input) return
     const fiscalYear = parseInt(input, 10)

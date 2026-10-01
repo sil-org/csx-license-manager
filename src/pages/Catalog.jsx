@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import { getActiveLicenses, sizeAwareSort } from '../lib/licenses'
 import { requestSubscription } from '../lib/subscriptions'
 import { searchSuiteKeys } from '../lib/suiteKeys'
+import { currentFiscalYear } from '../lib/fiscalYear'
 import {
   sendEmail,
   skVerificationEmailSubject, skVerificationEmailHtml,
@@ -226,7 +227,7 @@ function RequestModal({ license, onClose }) {
   const [error, setError] = useState(null)
   const [done, setDone] = useState(false)
 
-  const fy = new Date().getFullYear()
+  const fy = currentFiscalYear()
   const forSomeoneElse = recipientEmail.trim().toLowerCase() !== myEmail.toLowerCase()
 
   // Debounced typeahead — mirrors GAS's searchSuiteKeys(), which searched

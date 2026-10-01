@@ -5,6 +5,7 @@ import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { getMySubscriptions, cancelSubscription, optInRenewal, optOutRenewal } from '../lib/subscriptions'
+import { fiscalYearOf } from '../lib/fiscalYear'
 import { fyLabel, STATUS_LABEL, STATUS_BADGE, INACTIVE_STATUSES, PRICE_UNIT_LABEL, suiteKeyKeepsBillingAfterCancel } from '../lib/subscriptionDisplay'
 
 // "SuiteKey: X" / "Ministry ID: X" / "GTIS-funded" — same underlying data as
@@ -23,14 +24,6 @@ function formatPrice(price) {
   return n % 1 === 0 ? `$${n}` : `$${n.toFixed(2)}`
 }
 
-// Same Oct-1 fiscal-year boundary used throughout (see currentFiscalYear()
-// in SuiteKeySpendCard.jsx/TeamSpendCard.jsx), applied to a specific date
-// instead of "now" — the fiscal year this subscription was originally
-// signed up in.
-function fiscalYearOf(dateStr) {
-  const d = new Date(dateStr)
-  return d.getMonth() + 1 >= 10 ? d.getFullYear() + 1 : d.getFullYear()
-}
 
 // price_at_signup is frozen at whatever it was the day the subscription was
 // first created — opt_in_renewal() bumps sub.fy to the new fiscal year but

@@ -1,14 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react'
 import { getTeamSpend } from '../lib/team'
+import { currentFiscalYear } from '../lib/fiscalYear'
 
-// FY runs Oct 1 - Sep 30 (see fy_boundary_months() in
-// 70_team_spend.sql) — a calendar month of 10+ means the fiscal year has
-// already rolled over to next calendar year.
-function currentFiscalYear() {
-  const now = new Date()
-  return now.getMonth() + 1 >= 10 ? now.getFullYear() + 1 : now.getFullYear()
-}
 
 function fyPeriod(fy) {
   return `Oct 1, ${fy - 1} – Sep 30, ${fy}`

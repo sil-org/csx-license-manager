@@ -1,12 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { getSuiteKeySpend } from '../lib/suiteKeyCharges'
+import { currentFiscalYear } from '../lib/fiscalYear'
 
-// FY runs Oct 1 - Sep 30 — see TeamSpendCard.jsx, which uses the same rule.
-function currentFiscalYear() {
-  const now = new Date()
-  return now.getMonth() + 1 >= 10 ? now.getFullYear() + 1 : now.getFullYear()
-}
 
 function fyPeriod(fy) {
   return `Oct 1, ${fy - 1} – Sep 30, ${fy}`
