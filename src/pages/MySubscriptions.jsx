@@ -121,7 +121,7 @@ export default function MySubscriptions() {
 
         <div className="space-y-3">
           {subs?.filter(sub => showInactive || !INACTIVE_STATUSES.includes(sub.status)).map(sub => (
-            <div key={sub.id} className="bg-white rounded-xl shadow-sm p-5 flex items-center justify-between">
+            <div key={sub.id} className="bg-white rounded-xl shadow-xs p-5 flex items-center justify-between">
               <div>
                 <p className="font-semibold text-gray-900">{sub.license?.name}</p>
                 <p className="text-sm text-gray-500">

@@ -139,7 +139,7 @@ export default function FAQ() {
                 <details key={item.q} className="bg-white border border-gray-200 rounded-lg overflow-hidden group">
                   <summary className="px-4 py-3 font-medium cursor-pointer list-none flex justify-between items-center gap-3">
                     <span>{item.q}</span>
-                    <span className="text-brand text-lg flex-shrink-0 group-open:rotate-45 transition-transform">+</span>
+                    <span className="text-brand text-lg shrink-0 group-open:rotate-45 transition-transform">+</span>
                   </summary>
                   <div className="px-4 pb-4 text-sm text-gray-700 leading-relaxed">{item.a}</div>
                 </details>

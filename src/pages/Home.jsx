@@ -52,7 +52,7 @@ export default function Home() {
 
         <button
           onClick={() => handleSignIn(signInWithGoogle)}
-          className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition"
+          className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-xs transition"
         >
           <GoogleIcon />
           Sign in with Google
@@ -61,7 +61,7 @@ export default function Home() {
         {SSO_SIGNIN_ENABLED && (
           <button
             onClick={() => handleSignIn(signInWithSSO)}
-            className="mt-3 w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition"
+            className="mt-3 w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-xs transition"
           >
             Sign in with SSO
           </button>

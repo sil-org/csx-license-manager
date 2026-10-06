@@ -72,14 +72,14 @@ export default function InstallPrompt() {
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-sm bg-white rounded-xl shadow-lg border border-gray-200 p-4 flex items-start gap-3">
       {showIOSInstructions ? (
         <>
-          <Share size={20} className="text-brand flex-shrink-0 mt-0.5" />
+          <Share size={20} className="text-brand shrink-0 mt-0.5" />
           <p className="text-sm text-gray-700 flex-1">
             Install this app: tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.
           </p>
         </>
       ) : (
         <>
-          <Download size={20} className="text-brand flex-shrink-0 mt-0.5" />
+          <Download size={20} className="text-brand shrink-0 mt-0.5" />
           <div className="flex-1">
             <p className="text-sm text-gray-700 mb-2">Install this app for quicker access.</p>
             <button onClick={handleInstall} className="text-sm font-medium bg-brand text-white rounded-lg px-3 py-1.5">
@@ -88,7 +88,7 @@ export default function InstallPrompt() {
           </div>
         </>
       )}
-      <button onClick={dismiss} className="text-gray-400 hover:text-gray-600 flex-shrink-0" aria-label="Dismiss">
+      <button onClick={dismiss} className="text-gray-400 hover:text-gray-600 shrink-0" aria-label="Dismiss">
         <X size={16} />
       </button>
     </div>

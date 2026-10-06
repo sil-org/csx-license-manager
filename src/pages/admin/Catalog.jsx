@@ -322,7 +322,7 @@ export default function AdminCatalog() {
           <p className="text-gray-400 mb-4">No licenses match "{search}".</p>
         )}
 
-        <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
+        <div className="bg-white rounded-xl shadow-xs overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-gray-400 border-b">
               <tr>
@@ -586,7 +586,7 @@ export default function AdminCatalog() {
       {preview && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setPreview(null)}>
           <div className="bg-white rounded-2xl shadow-lg w-full max-w-3xl h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0">
               <h3 className="font-semibold text-gray-900 text-sm">{preview.title}</h3>
               <button type="button" onClick={() => setPreview(null)} aria-label="Close" className="text-gray-400 hover:text-gray-600">
                 <X size={18} />
@@ -645,7 +645,7 @@ function RichTextEditor({ value, onChange, placeholder }) {
             title={title}
             onMouseDown={e => e.preventDefault()}
             onClick={() => exec(command)}
-            className="p-1 rounded text-gray-600 hover:bg-gray-200"
+            className="p-1 rounded-sm text-gray-600 hover:bg-gray-200"
           >
             <Icon size={14} />
           </button>
@@ -655,7 +655,7 @@ function RichTextEditor({ value, onChange, placeholder }) {
           title="Link"
           onMouseDown={e => e.preventDefault()}
           onClick={handleLink}
-          className="p-1 rounded text-gray-600 hover:bg-gray-200"
+          className="p-1 rounded-sm text-gray-600 hover:bg-gray-200"
         >
           <LinkIcon size={14} />
         </button>
@@ -666,7 +666,7 @@ function RichTextEditor({ value, onChange, placeholder }) {
         suppressContentEditableWarning
         onInput={e => onChange(e.currentTarget.innerHTML)}
         data-placeholder={placeholder}
-        className="px-3 py-2 text-sm min-h-[4.5rem] focus:outline-none empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400"
+        className="px-3 py-2 text-sm min-h-18 focus:outline-hidden empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400"
       />
     </div>
   )
@@ -737,7 +737,7 @@ function DepartmentApprovals({ licenseId }) {
       {rows?.length > 0 && (
         <ul className="space-y-1 mb-3">
           {rows.map(r => (
-            <li key={r.id} className="flex items-center justify-between text-sm bg-gray-50 rounded px-2 py-1">
+            <li key={r.id} className="flex items-center justify-between text-sm bg-gray-50 rounded-sm px-2 py-1">
               <span><strong>{r.sco}</strong> → {r.approver_email}</span>
               <button type="button" onClick={() => handleRemove(r.id)} className="text-gray-400 hover:text-sil-red" aria-label={`Remove ${r.sco}`}>
                 <X size={14} />
@@ -814,7 +814,7 @@ function AreaDiscounts({ licenseId }) {
       {rows?.length > 0 && (
         <ul className="space-y-1 mb-3">
           {rows.map(r => (
-            <li key={r.id} className="flex items-center justify-between text-sm bg-gray-50 rounded px-2 py-1">
+            <li key={r.id} className="flex items-center justify-between text-sm bg-gray-50 rounded-sm px-2 py-1">
               <span><strong>{r.area}</strong> → {r.discount_percent}% off</span>
               <button type="button" onClick={() => handleRemove(r.id)} className="text-gray-400 hover:text-sil-red" aria-label={`Remove ${r.area}`}>
                 <X size={14} />

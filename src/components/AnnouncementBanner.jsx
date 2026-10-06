@@ -37,12 +37,12 @@ export default function AnnouncementBanner() {
           href={announcement.cta_url}
           target="_blank"
           rel="noopener noreferrer"
-          className="font-medium underline underline-offset-2 whitespace-nowrap flex-shrink-0"
+          className="font-medium underline underline-offset-2 whitespace-nowrap shrink-0"
         >
           {announcement.cta_label}
         </a>
       )}
-      <button onClick={dismiss} aria-label="Dismiss" className="flex-shrink-0 hover:opacity-75">
+      <button onClick={dismiss} aria-label="Dismiss" className="shrink-0 hover:opacity-75">
         <X size={16} />
       </button>
     </div>

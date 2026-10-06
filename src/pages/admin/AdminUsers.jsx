@@ -45,7 +45,7 @@ export default function AdminUsers() {
         <AdminTabs />
         <h1 className="font-display text-2xl font-bold text-brand mb-6">Admin — Users</h1>
 
-        <div className="bg-brand/[0.06] border border-brand/20 rounded-xl p-4 mb-6 text-sm text-gray-700">
+        <div className="bg-brand/6 border border-brand/20 rounded-xl p-4 mb-6 text-sm text-gray-700">
           New to maintaining this project? Start with the{' '}
           <a
             href="https://github.com/kode-monki/license-manager/blob/main/README.md"
@@ -70,7 +70,7 @@ export default function AdminUsers() {
           />
         )}
 
-        <div className="bg-white rounded-xl shadow-sm divide-y">
+        <div className="bg-white rounded-xl shadow-xs divide-y">
           {visibleProfiles?.map(p => (
             <div key={p.id} className="p-4 flex items-center justify-between">
               <div>

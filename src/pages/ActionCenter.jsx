@@ -219,7 +219,7 @@ function Section({ title, children }) {
 
 function Row({ title, sub, children }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm p-4 flex items-center justify-between">
+    <div className="bg-white rounded-xl shadow-xs p-4 flex items-center justify-between">
       <div>
         <p className="font-medium text-brand">{title}</p>
         <p className="text-xs text-gray-400">{sub}</p>

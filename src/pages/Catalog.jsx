@@ -100,11 +100,11 @@ export default function Catalog() {
               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setRequesting(license) } }}
               role="button"
               tabIndex={0}
-              className="bg-white rounded-xl shadow-sm p-5 flex flex-col cursor-pointer hover:shadow-md transition"
+              className="bg-white rounded-xl shadow-xs p-5 flex flex-col cursor-pointer hover:shadow-md transition"
             >
               <div className="flex items-start gap-3 mb-3">
                 {license.logo_url && (
-                  <img src={license.logo_url} alt="" className="h-10 w-10 object-contain flex-shrink-0" />
+                  <img src={license.logo_url} alt="" className="h-10 w-10 object-contain shrink-0" />
                 )}
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">

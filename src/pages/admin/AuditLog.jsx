@@ -82,7 +82,7 @@ export default function AdminAuditLog() {
         <h1 className="font-display text-2xl font-bold text-brand mb-6">Admin — Audit Log</h1>
         {error && <p className="text-sil-red mb-4">{error}</p>}
 
-        <form onSubmit={applyFilters} className="bg-white rounded-xl shadow-sm p-4 mb-4 flex flex-wrap items-end gap-3">
+        <form onSubmit={applyFilters} className="bg-white rounded-xl shadow-xs p-4 mb-4 flex flex-wrap items-end gap-3">
           <label className="text-sm text-gray-700">
             User
             <input
@@ -163,7 +163,7 @@ export default function AdminAuditLog() {
           <p className="text-gray-400 mb-4">No entries match these filters.</p>
         )}
 
-        <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
+        <div className="bg-white rounded-xl shadow-xs overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-gray-400 border-b">
               <tr>

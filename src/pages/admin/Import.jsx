@@ -168,7 +168,7 @@ function ImportSection({ title, description, sourceUrl, previewColumns, rowLabel
   const failCount = results ? results.length - successCount : 0
 
   return (
-    <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+    <div className="bg-white rounded-xl shadow-xs p-6 mb-6">
       <h2 className="font-display text-lg font-bold text-brand mb-1 flex items-center gap-1.5">
         {title}
         {sourceUrl && (

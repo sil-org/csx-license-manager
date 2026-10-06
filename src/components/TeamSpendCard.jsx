@@ -36,7 +36,7 @@ export default function TeamSpendCard() {
   const total = key => Math.round(data[key].actual + data[key].projected)
 
   return (
-    <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+    <div className="bg-white rounded-xl shadow-xs p-6 mb-6">
       <div className="flex items-center justify-center gap-4 pb-4 mb-4 border-b">
         <button
           onClick={() => setFy(f => f - 1)}
@@ -50,7 +50,7 @@ export default function TeamSpendCard() {
           <div className="flex items-center justify-center gap-2">
             <h2 className="font-display font-bold text-lg text-brand">FY{fy}</h2>
             {projected && (
-              <span className="text-[10px] font-bold uppercase tracking-wide text-sil-yellow bg-sil-yellow/10 rounded px-1.5 py-0.5">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-sil-yellow bg-sil-yellow/10 rounded-sm px-1.5 py-0.5">
                 Projected
               </span>
             )}

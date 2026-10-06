@@ -153,7 +153,7 @@ export default function MyTeam() {
               <p className="text-gray-400 mb-4">No subscriptions match the current filters.</p>
             )}
 
-            <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
+            <div className="bg-white rounded-xl shadow-xs overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-left text-gray-400 border-b">
                   <tr>
@@ -188,7 +188,7 @@ export default function MyTeam() {
                       <td className={`p-3 ${STATUS_COLOR[sub.status]}`}>{STATUS_LABEL[sub.status]}</td>
                       <td className="p-3">
                         {CANCELLABLE.includes(sub.status) && (
-                          <button onClick={() => handleCancel(sub)} title="Cancel subscription" className="p-1 rounded hover:bg-gray-100 text-sil-red">
+                          <button onClick={() => handleCancel(sub)} title="Cancel subscription" className="p-1 rounded-sm hover:bg-gray-100 text-sil-red">
                             <XCircle size={16} />
                           </button>
                         )}

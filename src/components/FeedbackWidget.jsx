@@ -109,7 +109,7 @@ export default function FeedbackWidget({ onSubmit }) {
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Short summary"
                   maxLength={120}
-                  className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                  className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-hidden"
                 />
 
                 <label className="mb-1 block text-xs font-medium text-gray-500">Details</label>
@@ -118,7 +118,7 @@ export default function FeedbackWidget({ onSubmit }) {
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder={activeType.placeholder}
                   rows={3}
-                  className="mb-3 w-full resize-none rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                  className="mb-3 w-full resize-none rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand focus:outline-hidden"
                 />
 
                 {status === 'error' && (

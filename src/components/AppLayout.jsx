@@ -70,7 +70,7 @@ export default function AppLayout({ appName, links, children }) {
     <div className="min-h-screen flex bg-gray-50">
       <button
         onClick={() => setMobileOpen(o => !o)}
-        className="md:hidden fixed top-3 left-3 z-30 bg-white border border-gray-200 shadow-sm rounded-lg p-2 text-brand"
+        className="md:hidden fixed top-3 left-3 z-30 bg-white border border-gray-200 shadow-xs rounded-lg p-2 text-brand"
         aria-label="Menu"
       >
         {mobileOpen ? <X size={18} /> : <Menu size={18} />}
@@ -81,7 +81,7 @@ export default function AppLayout({ appName, links, children }) {
       )}
 
       <nav
-        className={`w-56 flex-shrink-0 bg-white border-r border-gray-200 flex flex-col
+        className={`w-56 shrink-0 bg-white border-r border-gray-200 flex flex-col
           fixed md:sticky top-0 h-screen z-30 transition-transform duration-200
           ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}
       >
@@ -97,7 +97,7 @@ export default function AppLayout({ appName, links, children }) {
               <span className="font-display font-bold text-brand text-sm block truncate">{appName}</span>
               <span className="text-[10px] font-bold text-sil-red uppercase tracking-wide">Beta · v{APP_VERSION}</span>
             </div>
-            <ChevronDown size={14} className={`flex-shrink-0 text-gray-400 transition-transform ${appMenuOpen ? 'rotate-180' : ''}`} />
+            <ChevronDown size={14} className={`shrink-0 text-gray-400 transition-transform ${appMenuOpen ? 'rotate-180' : ''}`} />
           </button>
 
           {appMenuOpen && (
@@ -115,8 +115,8 @@ export default function AppLayout({ appName, links, children }) {
                     className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                   >
                     {app.logo
-                      ? <img src={app.logo} alt="" className="h-4 w-4 object-contain flex-shrink-0" />
-                      : <LayoutGrid size={14} className="text-gray-400 flex-shrink-0" />}
+                      ? <img src={app.logo} alt="" className="h-4 w-4 object-contain shrink-0" />
+                      : <LayoutGrid size={14} className="text-gray-400 shrink-0" />}
                     <span className="truncate">{app.name}</span>
                   </a>
                 ))}
@@ -142,10 +142,10 @@ export default function AppLayout({ appName, links, children }) {
                   }}
                   className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm border-l-[3px] transition-colors text-left
                     ${active
-                      ? 'border-brand text-brand bg-brand/[0.08] font-semibold'
+                      ? 'border-brand text-brand bg-brand/8 font-semibold'
                       : 'border-transparent text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}
                 >
-                  {Icon && <Icon size={16} className="flex-shrink-0" />}
+                  {Icon && <Icon size={16} className="shrink-0" />}
                   <span className="truncate">{link.label}</span>
                   {!!link.badge && (
                     <span className="ml-auto bg-sil-red text-white rounded-full text-[11px] font-semibold px-1.5 leading-4">
@@ -153,7 +153,7 @@ export default function AppLayout({ appName, links, children }) {
                     </span>
                   )}
                   {link.children?.length > 0 && (
-                    <ChevronDown size={14} className={`ml-auto flex-shrink-0 transition-transform ${expanded ? 'rotate-180' : ''} ${link.badge ? 'ml-1' : ''}`} />
+                    <ChevronDown size={14} className={`ml-auto shrink-0 transition-transform ${expanded ? 'rotate-180' : ''} ${link.badge ? 'ml-1' : ''}`} />
                   )}
                 </RowTag>
 

@@ -77,7 +77,7 @@ export default function AdminMinistryIds() {
         )}
 
         {visibleIds?.length > 0 && (
-          <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
+          <div className="bg-white rounded-xl shadow-xs overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-left text-gray-400 border-b">
                 <tr>

@@ -1,3 +1,37 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+@theme {
+  --color-brand: #005cb9;
+  --color-brand-dark: #034d8a;
+  --color-brand-accent: #ff6b00;
+
+  --color-sil-blue: #005cb9;
+  --color-sil-light-blue: #00a7e1;
+  --color-sil-violet: #93358d;
+  --color-sil-red: #d52227;
+  --color-sil-orange: #ff6b00;
+  --color-sil-green: #509e2f;
+  --color-sil-yellow: #ffb71b;
+  --color-sil-gray: #666666;
+
+  --font-sans: 'Source Sans 3', ui-sans-serif, system-ui, sans-serif;
+  --font-display: Roboto, Arial, ui-sans-serif, sans-serif;
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}

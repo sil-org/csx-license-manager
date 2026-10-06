@@ -557,7 +557,7 @@ export default function AdminAllSubscriptions() {
         )}
 
         {subs?.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
+        <div className="bg-white rounded-xl shadow-xs overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-gray-400 border-b">
               <tr>
@@ -598,7 +598,7 @@ export default function AdminAllSubscriptions() {
                     <button
                       onClick={() => openEditModal(sub)}
                       title="Notes, product key, invoice number, price paid"
-                      className={`p-1 rounded hover:bg-gray-100 ${hasDetails ? 'text-brand' : 'text-gray-300'}`}
+                      className={`p-1 rounded-sm hover:bg-gray-100 ${hasDetails ? 'text-brand' : 'text-gray-300'}`}
                     >
                       <StickyNote size={16} />
                     </button>
@@ -610,7 +610,7 @@ export default function AdminAllSubscriptions() {
                           <button
                             onClick={() => openEditModal(sub, { activate: true })}
                             title="Mark active (opens purchase details)"
-                            className="p-1 rounded hover:bg-gray-100 text-sil-green"
+                            className="p-1 rounded-sm hover:bg-gray-100 text-sil-green"
                           >
                             <CheckCircle2 size={16} />
                           </button>
@@ -623,7 +623,7 @@ export default function AdminAllSubscriptions() {
                               onClick={() => confirmResendProvisioning(sub)}
                               disabled={resendState[sub.id] === 'sending'}
                               title="Re-request provisioning"
-                              className="p-1 rounded hover:bg-gray-100 text-brand disabled:opacity-50"
+                              className="p-1 rounded-sm hover:bg-gray-100 text-brand disabled:opacity-50"
                             >
                               <RefreshCw size={16} className={resendState[sub.id] === 'sending' ? 'animate-spin' : ''} />
                             </button>
@@ -640,7 +640,7 @@ export default function AdminAllSubscriptions() {
                             onClick={() => handleResendSkVerification(sub)}
                             disabled={resendState[sub.id] === 'sending'}
                             title="Resend SuiteKey verification email"
-                            className="p-1 rounded hover:bg-gray-100 text-brand disabled:opacity-50"
+                            className="p-1 rounded-sm hover:bg-gray-100 text-brand disabled:opacity-50"
                           >
                             <RefreshCw size={16} className={resendState[sub.id] === 'sending' ? 'animate-spin' : ''} />
                           </button>
@@ -671,14 +671,14 @@ export default function AdminAllSubscriptions() {
                             onClick={() => confirmSendRenewalReminder(sub)}
                             disabled={resendState[sub.id] === 'sending'}
                             title="Send renewal reminder"
-                            className="p-1 rounded hover:bg-gray-100 text-brand disabled:opacity-50"
+                            className="p-1 rounded-sm hover:bg-gray-100 text-brand disabled:opacity-50"
                           >
                             <Bell size={16} className={resendState[sub.id] === 'sending' ? 'animate-spin' : ''} />
                           </button>
                         )
                       )}
                       {CANCELLABLE.includes(sub.status) && (
-                        <button onClick={() => handleCancel(sub)} title="Cancel subscription" className="p-1 rounded hover:bg-gray-100 text-sil-red">
+                        <button onClick={() => handleCancel(sub)} title="Cancel subscription" className="p-1 rounded-sm hover:bg-gray-100 text-sil-red">
                           <XCircle size={16} />
                         </button>
                       )}
@@ -687,14 +687,14 @@ export default function AdminAllSubscriptions() {
                           <button
                             onClick={() => handleRenewalDecision(optInRenewal, sub, 'Renew')}
                             title={`Record that they decided to renew for FY${sub.open_renewal_fy} (e.g. they emailed their answer)`}
-                            className="text-xs font-medium text-white bg-sil-green rounded px-2 py-0.5 hover:opacity-90 transition"
+                            className="text-xs font-medium text-white bg-sil-green rounded-sm px-2 py-0.5 hover:opacity-90 transition"
                           >
                             Renew
                           </button>
                           <button
                             onClick={() => handleRenewalDecision(optOutRenewal, sub, "Don't renew")}
                             title={`Record that they decided not to renew for FY${sub.open_renewal_fy} (e.g. they emailed their answer)`}
-                            className="text-xs font-medium text-white bg-gray-400 rounded px-2 py-0.5 hover:opacity-90 transition"
+                            className="text-xs font-medium text-white bg-gray-400 rounded-sm px-2 py-0.5 hover:opacity-90 transition"
                           >
                             Cancel
                           </button>

@@ -90,7 +90,7 @@ export default function AdminFinanceExport() {
           rows.length === 0 ? (
             <p className="text-gray-400">No active subscriptions, or approved subscriptions started in that range.</p>
           ) : (
-            <div className="bg-white rounded-xl shadow-sm overflow-x-auto">
+            <div className="bg-white rounded-xl shadow-xs overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-left text-gray-400 border-b">
                   <tr>

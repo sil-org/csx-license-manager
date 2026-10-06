@@ -52,7 +52,7 @@ export default function AdminAnnouncements() {
         {!form && !error && <p className="text-gray-400">Loading…</p>}
 
         {form && (
-          <form onSubmit={handleSave} className="bg-white rounded-xl shadow-sm p-6 max-w-xl space-y-4">
+          <form onSubmit={handleSave} className="bg-white rounded-xl shadow-xs p-6 max-w-xl space-y-4">
             <label className="block text-sm text-gray-700">
               Message
               <textarea
