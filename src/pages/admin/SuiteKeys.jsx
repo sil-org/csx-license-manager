@@ -232,67 +232,71 @@ export default function AdminSuiteKeys() {
       </div>
 
       {editing && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
-          <form onSubmit={handleSave} className="bg-white rounded-2xl shadow-lg p-8 max-w-md w-full space-y-3">
-            <h2 className="font-display text-xl font-bold text-brand mb-2">
-              {editing.isNew ? 'New SuiteKey' : 'Edit SuiteKey'}
-            </h2>
-
-            <label className="block text-sm text-gray-700">
-              SuiteKey
-              <input
-                value={editing.suite_key}
-                onChange={e => setEditing({ ...editing, suite_key: e.target.value })}
-                disabled={!editing.isNew}
-                required
-                className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-500"
-              />
-            </label>
-
-            <label className="block text-sm text-gray-700">
-              Owner email
-              <input
-                type="email"
-                value={editing.owner_input || ''}
-                onChange={e => setEditing({ ...editing, owner_input: e.target.value })}
-                placeholder="Leave blank to unassign"
-                className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-              />
-            </label>
-
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input
-                type="checkbox"
-                checked={!!editing.is_group}
-                onChange={e => setEditing({ ...editing, is_group: e.target.checked })}
-              />
-              This is a Google Group, not one person
-            </label>
-            <span className="block text-xs text-gray-400 -mt-2">
-              {editing.is_group
-                ? "Anyone currently in this group can approve/decline/revoke charges to this key — no per-request verification step, since group membership is already the authorization check. Membership is synced from Google on a schedule, not read live."
-                : "Takes effect immediately — no confirmation needed from them. Any requests still awaiting verification on this key move into their Action Center queue and they're notified by email."}
-            </span>
-
-            {!editing.isNew && (
-              <div className="block text-sm text-gray-700">
-                Description
-                <p className="mt-1 text-gray-500">{editing.description || '—'}</p>
-                <span className="block text-xs text-gray-400">
-                  Set from the finance system's daily sync, not editable here.
-                </span>
+        <div className="fixed inset-0 bg-black/40 overflow-y-auto">
+          {/* min-h-full so a tall modal scrolls from its true top instead of
+              being clipped by flex centering against a fixed-height container. */}
+          <div className="min-h-full flex items-center justify-center p-4">
+            <form onSubmit={handleSave} className="bg-white rounded-2xl shadow-lg p-8 max-w-md w-full space-y-3 my-8">
+              <h2 className="font-display text-xl font-bold text-brand mb-2">
+                {editing.isNew ? 'New SuiteKey' : 'Edit SuiteKey'}
+              </h2>
+  
+              <label className="block text-sm text-gray-700">
+                SuiteKey
+                <input
+                  value={editing.suite_key}
+                  onChange={e => setEditing({ ...editing, suite_key: e.target.value })}
+                  disabled={!editing.isNew}
+                  required
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-500"
+                />
+              </label>
+  
+              <label className="block text-sm text-gray-700">
+                Owner email
+                <input
+                  type="email"
+                  value={editing.owner_input || ''}
+                  onChange={e => setEditing({ ...editing, owner_input: e.target.value })}
+                  placeholder="Leave blank to unassign"
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </label>
+  
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={!!editing.is_group}
+                  onChange={e => setEditing({ ...editing, is_group: e.target.checked })}
+                />
+                This is a Google Group, not one person
+              </label>
+              <span className="block text-xs text-gray-400 -mt-2">
+                {editing.is_group
+                  ? "Anyone currently in this group can approve/decline/revoke charges to this key — no per-request verification step, since group membership is already the authorization check. Membership is synced from Google on a schedule, not read live."
+                  : "Takes effect immediately — no confirmation needed from them. Any requests still awaiting verification on this key move into their Action Center queue and they're notified by email."}
+              </span>
+  
+              {!editing.isNew && (
+                <div className="block text-sm text-gray-700">
+                  Description
+                  <p className="mt-1 text-gray-500">{editing.description || '—'}</p>
+                  <span className="block text-xs text-gray-400">
+                    Set from the finance system's daily sync, not editable here.
+                  </span>
+                </div>
+              )}
+  
+              {error && <p className="text-sil-red text-sm">{error}</p>}
+  
+              <div className="flex gap-3 pt-3">
+                <button type="submit" disabled={saving} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                <button type="button" onClick={() => setEditing(null)} className="text-sm font-medium text-gray-500">Cancel</button>
               </div>
-            )}
-
-            {error && <p className="text-sil-red text-sm">{error}</p>}
-
-            <div className="flex gap-3 pt-3">
-              <button type="submit" disabled={saving} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-              <button type="button" onClick={() => setEditing(null)} className="text-sm font-medium text-gray-500">Cancel</button>
-            </div>
-          </form>
+            </form>
+          </div>
         </div>
       )}
     </AppLayout>

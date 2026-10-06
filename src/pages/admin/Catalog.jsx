@@ -367,219 +367,223 @@ export default function AdminCatalog() {
       </div>
 
       {editing && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 overflow-y-auto">
-          <form onSubmit={handleSave} className="bg-white rounded-2xl shadow-lg p-8 max-w-2xl w-full my-8">
-            <h2 className="font-display text-xl font-bold text-brand mb-4">{editing.id ? 'Edit license' : 'New license'}</h2>
-            {error && <p className="text-sil-red text-sm mb-3">{error}</p>}
-
-            <div className="flex items-start gap-3 mb-3">
-              <div className="h-14 w-14 shrink-0 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden">
-                {editing.logo_url
-                  ? <img src={editing.logo_url} alt="" className="h-full w-full object-contain" />
-                  : <span className="text-[10px] text-gray-300 text-center px-1">No logo</span>}
+        <div className="fixed inset-0 bg-black/40 overflow-y-auto">
+          {/* min-h-full so a tall modal scrolls from its true top instead of
+              being clipped by flex centering against a fixed-height container. */}
+          <div className="min-h-full flex items-center justify-center p-4">
+            <form onSubmit={handleSave} className="bg-white rounded-2xl shadow-lg p-8 max-w-2xl w-full my-8">
+              <h2 className="font-display text-xl font-bold text-brand mb-4">{editing.id ? 'Edit license' : 'New license'}</h2>
+              {error && <p className="text-sil-red text-sm mb-3">{error}</p>}
+  
+              <div className="flex items-start gap-3 mb-3">
+                <div className="h-14 w-14 shrink-0 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden">
+                  {editing.logo_url
+                    ? <img src={editing.logo_url} alt="" className="h-full w-full object-contain" />
+                    : <span className="text-[10px] text-gray-300 text-center px-1">No logo</span>}
+                </div>
+                <div className="flex-1">
+                  <Field label="Name" value={editing.name} onChange={v => setEditing({ ...editing, name: v })} required />
+                  {showLogoInput || !editing.logo_url ? (
+                    <div className="mt-1">
+                      <Field label="Logo URL" value={editing.logo_url} onChange={v => setEditing({ ...editing, logo_url: v })} />
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => setShowLogoInput(true)} className="mt-1 text-xs font-medium text-brand">
+                      Change logo
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="flex-1">
-                <Field label="Name" value={editing.name} onChange={v => setEditing({ ...editing, name: v })} required />
-                {showLogoInput || !editing.logo_url ? (
-                  <div className="mt-1">
-                    <Field label="Logo URL" value={editing.logo_url} onChange={v => setEditing({ ...editing, logo_url: v })} />
-                  </div>
-                ) : (
-                  <button type="button" onClick={() => setShowLogoInput(true)} className="mt-1 text-xs font-medium text-brand">
-                    Change logo
-                  </button>
+  
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                <Field label="Vendor" value={editing.vendor} onChange={v => setEditing({ ...editing, vendor: v })} />
+                <Field label="Category" value={editing.category} onChange={v => setEditing({ ...editing, category: v })} />
+  
+                <Field label="Price" type="number" value={editing.price} onChange={v => setEditing({ ...editing, price: v })} />
+                <label className="text-sm text-gray-700">
+                  Billing cycle
+                  <select value={editing.billing_cycle}
+                    onChange={e => setEditing({
+                      ...editing, billing_cycle: e.target.value,
+                      ...(e.target.value === 'annual'
+                        ? { renewal_month: editing.renewal_month || 10, renewal_reminder: true }
+                        : { renewal_month: '', renewal_reminder: false }),
+                    })}
+                    className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    <option value="annual">Annual</option>
+                    <option value="monthly">Monthly</option>
+                    <option value="one_time">One-time (not recurring)</option>
+                  </select>
+                </label>
+  
+                {editing.billing_cycle === 'annual' && (
+                  <Field label="Renewal month (1-12)" type="number" min={1} max={12} value={editing.renewal_month} onChange={v => setEditing({ ...editing, renewal_month: v })} />
                 )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-              <Field label="Vendor" value={editing.vendor} onChange={v => setEditing({ ...editing, vendor: v })} />
-              <Field label="Category" value={editing.category} onChange={v => setEditing({ ...editing, category: v })} />
-
-              <Field label="Price" type="number" value={editing.price} onChange={v => setEditing({ ...editing, price: v })} />
-              <label className="text-sm text-gray-700">
-                Billing cycle
-                <select value={editing.billing_cycle}
-                  onChange={e => setEditing({
-                    ...editing, billing_cycle: e.target.value,
-                    ...(e.target.value === 'annual'
-                      ? { renewal_month: editing.renewal_month || 10, renewal_reminder: true }
-                      : { renewal_month: '', renewal_reminder: false }),
-                  })}
-                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-                  <option value="annual">Annual</option>
-                  <option value="monthly">Monthly</option>
-                  <option value="one_time">One-time (not recurring)</option>
-                </select>
-              </label>
-
-              {editing.billing_cycle === 'annual' && (
-                <Field label="Renewal month (1-12)" type="number" min={1} max={12} value={editing.renewal_month} onChange={v => setEditing({ ...editing, renewal_month: v })} />
-              )}
-              <div className={`flex flex-col justify-center gap-1.5 text-sm ${editing.billing_cycle !== 'annual' ? 'col-span-2' : ''}`}>
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={editing.gtis_sponsored} onChange={e => setEditing({ ...editing, gtis_sponsored: e.target.checked })} />
-                  GTIS-sponsored (no approval needed)
-                </label>
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={editing.pro_rated} onChange={e => setEditing({ ...editing, pro_rated: e.target.checked })} />
-                  Pro-rated
-                </label>
-              </div>
-
-              <label className="col-span-2 block text-sm text-gray-700">
-                Description
-                <RichTextEditor
-                  value={editing.notes ?? ''}
-                  onChange={html => setEditing({ ...editing, notes: html })}
-                  placeholder="Shown to staff in the Catalog before they subscribe — what it's for, what's included, any caveats."
-                />
-              </label>
-
-              <Field label="Activation URL" value={editing.activation_url} onChange={v => setEditing({ ...editing, activation_url: v })}
-                hint="Vendor admin portal link, shown to whoever provisions this license once it's approved — every subscription needs an explicit 'Mark active' regardless of whether this is set." />
-              <Field label="Service manager email(s)" value={editing.service_manager_emails} onChange={v => setEditing({ ...editing, service_manager_emails: v })}
-                hint="Comma-separated if more than one — everyone listed gets the same provisioning email." />
-
-              <Field label="More info URL" value={editing.more_info_url} onChange={v => setEditing({ ...editing, more_info_url: v })} />
-              <Field label="Google Group email" value={editing.google_group_email} onChange={v => setEditing({ ...editing, google_group_email: v })}
-                hint="Not automated yet — see supabase/schema_licenses.sql notes." />
-
-              <label className="text-sm text-gray-700">
-                Provisioning
-                <select value={editing.provisioning_adapter}
-                  onChange={e => setEditing({ ...editing, provisioning_adapter: e.target.value })}
-                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-                  {PROVISIONING_ADAPTERS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
-                </select>
-                <span className="block text-xs text-gray-400 mt-0.5">
-                  Automatically enable/disable the user in an external vendor system on activation/cancellation (in addition to, or instead of, the manual Activation URL above).
-                </span>
-              </label>
-              {editing.provisioning_adapter && (
-                <label className="block text-sm text-gray-700">
-                  Provisioning config (JSON)
-                  <textarea
-                    value={editing.provisioning_config}
-                    onChange={e => setEditing({ ...editing, provisioning_config: e.target.value })}
-                    rows={2}
-                    placeholder={PROVISIONING_ADAPTERS.find(a => a.value === editing.provisioning_adapter)?.configHint}
-                    className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 font-mono text-xs"
-                  />
-                </label>
-              )}
-
-              <details className="col-span-2 border border-gray-200 rounded-lg px-3 py-2">
-                <summary className="text-sm font-medium text-gray-700 cursor-pointer select-none">More settings</summary>
-                <div className="mt-3 space-y-4">
-                  <label className="flex items-center gap-2 text-sm text-gray-700">
-                    <input type="checkbox" checked={editing.department_gated} onChange={e => setEditing({ ...editing, department_gated: e.target.checked })} />
-                    Department-gated (free; departments opt in to approval below)
+                <div className={`flex flex-col justify-center gap-1.5 text-sm ${editing.billing_cycle !== 'annual' ? 'col-span-2' : ''}`}>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={editing.gtis_sponsored} onChange={e => setEditing({ ...editing, gtis_sponsored: e.target.checked })} />
+                    GTIS-sponsored (no approval needed)
                   </label>
-
-                  {editing.id && editing.department_gated && <DepartmentApprovals licenseId={editing.id} />}
-
-                  {editing.id && !editing.gtis_sponsored && !editing.department_gated && <AreaDiscounts licenseId={editing.id} />}
-
-                  <label className="flex items-center gap-2 text-sm text-gray-700">
-                    <input type="checkbox" checked={editing.allow_multiple_per_person} onChange={e => setEditing({ ...editing, allow_multiple_per_person: e.target.checked })} />
-                    Allow multiple per person (e.g. a person can hold more than one Shared Drive)
-                  </label>
-
-                  <div className="space-y-1.5">
-                    <Field label="Extra field label" value={editing.extra_field_label} onChange={v => setEditing({ ...editing, extra_field_label: v })}
-                      placeholder='e.g. "Shared Drive name"'
-                      hint="Asks requesters for one more piece of text at request time — shown in Admin -> All Subscriptions' details popup. Leave blank for none." />
-                    {editing.extra_field_label && (
-                      <label className="flex items-center gap-2 text-sm text-gray-700">
-                        <input type="checkbox" checked={editing.extra_field_required} onChange={e => setEditing({ ...editing, extra_field_required: e.target.checked })} />
-                        Required
-                      </label>
-                    )}
-                  </div>
-
-                  <div className="text-sm text-gray-700">
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={editing.requires_acknowledgement} onChange={e => setEditing({ ...editing, requires_acknowledgement: e.target.checked })} />
-                      Require Terms &amp; Conditions acknowledgement before requesting
-                    </label>
-                    {editing.requires_acknowledgement && (
-                      <RichTextEditor
-                        value={editing.acknowledgement_text ?? ''}
-                        onChange={html => setEditing({ ...editing, acknowledgement_text: html })}
-                        placeholder="Shown to staff in the request form, next to a required &quot;I agree&quot; checkbox — link to the actual terms document here."
-                      />
-                    )}
-                  </div>
-
-                  <div className="flex flex-col gap-1.5 text-sm">
-                    <span className="text-gray-700">Also include in the provisioning email (most service managers only want the email address above):</span>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={editing.provisioning_email_show_name} onChange={e => setEditing({ ...editing, provisioning_email_show_name: e.target.checked })} />
-                      Name
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={editing.provisioning_email_show_job_title} onChange={e => setEditing({ ...editing, provisioning_email_show_job_title: e.target.checked })} />
-                      Job title
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={editing.provisioning_email_show_department} onChange={e => setEditing({ ...editing, provisioning_email_show_department: e.target.checked })} />
-                      Department
-                    </label>
-                  </div>
-
-                  <label className="block text-sm text-gray-700">
-                    Onboarding email override
-                    <RichTextEditor
-                      value={editing.onboarding_message ?? ''}
-                      onChange={html => setEditing({ ...editing, onboarding_message: html })}
-                      placeholder="Leave blank to use the default &quot;your license is ready&quot; message"
-                    />
-                    <span className="block text-xs text-gray-400 mt-0.5">
-                      Replaces the default activation email body for this license — e.g. setup steps a generic message wouldn't cover.
-                    </span>
-                    <button type="button" onClick={previewOnboarding} className="mt-1 text-xs font-medium text-brand">Preview</button>
-                  </label>
-
-                  <label className="block text-sm text-gray-700">
-                    Renewal reminder override
-                    <RichTextEditor
-                      value={editing.reminder_message ?? ''}
-                      onChange={html => setEditing({ ...editing, reminder_message: html })}
-                      placeholder="Leave blank to use the default renewal-reminder message"
-                    />
-                    <span className="block text-xs text-gray-400 mt-0.5">
-                      Replaces the default text in this license's card within the renewal-reminder digest — used both by
-                      "Start renewal period" below and the weekly nag it kicks off for anyone who hasn't responded yet.
-                    </span>
-                    <button type="button" onClick={previewReminder} className="mt-1 text-xs font-medium text-brand">Preview</button>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={editing.pro_rated} onChange={e => setEditing({ ...editing, pro_rated: e.target.checked })} />
+                    Pro-rated
                   </label>
                 </div>
-              </details>
-            </div>
-
-            <div className="flex items-center justify-between pt-4">
-              <div className="flex items-center gap-3">
-                <button type="submit" className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">Save</button>
-                <button type="button" onClick={() => setEditing(null)} className="text-sm font-medium text-gray-500">Cancel</button>
-                {editing.id && editing.active && editing.billing_cycle === 'annual' && (
-                  <button
-                    type="button"
-                    onClick={handleStartRenewalPeriod}
-                    disabled={renewalSending}
-                    className="text-sm font-medium text-brand disabled:opacity-50"
-                  >
-                    {renewalSending ? 'Starting…' : 'Start renewal period'}
-                  </button>
+  
+                <label className="col-span-2 block text-sm text-gray-700">
+                  Description
+                  <RichTextEditor
+                    value={editing.notes ?? ''}
+                    onChange={html => setEditing({ ...editing, notes: html })}
+                    placeholder="Shown to staff in the Catalog before they subscribe — what it's for, what's included, any caveats."
+                  />
+                </label>
+  
+                <Field label="Activation URL" value={editing.activation_url} onChange={v => setEditing({ ...editing, activation_url: v })}
+                  hint="Vendor admin portal link, shown to whoever provisions this license once it's approved — every subscription needs an explicit 'Mark active' regardless of whether this is set." />
+                <Field label="Service manager email(s)" value={editing.service_manager_emails} onChange={v => setEditing({ ...editing, service_manager_emails: v })}
+                  hint="Comma-separated if more than one — everyone listed gets the same provisioning email." />
+  
+                <Field label="More info URL" value={editing.more_info_url} onChange={v => setEditing({ ...editing, more_info_url: v })} />
+                <Field label="Google Group email" value={editing.google_group_email} onChange={v => setEditing({ ...editing, google_group_email: v })}
+                  hint="Not automated yet — see supabase/schema_licenses.sql notes." />
+  
+                <label className="text-sm text-gray-700">
+                  Provisioning
+                  <select value={editing.provisioning_adapter}
+                    onChange={e => setEditing({ ...editing, provisioning_adapter: e.target.value })}
+                    className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    {PROVISIONING_ADAPTERS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                  </select>
+                  <span className="block text-xs text-gray-400 mt-0.5">
+                    Automatically enable/disable the user in an external vendor system on activation/cancellation (in addition to, or instead of, the manual Activation URL above).
+                  </span>
+                </label>
+                {editing.provisioning_adapter && (
+                  <label className="block text-sm text-gray-700">
+                    Provisioning config (JSON)
+                    <textarea
+                      value={editing.provisioning_config}
+                      onChange={e => setEditing({ ...editing, provisioning_config: e.target.value })}
+                      rows={2}
+                      placeholder={PROVISIONING_ADAPTERS.find(a => a.value === editing.provisioning_adapter)?.configHint}
+                      className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 font-mono text-xs"
+                    />
+                  </label>
+                )}
+  
+                <details className="col-span-2 border border-gray-200 rounded-lg px-3 py-2">
+                  <summary className="text-sm font-medium text-gray-700 cursor-pointer select-none">More settings</summary>
+                  <div className="mt-3 space-y-4">
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input type="checkbox" checked={editing.department_gated} onChange={e => setEditing({ ...editing, department_gated: e.target.checked })} />
+                      Department-gated (free; departments opt in to approval below)
+                    </label>
+  
+                    {editing.id && editing.department_gated && <DepartmentApprovals licenseId={editing.id} />}
+  
+                    {editing.id && !editing.gtis_sponsored && !editing.department_gated && <AreaDiscounts licenseId={editing.id} />}
+  
+                    <label className="flex items-center gap-2 text-sm text-gray-700">
+                      <input type="checkbox" checked={editing.allow_multiple_per_person} onChange={e => setEditing({ ...editing, allow_multiple_per_person: e.target.checked })} />
+                      Allow multiple per person (e.g. a person can hold more than one Shared Drive)
+                    </label>
+  
+                    <div className="space-y-1.5">
+                      <Field label="Extra field label" value={editing.extra_field_label} onChange={v => setEditing({ ...editing, extra_field_label: v })}
+                        placeholder='e.g. "Shared Drive name"'
+                        hint="Asks requesters for one more piece of text at request time — shown in Admin -> All Subscriptions' details popup. Leave blank for none." />
+                      {editing.extra_field_label && (
+                        <label className="flex items-center gap-2 text-sm text-gray-700">
+                          <input type="checkbox" checked={editing.extra_field_required} onChange={e => setEditing({ ...editing, extra_field_required: e.target.checked })} />
+                          Required
+                        </label>
+                      )}
+                    </div>
+  
+                    <div className="text-sm text-gray-700">
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={editing.requires_acknowledgement} onChange={e => setEditing({ ...editing, requires_acknowledgement: e.target.checked })} />
+                        Require Terms &amp; Conditions acknowledgement before requesting
+                      </label>
+                      {editing.requires_acknowledgement && (
+                        <RichTextEditor
+                          value={editing.acknowledgement_text ?? ''}
+                          onChange={html => setEditing({ ...editing, acknowledgement_text: html })}
+                          placeholder="Shown to staff in the request form, next to a required &quot;I agree&quot; checkbox — link to the actual terms document here."
+                        />
+                      )}
+                    </div>
+  
+                    <div className="flex flex-col gap-1.5 text-sm">
+                      <span className="text-gray-700">Also include in the provisioning email (most service managers only want the email address above):</span>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={editing.provisioning_email_show_name} onChange={e => setEditing({ ...editing, provisioning_email_show_name: e.target.checked })} />
+                        Name
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={editing.provisioning_email_show_job_title} onChange={e => setEditing({ ...editing, provisioning_email_show_job_title: e.target.checked })} />
+                        Job title
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={editing.provisioning_email_show_department} onChange={e => setEditing({ ...editing, provisioning_email_show_department: e.target.checked })} />
+                        Department
+                      </label>
+                    </div>
+  
+                    <label className="block text-sm text-gray-700">
+                      Onboarding email override
+                      <RichTextEditor
+                        value={editing.onboarding_message ?? ''}
+                        onChange={html => setEditing({ ...editing, onboarding_message: html })}
+                        placeholder="Leave blank to use the default &quot;your license is ready&quot; message"
+                      />
+                      <span className="block text-xs text-gray-400 mt-0.5">
+                        Replaces the default activation email body for this license — e.g. setup steps a generic message wouldn't cover.
+                      </span>
+                      <button type="button" onClick={previewOnboarding} className="mt-1 text-xs font-medium text-brand">Preview</button>
+                    </label>
+  
+                    <label className="block text-sm text-gray-700">
+                      Renewal reminder override
+                      <RichTextEditor
+                        value={editing.reminder_message ?? ''}
+                        onChange={html => setEditing({ ...editing, reminder_message: html })}
+                        placeholder="Leave blank to use the default renewal-reminder message"
+                      />
+                      <span className="block text-xs text-gray-400 mt-0.5">
+                        Replaces the default text in this license's card within the renewal-reminder digest — used both by
+                        "Start renewal period" below and the weekly nag it kicks off for anyone who hasn't responded yet.
+                      </span>
+                      <button type="button" onClick={previewReminder} className="mt-1 text-xs font-medium text-brand">Preview</button>
+                    </label>
+                  </div>
+                </details>
+              </div>
+  
+              <div className="flex items-center justify-between pt-4">
+                <div className="flex items-center gap-3">
+                  <button type="submit" className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">Save</button>
+                  <button type="button" onClick={() => setEditing(null)} className="text-sm font-medium text-gray-500">Cancel</button>
+                  {editing.id && editing.active && editing.billing_cycle === 'annual' && (
+                    <button
+                      type="button"
+                      onClick={handleStartRenewalPeriod}
+                      disabled={renewalSending}
+                      className="text-sm font-medium text-brand disabled:opacity-50"
+                    >
+                      {renewalSending ? 'Starting…' : 'Start renewal period'}
+                    </button>
+                  )}
+                </div>
+                {editing.id && (
+                  editing.active
+                    ? <button type="button" onClick={handleDeactivate} className="text-sm font-medium text-sil-red">Deactivate</button>
+                    : <button type="button" onClick={handleReactivate} className="text-sm font-medium text-sil-green">Reactivate</button>
                 )}
               </div>
-              {editing.id && (
-                editing.active
-                  ? <button type="button" onClick={handleDeactivate} className="text-sm font-medium text-sil-red">Deactivate</button>
-                  : <button type="button" onClick={handleReactivate} className="text-sm font-medium text-sil-green">Reactivate</button>
-              )}
-            </div>
-          </form>
+            </form>
+          </div>
         </div>
       )}
 

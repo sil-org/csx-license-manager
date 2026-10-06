@@ -712,139 +712,143 @@ export default function AdminAllSubscriptions() {
       </div>
 
       {editingSub && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 overflow-y-auto z-50" onClick={closeEditModal}>
-          <form onSubmit={handleSaveDetails} onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-lg p-6 max-w-md w-full my-8">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <h2 className="font-display text-lg font-bold text-brand">{editingSub.license?.name}</h2>
-                {editingSub.license?.activation_url && (
-                  <a
-                    href={editingSub.license.activation_url} target="_blank" rel="noreferrer"
-                    title="Open vendor portal"
-                    className="text-gray-400 hover:text-brand"
-                  >
-                    <ExternalLink size={16} />
-                  </a>
-                )}
+        <div className="fixed inset-0 bg-black/40 overflow-y-auto z-50" onClick={closeEditModal}>
+          {/* min-h-full so a tall modal scrolls from its true top instead of
+              being clipped by flex centering against a fixed-height container. */}
+          <div className="min-h-full flex items-center justify-center p-4">
+            <form onSubmit={handleSaveDetails} onClick={e => e.stopPropagation()} className="bg-white rounded-2xl shadow-lg p-6 max-w-md w-full my-8">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <h2 className="font-display text-lg font-bold text-brand">{editingSub.license?.name}</h2>
+                  {editingSub.license?.activation_url && (
+                    <a
+                      href={editingSub.license.activation_url} target="_blank" rel="noreferrer"
+                      title="Open vendor portal"
+                      className="text-gray-400 hover:text-brand"
+                    >
+                      <ExternalLink size={16} />
+                    </a>
+                  )}
+                </div>
+                <button type="button" onClick={closeEditModal} aria-label="Close" className="text-gray-400 hover:text-gray-600">
+                  <X size={18} />
+                </button>
               </div>
-              <button type="button" onClick={closeEditModal} aria-label="Close" className="text-gray-400 hover:text-gray-600">
-                <X size={18} />
-              </button>
-            </div>
-            <p className="text-sm text-gray-500 mb-4">{editingSub.user_email}</p>
-            {activateMode && (
-              <p className="text-sm text-sil-green mb-4">Saving will mark this subscription active and notify the user their license is provisioned.</p>
-            )}
-            {editError && <p className="text-sil-red text-sm mb-3">{editError}</p>}
-            <div className="space-y-3">
-              {editingSub.suite_key && (
-                <>
-                  <div className="relative">
-                    <label className="block text-sm text-gray-700 mb-1">SuiteKey</label>
-                    <p className="text-xs text-gray-400 mb-1">These are the SuiteKeys available in the Finance System.</p>
+              <p className="text-sm text-gray-500 mb-4">{editingSub.user_email}</p>
+              {activateMode && (
+                <p className="text-sm text-sil-green mb-4">Saving will mark this subscription active and notify the user their license is provisioned.</p>
+              )}
+              {editError && <p className="text-sil-red text-sm mb-3">{editError}</p>}
+              <div className="space-y-3">
+                {editingSub.suite_key && (
+                  <>
+                    <div className="relative">
+                      <label className="block text-sm text-gray-700 mb-1">SuiteKey</label>
+                      <p className="text-xs text-gray-400 mb-1">These are the SuiteKeys available in the Finance System.</p>
+                      <input
+                        type="text"
+                        value={editForm.suiteKey}
+                        onChange={e => { setEditForm(f => ({ ...f, suiteKey: e.target.value })); setSuiteKeySelected(false) }}
+                        onFocus={() => setShowSuiteKeySuggestions(true)}
+                        onBlur={() => setTimeout(() => setShowSuiteKeySuggestions(false), 150)}
+                        autoComplete="off"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                      {showSuiteKeySuggestions && suiteKeySuggestions.length > 0 && (
+                        <ul className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-md max-h-48 overflow-y-auto">
+                          {suiteKeySuggestions.map(s => (
+                            <li key={s.suite_key}>
+                              <button
+                                type="button"
+                                onMouseDown={() => selectSuiteKeySuggestion(s)}
+                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between gap-2"
+                              >
+                                <span className="font-medium text-brand">{s.suite_key}</span>
+                                <span className="text-xs text-gray-400 truncate">
+                                  {s.has_owner ? (s.description || 'Has an owner') : 'No owner yet'}
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    {editForm.suiteKey.trim().toLowerCase() !== editingSub.suite_key.toLowerCase() && (
+                      <label className="block text-sm text-gray-700">
+                        Suggested approver (only used if this SuiteKey has no owner on file)
+                        <input
+                          type="email"
+                          value={editForm.suggestedApproverEmail}
+                          onChange={e => setEditForm(f => ({ ...f, suggestedApproverEmail: e.target.value }))}
+                          className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                        <span className="block text-xs text-gray-400 mt-1">
+                          Changing the SuiteKey emails its owner that a request now sits against their key — it does not change this subscription's status.
+                        </span>
+                      </label>
+                    )}
+                  </>
+                )}
+                {editingSub.license?.extra_field_label && (
+                  <label className="block text-sm text-gray-700">
+                    {editingSub.license.extra_field_label}
                     <input
                       type="text"
-                      value={editForm.suiteKey}
-                      onChange={e => { setEditForm(f => ({ ...f, suiteKey: e.target.value })); setSuiteKeySelected(false) }}
-                      onFocus={() => setShowSuiteKeySuggestions(true)}
-                      onBlur={() => setTimeout(() => setShowSuiteKeySuggestions(false), 150)}
-                      autoComplete="off"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      value={editForm.extraFieldValue}
+                      onChange={e => setEditForm(f => ({ ...f, extraFieldValue: e.target.value }))}
+                      className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                     />
-                    {showSuiteKeySuggestions && suiteKeySuggestions.length > 0 && (
-                      <ul className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-md max-h-48 overflow-y-auto">
-                        {suiteKeySuggestions.map(s => (
-                          <li key={s.suite_key}>
-                            <button
-                              type="button"
-                              onMouseDown={() => selectSuiteKeySuggestion(s)}
-                              className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between gap-2"
-                            >
-                              <span className="font-medium text-brand">{s.suite_key}</span>
-                              <span className="text-xs text-gray-400 truncate">
-                                {s.has_owner ? (s.description || 'Has an owner') : 'No owner yet'}
-                              </span>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                  {editForm.suiteKey.trim().toLowerCase() !== editingSub.suite_key.toLowerCase() && (
-                    <label className="block text-sm text-gray-700">
-                      Suggested approver (only used if this SuiteKey has no owner on file)
-                      <input
-                        type="email"
-                        value={editForm.suggestedApproverEmail}
-                        onChange={e => setEditForm(f => ({ ...f, suggestedApproverEmail: e.target.value }))}
-                        className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      />
-                      <span className="block text-xs text-gray-400 mt-1">
-                        Changing the SuiteKey emails its owner that a request now sits against their key — it does not change this subscription's status.
-                      </span>
-                    </label>
-                  )}
-                </>
-              )}
-              {editingSub.license?.extra_field_label && (
+                  </label>
+                )}
                 <label className="block text-sm text-gray-700">
-                  {editingSub.license.extra_field_label}
+                  Cost at time of purchase
                   <input
-                    type="text"
-                    value={editForm.extraFieldValue}
-                    onChange={e => setEditForm(f => ({ ...f, extraFieldValue: e.target.value }))}
+                    type="number" step="0.01" min="0"
+                    value={editForm.pricePaid}
+                    onChange={e => setEditForm(f => ({ ...f, pricePaid: e.target.value }))}
                     className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                   />
                 </label>
-              )}
-              <label className="block text-sm text-gray-700">
-                Cost at time of purchase
-                <input
-                  type="number" step="0.01" min="0"
-                  value={editForm.pricePaid}
-                  onChange={e => setEditForm(f => ({ ...f, pricePaid: e.target.value }))}
-                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="block text-sm text-gray-700">
-                Product key
-                <input
-                  type="text"
-                  value={editForm.productKey}
-                  onChange={e => setEditForm(f => ({ ...f, productKey: e.target.value }))}
-                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="block text-sm text-gray-700">
-                Invoice number
-                <input
-                  type="text"
-                  value={editForm.invoiceNumber}
-                  onChange={e => setEditForm(f => ({ ...f, invoiceNumber: e.target.value }))}
-                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                />
-              </label>
-              <label className="block text-sm text-gray-700">
-                Notes
-                <textarea
-                  rows={4}
-                  value={editForm.notes}
-                  onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))}
-                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                />
-              </label>
-            </div>
-            <div className="flex justify-end gap-3 mt-5">
-              <button type="button" onClick={closeEditModal} className="text-sm font-medium text-gray-500">Cancel</button>
-              <button
-                type="submit"
-                disabled={editSaving}
-                className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2 hover:bg-brand-dark transition disabled:opacity-50"
-              >
-                {activateMode ? (editSaving ? 'Marking active…' : 'Mark active') : (editSaving ? 'Saving…' : 'Save')}
-              </button>
-            </div>
-          </form>
+                <label className="block text-sm text-gray-700">
+                  Product key
+                  <input
+                    type="text"
+                    value={editForm.productKey}
+                    onChange={e => setEditForm(f => ({ ...f, productKey: e.target.value }))}
+                    className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-sm text-gray-700">
+                  Invoice number
+                  <input
+                    type="text"
+                    value={editForm.invoiceNumber}
+                    onChange={e => setEditForm(f => ({ ...f, invoiceNumber: e.target.value }))}
+                    className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-sm text-gray-700">
+                  Notes
+                  <textarea
+                    rows={4}
+                    value={editForm.notes}
+                    onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))}
+                    className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </label>
+              </div>
+              <div className="flex justify-end gap-3 mt-5">
+                <button type="button" onClick={closeEditModal} className="text-sm font-medium text-gray-500">Cancel</button>
+                <button
+                  type="submit"
+                  disabled={editSaving}
+                  className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2 hover:bg-brand-dark transition disabled:opacity-50"
+                >
+                  {activateMode ? (editSaving ? 'Marking active…' : 'Mark active') : (editSaving ? 'Saving…' : 'Save')}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </AppLayout>
