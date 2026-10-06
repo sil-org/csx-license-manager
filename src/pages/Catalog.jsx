@@ -295,204 +295,209 @@ function RequestModal({ license, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-lg p-6 max-w-md w-full my-8">
-        <div className="flex items-start justify-between mb-4">
-          <h2 className="font-display text-xl font-bold text-brand">Request {license.name}</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400 hover:text-gray-600 -mt-1 -mr-1 p-1">
-            <X size={20} />
-          </button>
-        </div>
-
-        {done ? (
-          <>
-            <p className="text-gray-700 mb-6">
-              {forSomeoneElse ? `Your request for ${recipientEmail.trim()} has been submitted.` : 'Your request has been submitted.'}
-            </p>
-            <button onClick={onClose} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">Close</button>
-          </>
-        ) : (
-          <form onSubmit={submit} className="space-y-4">
-            {(license.notes || license.more_info_url) && (
-              <div className="bg-gray-50 rounded-lg px-4 py-3 space-y-2">
-                {license.notes && (
-                  <div className="text-sm text-gray-700 [&_a]:text-brand [&_a]:underline" dangerouslySetInnerHTML={{ __html: openLinksInNewTab(license.notes) }} />
-                )}
-                {license.more_info_url && (
-                  <a href={license.more_info_url} target="_blank" rel="noreferrer" className="text-sm font-medium text-brand inline-block">
-                    More information →
-                  </a>
-                )}
-              </div>
-            )}
-            {license.price != null && (
-              <div className="bg-gray-50 rounded-lg px-4 py-3">
-                <p className="text-lg font-semibold text-gray-900">{formatPrice(license.price)}</p>
-              </div>
-            )}
-            <p className="text-sm text-gray-500 -mt-2">Billing: {billingSummary(license)} &middot; Fiscal year {fy}</p>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                License for <span className="text-sil-red">*</span>
-              </label>
-              <input
-                type="email"
-                required
-                value={recipientEmail}
-                onChange={e => setRecipientEmail(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-              />
-              <p className="text-xs text-gray-400 mt-1">Pre-filled with your email. Change this to request on behalf of someone else.</p>
-            </div>
-
-            {license.extra_field_label && (
+    <div className="fixed inset-0 bg-black/40 overflow-y-auto">
+      {/* min-h-full (not items-center alone) on this inner flex wrapper so a
+          modal taller than the viewport scrolls from its true top instead of
+          being clipped by flex centering against a fixed-height container. */}
+      <div className="min-h-full flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-lg p-6 max-w-md w-full my-8">
+          <div className="flex items-start justify-between mb-4">
+            <h2 className="font-display text-xl font-bold text-brand">Request {license.name}</h2>
+            <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400 hover:text-gray-600 -mt-1 -mr-1 p-1">
+              <X size={20} />
+            </button>
+          </div>
+  
+          {done ? (
+            <>
+              <p className="text-gray-700 mb-6">
+                {forSomeoneElse ? `Your request for ${recipientEmail.trim()} has been submitted.` : 'Your request has been submitted.'}
+              </p>
+              <button onClick={onClose} className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2">Close</button>
+            </>
+          ) : (
+            <form onSubmit={submit} className="space-y-4">
+              {(license.notes || license.more_info_url) && (
+                <div className="bg-gray-50 rounded-lg px-4 py-3 space-y-2">
+                  {license.notes && (
+                    <div className="text-sm text-gray-700 [&_a]:text-brand [&_a]:underline" dangerouslySetInnerHTML={{ __html: openLinksInNewTab(license.notes) }} />
+                  )}
+                  {license.more_info_url && (
+                    <a href={license.more_info_url} target="_blank" rel="noreferrer" className="text-sm font-medium text-brand inline-block">
+                      More information →
+                    </a>
+                  )}
+                </div>
+              )}
+              {license.price != null && (
+                <div className="bg-gray-50 rounded-lg px-4 py-3">
+                  <p className="text-lg font-semibold text-gray-900">{formatPrice(license.price)}</p>
+                </div>
+              )}
+              <p className="text-sm text-gray-500 -mt-2">Billing: {billingSummary(license)} &middot; Fiscal year {fy}</p>
+  
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  {license.extra_field_label} {license.extra_field_required && <span className="text-sil-red">*</span>}
+                  License for <span className="text-sil-red">*</span>
                 </label>
                 <input
-                  type="text"
-                  required={license.extra_field_required}
-                  value={extraFieldValue}
-                  onChange={e => setExtraFieldValue(e.target.value)}
+                  type="email"
+                  required
+                  value={recipientEmail}
+                  onChange={e => setRecipientEmail(e.target.value)}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                 />
+                <p className="text-xs text-gray-400 mt-1">Pre-filled with your email. Change this to request on behalf of someone else.</p>
               </div>
-            )}
-
-            {license.gtis_sponsored ? (
-              <p className="text-sm text-gray-600">This license is GTIS-sponsored — no approval needed.</p>
-            ) : license.department_gated ? (
-              <p className="text-sm text-gray-600">This is a free license — whether it needs approval depends on your department, and is handled automatically.</p>
-            ) : (
-              <>
+  
+              {license.extra_field_label && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    Bill to <span className="text-sil-red">*</span>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {license.extra_field_label} {license.extra_field_required && <span className="text-sil-red">*</span>}
                   </label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setMode('suite_key')}
-                      className={`flex-1 text-sm font-medium rounded-lg px-3 py-2 border transition ${
-                        mode === 'suite_key' ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      SuiteKey
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMode('ministry_id')}
-                      className={`flex-1 text-sm font-medium rounded-lg px-3 py-2 border transition ${
-                        mode === 'ministry_id' ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      Ministry Account
-                    </button>
-                  </div>
+                  <input
+                    type="text"
+                    required={license.extra_field_required}
+                    value={extraFieldValue}
+                    onChange={e => setExtraFieldValue(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
                 </div>
-
-                {mode === 'suite_key' ? (
-                  <>
-                    <div className="relative">
+              )}
+  
+              {license.gtis_sponsored ? (
+                <p className="text-sm text-gray-600">This license is GTIS-sponsored — no approval needed.</p>
+              ) : license.department_gated ? (
+                <p className="text-sm text-gray-600">This is a free license — whether it needs approval depends on your department, and is handled automatically.</p>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Bill to <span className="text-sil-red">*</span>
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setMode('suite_key')}
+                        className={`flex-1 text-sm font-medium rounded-lg px-3 py-2 border transition ${
+                          mode === 'suite_key' ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        SuiteKey
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMode('ministry_id')}
+                        className={`flex-1 text-sm font-medium rounded-lg px-3 py-2 border transition ${
+                          mode === 'ministry_id' ? 'bg-brand text-white border-brand' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        Ministry Account
+                      </button>
+                    </div>
+                  </div>
+  
+                  {mode === 'suite_key' ? (
+                    <>
+                      <div className="relative">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          SuiteKey <span className="text-sil-red">*</span>
+                        </label>
+                        <p className="text-xs text-gray-400 mb-1">These are the SuiteKeys available in the Finance System.</p>
+                        <input
+                          value={suiteKey}
+                          onChange={e => { setSuiteKey(e.target.value); setSuiteKeyHasOwner(false); setSuiteKeySelected(false) }}
+                          onFocus={() => setShowSuggestions(true)}
+                          onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                          required
+                          autoComplete="off"
+                          placeholder="Type at least 2 characters…"
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                        {showSuggestions && suggestions.length > 0 && (
+                          <ul className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-md max-h-48 overflow-y-auto">
+                            {suggestions.map(s => (
+                              <li key={s.suite_key}>
+                                <button
+                                  type="button"
+                                  onMouseDown={() => selectSuggestion(s)}
+                                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between gap-2"
+                                >
+                                  <span className="font-medium text-brand">{s.suite_key}</span>
+                                  <span className="text-xs text-gray-400 truncate">
+                                    {s.has_owner ? (s.description || 'Has an owner') : 'No owner yet'}
+                                  </span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                      {!suiteKeyHasOwner && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Suggested approver email <span className="text-gray-400">(only needed if this SuiteKey has no owner on file)</span>
+                          </label>
+                          <input type="email" value={suggestedApproverEmail} onChange={e => setSuggestedApproverEmail(e.target.value)}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        SuiteKey <span className="text-sil-red">*</span>
+                        Ministry ID <span className="text-sil-red">*</span>
                       </label>
-                      <p className="text-xs text-gray-400 mb-1">These are the SuiteKeys available in the Finance System.</p>
                       <input
-                        value={suiteKey}
-                        onChange={e => { setSuiteKey(e.target.value); setSuiteKeyHasOwner(false); setSuiteKeySelected(false) }}
-                        onFocus={() => setShowSuggestions(true)}
-                        onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                        value={ministryId}
+                        onChange={e => setMinistryId(e.target.value)}
+                        inputMode="numeric"
+                        pattern="\d{6}"
+                        maxLength={6}
+                        placeholder="6 digits"
                         required
-                        autoComplete="off"
-                        placeholder="Type at least 2 characters…"
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       />
-                      {showSuggestions && suggestions.length > 0 && (
-                        <ul className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-md max-h-48 overflow-y-auto">
-                          {suggestions.map(s => (
-                            <li key={s.suite_key}>
-                              <button
-                                type="button"
-                                onMouseDown={() => selectSuggestion(s)}
-                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between gap-2"
-                              >
-                                <span className="font-medium text-brand">{s.suite_key}</span>
-                                <span className="text-xs text-gray-400 truncate">
-                                  {s.has_owner ? (s.description || 'Has an owner') : 'No owner yet'}
-                                </span>
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
                     </div>
-                    {!suiteKeyHasOwner && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Suggested approver email <span className="text-gray-400">(only needed if this SuiteKey has no owner on file)</span>
-                        </label>
-                        <input type="email" value={suggestedApproverEmail} onChange={e => setSuggestedApproverEmail(e.target.value)}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Ministry ID <span className="text-sil-red">*</span>
-                    </label>
+                  )}
+                </>
+              )}
+  
+              {license.requires_acknowledgement && (
+                <div className="bg-gray-50 rounded-lg px-4 py-3 space-y-2">
+                  {license.acknowledgement_text && (
+                    <div className="text-sm text-gray-700 [&_a]:text-brand [&_a]:underline" dangerouslySetInnerHTML={{ __html: openLinksInNewTab(license.acknowledgement_text) }} />
+                  )}
+                  <label className="flex items-start gap-2 text-sm text-gray-700">
                     <input
-                      value={ministryId}
-                      onChange={e => setMinistryId(e.target.value)}
-                      inputMode="numeric"
-                      pattern="\d{6}"
-                      maxLength={6}
-                      placeholder="6 digits"
+                      type="checkbox"
+                      checked={acknowledged}
+                      onChange={e => setAcknowledged(e.target.checked)}
                       required
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      className="mt-0.5"
                     />
-                  </div>
-                )}
-              </>
-            )}
-
-            {license.requires_acknowledgement && (
-              <div className="bg-gray-50 rounded-lg px-4 py-3 space-y-2">
-                {license.acknowledgement_text && (
-                  <div className="text-sm text-gray-700 [&_a]:text-brand [&_a]:underline" dangerouslySetInnerHTML={{ __html: openLinksInNewTab(license.acknowledgement_text) }} />
-                )}
-                <label className="flex items-start gap-2 text-sm text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={acknowledged}
-                    onChange={e => setAcknowledged(e.target.checked)}
-                    required
-                    className="mt-0.5"
-                  />
-                  I have read and agree to the above.
-                </label>
+                    I have read and agree to the above.
+                  </label>
+                </div>
+              )}
+  
+              {error && <p className="text-sil-red text-sm">{error}</p>}
+  
+              <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
+                <button type="button" onClick={onClose} className="text-sm font-medium text-gray-600 border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50">
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting || (license.requires_acknowledgement && !acknowledged)}
+                  className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2 hover:bg-brand-dark transition disabled:opacity-60"
+                >
+                  {submitting ? 'Submitting…' : license.gtis_sponsored ? 'Confirm request' : 'Submit request'}
+                </button>
               </div>
-            )}
-
-            {error && <p className="text-sil-red text-sm">{error}</p>}
-
-            <div className="flex justify-end gap-3 border-t border-gray-100 pt-4">
-              <button type="button" onClick={onClose} className="text-sm font-medium text-gray-600 border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50">
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={submitting || (license.requires_acknowledgement && !acknowledged)}
-                className="text-sm font-medium bg-brand text-white rounded-lg px-4 py-2 hover:bg-brand-dark transition disabled:opacity-60"
-              >
-                {submitting ? 'Submitting…' : license.gtis_sponsored ? 'Confirm request' : 'Submit request'}
-              </button>
-            </div>
-          </form>
-        )}
+            </form>
+          )}
+        </div>
       </div>
     </div>
   )
