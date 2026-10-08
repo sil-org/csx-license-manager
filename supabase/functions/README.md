@@ -46,3 +46,18 @@ anything beyond a no-op run.
 internally (one Resend call per recipient digest) rather than duplicating the
 Resend/email_log logic — same reasoning as every other notification path in
 this app funneling through that one function.
+
+## `send-email` authentication and per-app senders
+
+`send-email` is deployed with `--no-verify-jwt`, so it authenticates callers itself (`send-email/auth.ts`):
+it accepts the service-role key or `CRON_SECRET` (server-to-server — e.g. the reminder functions) or a
+valid signed-in user's access token (the browser app). It used to accept *any* `Authorization` header
+value; anything else is now a 401.
+
+The request may carry `app` to pick the sender: `licenses` (default — existing callers are unchanged) or
+`contracts` (`Contract Repository <contracts@em.sil.org>`, used by the contract-repository app; server-to-server
+callers only). Senders come from a fixed list in `auth.ts`; callers can never supply a `from`. Optional secret
+`CONTRACTS_REPLY_TO` sets the contracts reply-to address.
+
+Tests: `deno test supabase/functions/send-email/auth_test.ts` (unit) and
+`deno run -A --no-check supabase/functions/send-email/e2e_check.ts` (the real handler with Resend and Supabase mocked).
