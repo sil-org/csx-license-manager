@@ -30,18 +30,23 @@ import { addGroupMember, removeGroupMember } from './adapters/google-group.ts'
 //    handleActivate/handleCancel in src/pages/admin/AllSubscriptions.jsx and
 //    the self-serve cancel in src/pages/MySubscriptions.jsx.
 //
-// Deployed WITH JWT verification on (no --no-verify-jwt) — unlike
-// sync-group-memberships (cache-only writes, no request-auth check at all)
-// or send-email (presence-only header check), this function makes real
-// side-effecting calls to paid vendor APIs and Google's Directory API, so it
-// needs the Supabase platform's real signature verification. Any
-// authenticated caller can only trigger a correct dispatch of the DB's own
-// truth (#1) or a targeted single-member update naming a real license/email
-// (#2) — never an arbitrary write.
+// Auth: deployed with --no-verify-jwt like every function here (the deploy
+// workflow passes it for all of them), so authorizeCaller() below is the
+// only gate — a signed-in user with a profile, or the service-role key /
+// CRON_SECRET for scheduled runs. Beyond that, a caller can't choose the
+// outcome: #1 applies the DB's own truth, and #2 only adds a member who has
+// an active subscription to that license, or removes one whose
+// subscription was cancelled/revoked and who has no other active one. It
+// never touches a group member this app has no subscription record for.
 //
 // Adapter contract (see adapters/cubebackup.ts):
-//   async (config: object, desiredEmails: string[]) =>
+//   async (config: object, desiredEmails: string[], managedEmails: string[]) =>
 //     { enabled: string[], disabled: string[], errors: {email, message}[] }
+// managedEmails = users this app itself enabled (per provisioning_log) and
+// hasn't since disabled. An adapter may only ever disable someone in that
+// set — same lesson as the 2026-08-28 Google Group incident: the vendor's
+// roster includes people this app never provisioned, and "not in
+// subscriptions" must not mean "remove".
 //
 // Required secrets (Supabase Edge Function secrets):
 //   CUBEBACKUP_API_KEY   CubeBackup server instance API key (scoped to the
@@ -57,7 +62,7 @@ import { addGroupMember, removeGroupMember } from './adapters/google-group.ts'
 // pg_net). The Google Group update (#2) is meant to be called directly from
 // the frontend on each activate/cancel, not scheduled at all.
 
-const ADAPTERS: Record<string, (config: any, desiredEmails: string[]) => Promise<SyncResult>> = {
+const ADAPTERS: Record<string, (config: any, desiredEmails: string[], managedEmails: string[]) => Promise<SyncResult>> = {
   cubebackup: cubebackupSync,
 }
 
@@ -77,10 +82,12 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders() })
 
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const supabase = createClient(Deno.env.get('SUPABASE_URL')!, serviceRoleKey)
+
+    if (!(await authorizeCaller(supabase, req.headers.get('Authorization'), serviceRoleKey))) {
+      return json({ error: 'Unauthorized' }, 401)
+    }
 
     let body: { groupMembershipUpdate?: GroupMembershipUpdate } = {}
     try { body = await req.json() } catch { /* no body — e.g. the scheduled CubeBackup trigger */ }
@@ -136,8 +143,9 @@ Deno.serve(async (req) => {
         // the DB level (only within a single fiscal year) — distinct here is
         // load-bearing, not defensive.
         const desiredEmails = [...new Set((subs || []).map(s => s.user_email))]
+        const managedEmails = await managedEmailsFor(supabase, license.id, license.provisioning_adapter!)
 
-        const result = await adapter(license.provisioning_config || {}, desiredEmails)
+        const result = await adapter(license.provisioning_config || {}, desiredEmails, managedEmails)
 
         const logRows = [
           ...result.enabled.map(email => ({ license_id: license.id, adapter: license.provisioning_adapter, email, action: 'enabled', status: 'ok' })),
@@ -170,6 +178,28 @@ async function handleGroupMembershipUpdate(
   update: GroupMembershipUpdate
 ): Promise<Response> {
   const { licenseId, email, action } = update
+  if (!licenseId || !email || (action !== 'add' && action !== 'remove')) {
+    return json({ error: 'groupMembershipUpdate needs licenseId, email and action add|remove' }, 400)
+  }
+
+  // The request only says *which* change to consider; the DB decides whether
+  // it's warranted. Add only someone with an active subscription; remove
+  // only someone whose subscription this app cancelled/revoked (never a
+  // member it has no record of — e.g. the hand-added members from the
+  // 2026-08-28 incident).
+  const { data: subRows, error: subsError } = await supabase
+    .from('subscriptions')
+    .select('status')
+    .eq('license_id', licenseId)
+    .eq('user_email', email)
+  if (subsError) throw subsError
+  const statuses = new Set((subRows || []).map(s => s.status))
+  if (action === 'add' && !statuses.has('active')) {
+    return json({ error: `${email} has no active subscription to this license` }, 403)
+  }
+  if (action === 'remove' && !statuses.has('cancelled') && !statuses.has('revoked')) {
+    return json({ error: `${email} has no cancelled or revoked subscription to this license` }, 403)
+  }
 
   const { data: license, error: licenseError } = await supabase
     .from('licenses')
@@ -189,17 +219,8 @@ async function handleGroupMembershipUpdate(
   // of their (possibly several) subscription rows was cancelled. No
   // equivalent check needed for 'add' — adding an existing member is just a
   // harmless 409, handled in adapters/google-group.ts.
-  if (action === 'remove') {
-    const { count, error: countError } = await supabase
-      .from('subscriptions')
-      .select('id', { count: 'exact', head: true })
-      .eq('license_id', licenseId)
-      .eq('user_email', email)
-      .eq('status', 'active')
-    if (countError) throw countError
-    if ((count || 0) > 0) {
-      return json({ ok: true, skipped: `${email} still has another active subscription to this license` })
-    }
+  if (action === 'remove' && statuses.has('active')) {
+    return json({ ok: true, skipped: `${email} still has another active subscription to this license` })
   }
 
   const logRow = { license_id: licenseId, adapter: 'google_group', email, action: action === 'add' ? 'enabled' : 'disabled', status: 'ok' }
@@ -218,6 +239,51 @@ async function handleGroupMembershipUpdate(
     if (logError) console.error(`Also failed to log the above error: ${logError.message}`)
     return json({ error: err.message }, 500)
   }
+}
+
+// Service-role key or CRON_SECRET (scheduled runs), or a signed-in user with
+// a profile in this app (the fire-and-forget kicks from the UI).
+async function authorizeCaller(
+  supabase: ReturnType<typeof createClient>,
+  authHeader: string | null,
+  serviceRoleKey: string
+): Promise<boolean> {
+  const token = authHeader?.replace(/^Bearer\s+/i, '').trim()
+  if (!token) return false
+  const cronSecret = Deno.env.get('CRON_SECRET')
+  if (token === serviceRoleKey || (cronSecret && token === cronSecret)) return true
+
+  const { data: { user } } = await supabase.auth.getUser(token)
+  if (!user) return false
+  const { data: link } = await supabase
+    .from('linked_accounts')
+    .select('profile_id')
+    .eq('supabase_user_id', user.id)
+    .maybeSingle()
+  return !!link
+}
+
+// Emails whose most recent successful provisioning_log entry for this
+// license+adapter is 'enabled' — i.e. seats this app turned on and hasn't
+// turned off. Paged, since PostgREST caps each response at 1000 rows.
+async function managedEmailsFor(supabase: ReturnType<typeof createClient>, licenseId: string, adapter: string): Promise<string[]> {
+  const latest = new Map<string, string>()
+  const pageSize = 1000
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from('provisioning_log')
+      .select('email, action')
+      .eq('license_id', licenseId)
+      .eq('adapter', adapter)
+      .eq('status', 'ok')
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + pageSize - 1)
+    if (error) throw error
+    for (const row of data || []) latest.set(row.email.toLowerCase(), row.action)
+    if (!data || data.length < pageSize) break
+  }
+  return [...latest].filter(([, action]) => action === 'enabled').map(([email]) => email)
 }
 
 function json(data: unknown, status = 200) {

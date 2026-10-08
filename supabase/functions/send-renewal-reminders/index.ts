@@ -112,8 +112,7 @@ Deno.serve(async (req) => {
         // Explicit Authorization header — supabase-js's implicit default
         // (from the key passed to createClient) doesn't reliably reach
         // send-email on a function-to-function invoke, and send-email 401s
-        // without it (it only checks that *some* Authorization header is
-        // present, but "some" still has to actually arrive).
+        // without it (it accepts the service-role key as a 'system' caller).
         const { error } = await supabase.functions.invoke('send-email', {
           headers: { Authorization: `Bearer ${serviceRoleKey}` },
           body: {

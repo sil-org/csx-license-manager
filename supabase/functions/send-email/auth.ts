@@ -8,7 +8,8 @@
 // Accepted callers:
 //   'server' — the service-role key or CRON_SECRET: our own Edge Functions (the scheduled
 //              reminder functions in license-manager and contract-repository).
-//   'user'   — a valid, unexpired Supabase access token of a signed-in user (the browser app).
+//   'user'   — a valid, unexpired Supabase access token of a signed-in user (the browser app);
+//              index.ts's validator also requires a linked_accounts profile in this app.
 // Everything else is rejected.
 
 export type Caller = 'server' | 'user' | null

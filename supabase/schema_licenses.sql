@@ -289,8 +289,10 @@ create table if not exists email_log (
   subscription_id uuid references subscriptions(id),
   resend_id      text,
   status         text not null,
-  error          text
+  error          text,
+  sent_by        text   -- verified caller: their email, or 'system' for service-role calls
 );
+alter table email_log add column if not exists sent_by text;
 
 create index if not exists email_log_subscription_id_idx on email_log (subscription_id);
 
@@ -359,8 +361,26 @@ returns text language sql stable security definer as $$
 $$;
 
 create or replace function is_admin()
-returns boolean language sql stable security definer as $$
-  select get_profile_role() = 'admin'
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce(get_profile_role() = 'admin', false)
+$$;
+
+-- Authorization guards in this file must never let NULL mean "allowed":
+-- plpgsql's IF treats a NULL condition as false, so `if not (...) then raise`
+-- skips the raise when <expr> is NULL. Write guards as
+-- `if not coalesce((...), false) then raise`, and resolve the caller with
+-- require_profile_email() (raises for a caller with no profile) rather than
+-- current_profile_email() (returns NULL). See pending/78.
+create or replace function require_profile_email()
+returns text language plpgsql stable security definer set search_path = public as $$
+declare
+  v_email text := current_profile_email();
+begin
+  if v_email is null then
+    raise exception 'not authenticated' using errcode = '28000';
+  end if;
+  return v_email;
+end;
 $$;
 
 -- Every RPC/RLS policy that gates on Suite Key ownership calls this one
@@ -814,7 +834,7 @@ create or replace function confirm_sk_ownership(p_suite_key text)
 returns table(id uuid, user_email text, license_name text, more_info_url text)
 language plpgsql security definer as $$
 declare
-  v_email text := current_profile_email();
+  v_email text := require_profile_email();
   -- What this suite key's pending_sk_verification row(s) actually name as
   -- the approver — the caller's own email for an individual suggestion, or
   -- a group's address when the caller is just a current member of it (see
@@ -948,7 +968,7 @@ create or replace function deny_sk_ownership(p_suite_key text)
 returns table(id uuid, user_email text, license_name text)
 language plpgsql security definer as $$
 declare
-  v_email text := current_profile_email();
+  v_email text := require_profile_email();
   -- Same individual-first, then-group-membership resolution as
   -- confirm_sk_ownership() above — a group member declining a group's
   -- suggested-approver row can't match on their own email, only via
@@ -1377,14 +1397,14 @@ $$;
 create or replace function approve_subscription(p_subscription_id uuid)
 returns void language plpgsql security definer as $$
 declare
-  v_email text := current_profile_email();
+  v_email text := require_profile_email();
   v_sub subscriptions%rowtype;
   v_license licenses%rowtype;
 begin
   select * into v_sub from subscriptions where id = p_subscription_id;
   if v_sub.id is null then raise exception 'subscription not found'; end if;
   if v_sub.status != 'pending' then raise exception 'subscription is not pending approval'; end if;
-  if not (is_admin() or is_suite_key_owner(v_sub.suite_key) or v_sub.pending_approver_email = v_email) then
+  if not coalesce((is_admin() or is_suite_key_owner(v_sub.suite_key) or v_sub.pending_approver_email = v_email), false) then
     raise exception 'not authorized to approve this subscription';
   end if;
 
@@ -1406,7 +1426,7 @@ $$;
 create or replace function decline_subscription(p_subscription_id uuid, p_notes text default null)
 returns void language plpgsql security definer as $$
 declare
-  v_email text := current_profile_email();
+  v_email text := require_profile_email();
   v_sub subscriptions%rowtype;
   v_license_name text;
 begin
@@ -1415,11 +1435,11 @@ begin
   if v_sub.status not in ('pending', 'pending_sk_verification') then
     raise exception 'subscription is not awaiting approval';
   end if;
-  if not (
+  if not coalesce((
     is_admin()
     or (v_sub.suite_key is not null and is_suite_key_owner(v_sub.suite_key))
     or v_sub.pending_approver_email = v_email
-  ) then
+  ), false) then
     raise exception 'not authorized to decline this subscription';
   end if;
 
@@ -1436,7 +1456,7 @@ $$;
 create or replace function activate_subscription(p_subscription_id uuid, p_price numeric default null)
 returns void language plpgsql security definer as $$
 declare
-  v_email text := current_profile_email();
+  v_email text := require_profile_email();
   v_sub subscriptions%rowtype;
   v_license licenses%rowtype;
 begin
@@ -1445,7 +1465,7 @@ begin
   if v_sub.status != 'approved' then raise exception 'subscription is not approved'; end if;
 
   select * into v_license from licenses where id = v_sub.license_id;
-  if not (is_admin() or v_email = any(v_license.service_manager_emails)) then
+  if not coalesce((is_admin() or v_email = any(v_license.service_manager_emails)), false) then
     raise exception 'not authorized to activate this subscription';
   end if;
 
@@ -1466,7 +1486,7 @@ $$;
 create or replace function cancel_subscription(p_subscription_id uuid, p_reason text default null)
 returns void language plpgsql security definer as $$
 declare
-  v_email text := current_profile_email();
+  v_email text := require_profile_email();
   v_sub subscriptions%rowtype;
   v_license_name text;
 begin
@@ -1477,7 +1497,7 @@ begin
   end if;
   -- is_manager_of() covers My Team's "Cancel" button — a people manager
   -- cancelling a direct/indirect report's subscription.
-  if not (is_admin() or v_sub.user_email = v_email or is_service_manager_for(v_sub.license_id) or is_manager_of(v_sub.user_email)) then
+  if not coalesce((is_admin() or v_sub.user_email = v_email or is_service_manager_for(v_sub.license_id) or is_manager_of(v_sub.user_email)), false) then
     raise exception 'not authorized to cancel this subscription';
   end if;
 
@@ -1492,14 +1512,14 @@ $$;
 create or replace function revoke_subscription(p_subscription_id uuid, p_reason text default null)
 returns void language plpgsql security definer as $$
 declare
-  v_email text := current_profile_email();
+  v_email text := require_profile_email();
   v_sub subscriptions%rowtype;
   v_license_name text;
 begin
   select * into v_sub from subscriptions where id = p_subscription_id;
   if v_sub.id is null then raise exception 'subscription not found'; end if;
   if v_sub.status != 'active' then raise exception 'subscription is not active'; end if;
-  if not (is_admin() or (v_sub.suite_key is not null and is_suite_key_owner(v_sub.suite_key))) then
+  if not coalesce((is_admin() or (v_sub.suite_key is not null and is_suite_key_owner(v_sub.suite_key))), false) then
     raise exception 'not authorized to revoke this subscription';
   end if;
 
@@ -1581,12 +1601,12 @@ $$;
 create or replace function opt_in_renewal(p_subscription_id uuid)
 returns void language plpgsql security definer as $$
 declare
-  v_email text := current_profile_email();
+  v_email text := require_profile_email();
   v_sub subscriptions%rowtype;
 begin
   select * into v_sub from subscriptions where id = p_subscription_id;
   if v_sub.id is null then raise exception 'subscription not found'; end if;
-  if not (is_admin() or v_sub.user_email = v_email) then raise exception 'not authorized'; end if;
+  if not coalesce((is_admin() or v_sub.user_email = v_email), false) then raise exception 'not authorized'; end if;
   if v_sub.open_renewal_fy is null then raise exception 'no open renewal period'; end if;
 
   update subscriptions
@@ -1603,12 +1623,12 @@ $$;
 create or replace function opt_out_renewal(p_subscription_id uuid)
 returns void language plpgsql security definer as $$
 declare
-  v_email text := current_profile_email();
+  v_email text := require_profile_email();
   v_sub subscriptions%rowtype;
 begin
   select * into v_sub from subscriptions where id = p_subscription_id;
   if v_sub.id is null then raise exception 'subscription not found'; end if;
-  if not (is_admin() or v_sub.user_email = v_email) then raise exception 'not authorized'; end if;
+  if not coalesce((is_admin() or v_sub.user_email = v_email), false) then raise exception 'not authorized'; end if;
   if v_sub.open_renewal_fy is null then raise exception 'no open renewal period'; end if;
 
   update subscriptions
@@ -1641,9 +1661,10 @@ create or replace function update_subscription_details(
 declare
   v_sub subscriptions%rowtype;
 begin
+  perform require_profile_email();
   select * into v_sub from subscriptions where id = p_subscription_id;
   if v_sub.id is null then raise exception 'subscription not found'; end if;
-  if not (is_admin() or is_service_manager_for(v_sub.license_id)) then
+  if not coalesce((is_admin() or is_service_manager_for(v_sub.license_id)), false) then
     raise exception 'not authorized to edit this subscription';
   end if;
 
@@ -2486,3 +2507,57 @@ begin
   update profiles set role = p_role where id = p_profile_id;
 end;
 $$;
+
+-- ─── Function EXECUTE grants (keep at the end of this file) ──────────────────
+-- Postgres grants EXECUTE to PUBLIC on every new function, so without this
+-- anyone holding the public anon key could call every RPC above. Revoke from
+-- PUBLIC and anon on every function this app defines, then grant back to
+-- authenticated/service_role. Add new RPCs to v_rpcs. Two exceptions:
+--   - Functions referenced by RLS policies must stay executable by whoever
+--     runs the query (including anon, e.g. the announcements banner), so
+--     they're left alone. They only answer questions about the caller, and
+--     since is_admin() never returns NULL they answer "no" for anon.
+--   - The Pipedream-only SuiteKey sync functions get service_role only.
+-- Explicit name list (not "all functions in schema public") because this
+-- project is shared with other apps whose functions must not be touched.
+
+do $$
+declare
+  v_rpcs text[] := array[
+    'activate_subscription', 'admin_add_area_discount', 'admin_add_department_approval',
+    'admin_confirm_sk_ownership', 'admin_import_audit_log', 'admin_import_licenses',
+    'admin_import_sco_codes', 'admin_import_subscriptions', 'admin_import_subscriptions_full',
+    'admin_import_team_hierarchy', 'admin_list_area_discounts', 'admin_list_areas',
+    'admin_list_department_approvals', 'admin_merge_suite_key', 'admin_remove_area_discount',
+    'admin_remove_department_approval', 'admin_save_announcement', 'admin_set_role',
+    'admin_update_ministry_id', 'admin_update_subscription_suite_key', 'admin_update_suite_key_owner',
+    'approve_subscription', 'calc_prorated_cost', 'calendar_month_span', 'calendar_month_span_exact',
+    'cancel_subscription', 'confirm_sk_ownership', 'create_link_token', 'current_client_ip',
+    'deactivate_license', 'decline_subscription', 'deny_sk_ownership', 'fy_boundary_months',
+    'get_admin_emails', 'get_area_discounted_price', 'get_finance_export', 'get_last_team_import',
+    'get_my_pending_approvals', 'get_my_pending_provisioning', 'get_my_pending_sk_verifications',
+    'get_my_suite_keys', 'get_seat_provisioning_fields', 'get_suite_key_owner', 'get_suite_key_spend',
+    'get_team_spend', 'is_eligible_staff_email', 'is_manager_of', 'is_org_manager',
+    'is_service_manager_any', 'is_suite_key_owner_any', 'opt_in_renewal', 'opt_out_renewal',
+    'reactivate_license', 'request_subscription', 'require_profile_email', 'resolve_profile',
+    'revoke_subscription', 'save_license', 'search_suite_keys', 'start_renewal_period',
+    'subscription_actual_fy_amount', 'update_subscription_details'
+  ];
+  v_service_only text[] := array['refresh_suite_keys_current', 'reconcile_suite_keys_from_current'];
+  r record;
+begin
+  for r in
+    select p.oid::regprocedure as sig, p.proname
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = any(v_rpcs || v_service_only)
+  loop
+    execute format('revoke execute on function %s from public, anon', r.sig);
+    if r.proname = any(v_service_only) then
+      execute format('revoke execute on function %s from authenticated', r.sig);
+      execute format('grant execute on function %s to service_role', r.sig);
+    else
+      execute format('grant execute on function %s to authenticated, service_role', r.sig);
+    end if;
+  end loop;
+end $$;
+

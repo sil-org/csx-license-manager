@@ -33,11 +33,19 @@ SQL can reference it by name instead of a literal secret landing in a
 committed file — see the header comment in `send-renewal-reminders/index.ts`
 for the full reasoning.
 
-`sync-group-memberships`/`sync-provisioning` predate this key-format
-migration and still assume the platform JWT gate works for them — that
-assumption is worth re-checking against the same
-`sb_publishable_...`-vs-legacy-JWT issue before actually scheduling either
-one; they may need the same `CRON_SECRET` treatment.
+**Every function here is deployed with `--no-verify-jwt`** (the deploy
+workflow passes it for all of them), so each one must authenticate its own
+callers — there is no platform gate behind it:
+
+- `send-email`, `sync-provisioning`: a signed-in user with a profile in this
+  app (verified with `auth.getUser()` + `linked_accounts`), the service-role
+  key, or `CRON_SECRET`.
+- `feedback`, `classify-approver-email`: a signed-in user.
+- `send-*-reminders`, `sync-group-memberships`: `CRON_SECRET` (or the
+  service-role key, for `sync-group-memberships`).
+
+Checking only that an `Authorization` header is *present* is not
+authentication — anyone can send one.
 `sync-provisioning` additionally needs `CUBEBACKUP_API_KEY` (or future
 adapters' equivalents) set via `supabase secrets set` before it can do
 anything beyond a no-op run.
@@ -51,8 +59,10 @@ this app funneling through that one function.
 
 `send-email` is deployed with `--no-verify-jwt`, so it authenticates callers itself (`send-email/auth.ts`):
 it accepts the service-role key or `CRON_SECRET` (server-to-server — e.g. the reminder functions) or a
-valid signed-in user's access token (the browser app). It used to accept *any* `Authorization` header
-value; anything else is now a 401.
+valid signed-in user's access token whose user has a `linked_accounts` profile in this app (the browser app —
+this Supabase project is shared with other apps, so a session alone isn't enough). It used to accept *any*
+`Authorization` header value; anything else is now a 401. Each send records the verified caller in
+`email_log.sent_by` (the user's email, or `system`).
 
 The request may carry `app` to pick the sender: `licenses` (default — existing callers are unchanged) or
 `contracts` (`Contract Repository <contracts@em.sil.org>`, used by the contract-repository app; server-to-server

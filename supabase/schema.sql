@@ -110,16 +110,43 @@ create policy "profiles: own update"
   using (id = current_profile_id())
   with check (id = current_profile_id() and role = get_profile_role());
 
--- linked_accounts: users can read their own; admins can read/insert all
+-- The own-update policy above still lets a user rewrite every other column
+-- of their own row — and apps on this project authorize by email, manager
+-- and department. This trigger rejects client-side changes to those columns;
+-- security-definer RPCs run as the function owner and are unaffected.
+-- Compared via to_jsonb so columns an app doesn't have are simply no-ops.
+create or replace function profiles_block_self_escalation()
+returns trigger language plpgsql set search_path = public as $$
+declare
+  k text;
+begin
+  if current_user not in ('authenticated', 'anon') then
+    return new;
+  end if;
+  foreach k in array array['id', 'primary_email', 'role', 'manager_email', 'sco', 'job_title', 'department'] loop
+    if (to_jsonb(new) -> k) is distinct from (to_jsonb(old) -> k) then
+      raise exception 'profiles.% can only be changed by an administrator', k using errcode = '42501';
+    end if;
+  end loop;
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_block_self_escalation on profiles;
+create trigger profiles_block_self_escalation
+  before update on profiles
+  for each row execute function profiles_block_self_escalation();
+
+-- linked_accounts: users can read their own; admins can read all
 drop policy if exists "linked_accounts: own read" on linked_accounts;
 create policy "linked_accounts: own read"
   on linked_accounts for select
   using (profile_id = current_profile_id() or get_profile_role() = 'admin');
 
+-- No insert policy: rows are only ever created by resolve_profile(), a
+-- security definer RPC. (A `with check (true)` policy used to live here,
+-- which let any signed-in user link themselves to any profile directly.)
 drop policy if exists "linked_accounts: insert own" on linked_accounts;
-create policy "linked_accounts: insert own"
-  on linked_accounts for insert
-  with check (true);  -- enforced inside resolve_profile(), a security definer RPC
 
 drop policy if exists "linked_accounts: admin update" on linked_accounts;
 create policy "linked_accounts: admin update"
@@ -154,6 +181,11 @@ create policy "link_tokens: own insert" on profile_link_tokens for insert
 -- SIL email, while still blocking anyone without a valid token from
 -- creating a profile with an ineligible address.
 --
+-- Identity always comes from the session (auth.uid() and that user's
+-- auth.users row), never from the parameters — p_supabase_user_id/p_email/
+-- p_display_name are kept only so existing callers don't break, and are
+-- ignored. Trusting them let any signed-in user link to any profile.
+--
 -- This function is shared with the helpdesk app (same Supabase project) —
 -- keep the two repos' copies of this file in sync.
 
@@ -163,57 +195,65 @@ create or replace function resolve_profile(
   p_email text,
   p_display_name text
 )
-returns uuid language plpgsql security definer as $$
+returns uuid language plpgsql security definer set search_path = public as $$
 declare
+  v_uid uuid := auth.uid();
+  v_email text;
+  v_confirmed_at timestamptz;
+  v_display_name text;
   v_profile_id uuid;
 begin
+  if v_uid is null then raise exception 'not authenticated' using errcode = '28000'; end if;
+
+  select u.email, u.email_confirmed_at,
+         coalesce(nullif(u.raw_user_meta_data->>'full_name', ''), nullif(u.raw_user_meta_data->>'name', ''), u.email)
+    into v_email, v_confirmed_at, v_display_name
+  from auth.users u where u.id = v_uid;
+  if v_email is null then raise exception 'signed-in account has no email address'; end if;
+
   -- case 1: already linked
   select profile_id into v_profile_id
-  from linked_accounts where supabase_user_id = p_supabase_user_id;
+  from linked_accounts where supabase_user_id = v_uid;
   if v_profile_id is not null then
     return v_profile_id;
   end if;
 
-  -- case 2: valid link token supplied — links this account to an existing
-  -- profile regardless of email domain (see comment above for why that's safe).
+  -- case 2: valid link token — links this account to the token's profile
+  -- regardless of email domain (the token itself is the proof). Locked so
+  -- two concurrent sign-ins can't both redeem the same token.
   if p_token is not null then
     select profile_id into v_profile_id
     from profile_link_tokens
-    where token = p_token and used_at is null and expires_at > now();
+    where token = p_token and used_at is null and expires_at > now()
+    for update;
 
     if v_profile_id is not null then
       insert into linked_accounts (supabase_user_id, profile_id, email)
-      values (p_supabase_user_id, v_profile_id, p_email);
+      values (v_uid, v_profile_id, v_email);
       update profile_link_tokens set used_at = now() where token = p_token;
       return v_profile_id;
     end if;
   end if;
 
-  -- case 3: brand new person, or their first sign-in after a profile was
-  -- pre-created for them without a linked account yet (e.g. license-manager's
-  -- admin_import_subscriptions creating a placeholder profile for a
-  -- historical row's requester_email) — either way this is the only path
-  -- that needs the eligibility check.
-  if not is_eligible_staff_email(p_email) then
+  -- case 3: new person, or first sign-in for a pre-created placeholder profile.
+  if not is_eligible_staff_email(v_email) then
     raise exception 'Access restricted to SIL staff.';
   end if;
+  if v_confirmed_at is null then
+    raise exception 'email address not confirmed';
+  end if;
 
-  -- A pre-created placeholder profile already claims this primary_email
-  -- (unique, case-insensitive) — link to it instead of inserting a second
-  -- row, which would violate that uniqueness. Refresh display_name now that
-  -- we have their real Google-verified name instead of whatever placeholder
-  -- (often just the email itself) was used when the profile was pre-created.
-  select id into v_profile_id from profiles where lower(primary_email) = lower(p_email);
+  select id into v_profile_id from profiles where lower(primary_email) = lower(v_email);
   if v_profile_id is not null then
-    update profiles set display_name = p_display_name where id = v_profile_id;
+    update profiles set display_name = v_display_name where id = v_profile_id;
   else
     insert into profiles (display_name, primary_email)
-    values (p_display_name, p_email)
+    values (v_display_name, v_email)
     returning id into v_profile_id;
   end if;
 
   insert into linked_accounts (supabase_user_id, profile_id, email)
-  values (p_supabase_user_id, v_profile_id, p_email);
+  values (v_uid, v_profile_id, v_email);
 
   return v_profile_id;
 end;

@@ -14,8 +14,15 @@ globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => 
   const req = new Request(input, init); const url = new URL(req.url)
   if (url.host === 'api.resend.com') { resendCalls.push(await req.json()); return Response.json({ id: 're_1' }) }
   if (url.pathname === '/auth/v1/user') {
-    return req.headers.get('authorization') === 'Bearer user-good'
-      ? Response.json({ id: 'u1', aud: 'authenticated', email: 'a@sil.org' }) : Response.json({ msg: 'bad jwt' }, { status: 401 })
+    const auth = req.headers.get('authorization')
+    if (auth === 'Bearer user-good') return Response.json({ id: 'u1', aud: 'authenticated', email: 'a@sil.org' })
+    if (auth === 'Bearer user-other-app') return Response.json({ id: 'u2', aud: 'authenticated', email: 'b@sil.org' })
+    return Response.json({ msg: 'bad jwt' }, { status: 401 })
+  }
+  if (url.pathname === '/rest/v1/linked_accounts') {
+    // Only u1 has a profile in this app; u2 is a valid user of another app sharing the project.
+    return url.searchParams.get('supabase_user_id') === 'eq.u1'
+      ? Response.json({ profile_id: 'p1' }) : Response.json({ code: 'PGRST116', message: 'no rows' }, { status: 406 })
   }
   if (url.pathname === '/rest/v1/email_log') { logRows.push(await req.json()); return new Response(null, { status: 201 }) }
   throw new Error('unexpected fetch ' + req.url)
@@ -39,16 +46,19 @@ check('no Authorization header -> 401', await send(null), 401)
 check('THE OLD HOLE: "Bearer anything" -> 401', await send('Bearer anything'), 401)
 check('THE OLD HOLE: arbitrary non-bearer value -> 401', await send('hello'), 401)
 check('invalid user token -> 401', await send('Bearer user-bad'), 401)
+check('valid user with no profile in this app -> 401', await send('Bearer user-other-app'), 401)
 check('nothing was sent for any rejected request', resendCalls.length, 0)
 
 check('license-manager reminders (service-role key) -> 200', await send('Bearer service-key'), 200)
 check('  ...sent as License Manager, unchanged', [resendCalls.at(-1)!.from, resendCalls.at(-1)!.reply_to], ['License Manager <license_manager@em.sil.org>', 'helpdesk+licenses@sil.org'])
 check('license-manager browser (valid user token) -> 200', await send('Bearer user-good'), 200)
 check('  ...sent as License Manager, unchanged', resendCalls.at(-1)!.from, 'License Manager <license_manager@em.sil.org>')
+check('  ...logged with sent_by = the user', logRows.at(-1)!.sent_by, 'a@sil.org')
 check('explicit app: "licenses" from browser -> 200', await send('Bearer user-good', { app: 'licenses' }), 200)
 
 check('contract reminders (CRON_SECRET, app contracts) -> 200', await send('Bearer cron-secret', { app: 'contracts' }), 200)
 check('  ...sent as Contract Repository', resendCalls.at(-1)!.from, 'Contract Repository <contracts@em.sil.org>')
+check('  ...logged with sent_by = system', logRows.at(-1)!.sent_by, 'system')
 check('  ...no reply_to when CONTRACTS_REPLY_TO unset', 'reply_to' in resendCalls.at(-1)!, false)
 check('browser user cannot send as contracts -> 403', await send('Bearer user-good', { app: 'contracts' }), 403)
 check('unknown app -> 400', await send('Bearer service-key', { app: 'evil' }), 400)

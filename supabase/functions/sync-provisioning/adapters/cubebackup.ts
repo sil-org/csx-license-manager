@@ -22,13 +22,20 @@ interface SyncResult {
   errors: { email: string; message: string }[]
 }
 
-export async function cubebackupSync(config: any, desiredEmails: string[]): Promise<SyncResult> {
+// managedEmails: users this app enabled itself and hasn't since disabled
+// (see managedEmailsFor() in ../index.ts). Only they can ever be disabled
+// here — every other user in the CubeBackup domain was set up outside this
+// app, and "no active subscription" says nothing about whether they should
+// be backed up. Without this, the first run would switch off backups for
+// everyone in the domain who isn't tracked as a subscription.
+export async function cubebackupSync(config: any, desiredEmails: string[], managedEmails: string[]): Promise<SyncResult> {
   const apiKey = Deno.env.get('CUBEBACKUP_API_KEY')
   if (!apiKey) throw new Error('CUBEBACKUP_API_KEY is not set')
   const { baseUrl, domain } = config || {}
   if (!baseUrl || !domain) throw new Error("cubebackup provisioning_config requires 'baseUrl' and 'domain'")
 
   const desiredSet = new Set(desiredEmails.map(e => e.toLowerCase()))
+  const managedSet = new Set(managedEmails.map(e => e.toLowerCase()))
 
   let byEmail = indexByEmail(await listUsers(baseUrl, domain, apiKey))
   const missing = desiredEmails.filter(e => !byEmail.has(e.toLowerCase()))
@@ -51,7 +58,7 @@ export async function cubebackupSync(config: any, desiredEmails: string[]): Prom
     if (shouldBackup && !currentlyBackedUp) {
       enabledIds.push(user.Id)
       enabled.push(email)
-    } else if (!shouldBackup && currentlyBackedUp) {
+    } else if (!shouldBackup && currentlyBackedUp && managedSet.has(email)) {
       disabledIds.push(user.Id)
       disabled.push(email)
     }

@@ -43,11 +43,19 @@ const DIRECTORY_SCOPES = [
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders() })
 
+  // Scheduled job only — deployed with --no-verify-jwt, so gate it on the
+  // same CRON_SECRET as send-*-reminders (or the service-role key, for a
+  // manual run). Without this, anyone could trigger Directory API calls and
+  // rewrite the group_memberships cache that authorization checks read.
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  const cronSecret = Deno.env.get('CRON_SECRET')
+  const token = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '').trim()
+  if (!token || (token !== serviceRoleKey && (!cronSecret || token !== cronSecret))) {
+    return json({ error: 'Unauthorized' }, 401)
+  }
+
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
+    const supabase = createClient(Deno.env.get('SUPABASE_URL')!, serviceRoleKey)
 
     const { data: ownedRows, error: ownedError } = await supabase
       .from('suite_keys')

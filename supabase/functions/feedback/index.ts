@@ -1,8 +1,17 @@
+import { createClient } from 'jsr:@supabase/supabase-js@2'
+
 const GITHUB_API = 'https://api.github.com'
+
+// Label per type, decided here rather than taken from the request, so a
+// caller can't attach arbitrary labels to issues in the repo.
+const LABELS: Record<FeedbackRequest['type'], string> = {
+  bug: 'bug',
+  feature: 'enhancement',
+  comment: 'comment',
+}
 
 interface FeedbackRequest {
   type: 'bug' | 'feature' | 'comment'
-  githubLabel: string
   title: string
   description: string
   context?: { userId?: string; page?: string }
@@ -19,13 +28,20 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
+    // Deployed with --no-verify-jwt, so verify the caller here: a real
+    // signed-in user, not just any Authorization header.
+    const token = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '').trim()
+    if (!token) {
+      return json({ error: 'Unauthorized' }, 401)
+    }
+    const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!)
+    const { data: { user } } = await supabase.auth.getUser(token)
+    if (!user) {
       return json({ error: 'Unauthorized' }, 401)
     }
 
     const body: FeedbackRequest = await req.json()
-    const { type, githubLabel, title, description, context } = body
+    const { type, title, description, context } = body
 
     if (!title?.trim() || !description?.trim()) {
       return json({ error: 'Title and description are required.' }, 400)
@@ -35,11 +51,10 @@ Deno.serve(async (req) => {
       return json({ error: 'Invalid feedback type.' }, 400)
     }
 
-    const contextBlock = context
-      ? ['', '---', '**Context**', context.userId ? `- User: ${context.userId}` : null, context.page ? `- Page: ${context.page}` : null]
-          .filter(Boolean)
-          .join('\n')
-      : ''
+    // User comes from the verified session, not the client-supplied context.
+    const contextBlock = ['', '---', '**Context**', `- User: ${user.email ?? user.id}`, context?.page ? `- Page: ${context.page}` : null]
+      .filter(Boolean)
+      .join('\n')
 
     const ghResponse = await fetch(
       `${GITHUB_API}/repos/${Deno.env.get('GITHUB_OWNER')}/${Deno.env.get('GITHUB_REPO')}/issues`,
@@ -54,7 +69,7 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           title: title.trim(),
           body: `${description.trim()}\n${contextBlock}`,
-          labels: [githubLabel || type, 'user-submitted'],
+          labels: [LABELS[type], 'user-submitted'],
         }),
       }
     )

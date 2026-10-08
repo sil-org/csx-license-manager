@@ -1,4 +1,4 @@
-import { createClient } from 'jsr:@supabase/supabase-js@2'
+import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2'
 import { classifyCaller, resolveSender } from './auth.ts'
 
 const RESEND_API_URL = 'https://api.resend.com/emails'
@@ -25,21 +25,24 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(Deno.env.get('SUPABASE_URL')!, serviceRoleKey)
 
-    // This function is deployed with --no-verify-jwt, so it authenticates callers itself.
-    // It previously only checked that an Authorization header *existed* — any value passed.
-    // Now: the service-role key / CRON_SECRET (our own Edge Functions) or a valid signed-in
-    // user's access token (the browser app). See auth.ts.
+    // Deployed with --no-verify-jwt (see supabase/functions/README.md), so
+    // this is the only gate: an open endpoint here would let anyone on the
+    // internet send arbitrary HTML from our domain. Callers are either our
+    // own Edge Functions (service-role key / CRON_SECRET) or a signed-in user
+    // with a profile in this app. See auth.ts.
+    let userIdentity: string | null = null
     const caller = await classifyCaller(req.headers.get('Authorization'), {
       serviceRoleKey,
       cronSecret: Deno.env.get('CRON_SECRET'),
       isValidUserToken: async (token) => {
-        const { data, error } = await supabase.auth.getUser(token)
-        return !error && !!data?.user
+        userIdentity = await verifiedUserIdentity(supabase, token)
+        return userIdentity !== null
       },
     })
     if (!caller) {
       return json({ error: 'Unauthorized' }, 401)
     }
+    const sentBy = caller === 'server' ? 'system' : userIdentity
 
     const body: EmailRequest = await req.json()
     const { to, subject, html, template, app, subscription_id, bcc, cc } = body
@@ -92,6 +95,7 @@ Deno.serve(async (req) => {
       resend_id: resendData.id || null,
       status,
       error,
+      sent_by: sentBy,
     })
 
     if (!resendRes.ok) {
@@ -103,6 +107,30 @@ Deno.serve(async (req) => {
     return json({ error: err.message }, 500)
   }
 })
+
+// Returns the verified user's email (for email_log.sent_by), or null if the
+// token isn't a signed-in user of this app.
+async function verifiedUserIdentity(
+  supabase: SupabaseClient,
+  token: string
+): Promise<string | null> {
+  // getUser(token) validates the JWT against the auth server — a forged or
+  // expired token (or the public anon key) comes back with no user.
+  const { data: { user } } = await supabase.auth.getUser(token)
+  if (!user) return null
+
+  // A valid session isn't enough on its own: this project is shared with
+  // other apps, so also require a linked profile (i.e. an eligible staff
+  // member who has signed in here — see resolve_profile()).
+  const { data: link } = await supabase
+    .from('linked_accounts')
+    .select('profile_id')
+    .eq('supabase_user_id', user.id)
+    .maybeSingle()
+  if (!link) return null
+
+  return user.email ?? user.id
+}
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
