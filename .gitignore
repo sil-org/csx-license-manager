@@ -4,3 +4,5 @@ node_modules/
 .env.local
 supabase/.temp/
 dist/
+deno.lock
+dev-server.log
