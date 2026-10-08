@@ -1,14 +1,16 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
+import { classifyCaller, resolveSender } from './auth.ts'
 
 const RESEND_API_URL = 'https://api.resend.com/emails'
-const FROM = 'License Manager <license_manager@em.sil.org>'
-const REPLY_TO = 'helpdesk+licenses@sil.org'
+// Sender identity comes from resolveSender() in auth.ts (per-app, chosen server-side).
 
 interface EmailRequest {
   to: string | string[]
   subject: string
   html: string
   template: string
+  /** Which app is sending; selects the sender identity. Defaults to 'licenses'. Non-default apps are server-to-server only. */
+  app?: string
   subscription_id?: string
   bcc?: string[]
   cc?: string[]
@@ -20,18 +22,35 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const supabase = createClient(Deno.env.get('SUPABASE_URL')!, serviceRoleKey)
+
+    // This function is deployed with --no-verify-jwt, so it authenticates callers itself.
+    // It previously only checked that an Authorization header *existed* — any value passed.
+    // Now: the service-role key / CRON_SECRET (our own Edge Functions) or a valid signed-in
+    // user's access token (the browser app). See auth.ts.
+    const caller = await classifyCaller(req.headers.get('Authorization'), {
+      serviceRoleKey,
+      cronSecret: Deno.env.get('CRON_SECRET'),
+      isValidUserToken: async (token) => {
+        const { data, error } = await supabase.auth.getUser(token)
+        return !error && !!data?.user
+      },
+    })
+    if (!caller) {
       return json({ error: 'Unauthorized' }, 401)
     }
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
-
     const body: EmailRequest = await req.json()
-    const { to, subject, html, template, subscription_id, bcc, cc } = body
+    const { to, subject, html, template, app, subscription_id, bcc, cc } = body
+
+    const sender = resolveSender(app, { contractsReplyTo: Deno.env.get('CONTRACTS_REPLY_TO') })
+    if (!sender) {
+      return json({ error: 'Unknown app' }, 400)
+    }
+    if (sender.serverOnly && caller !== 'server') {
+      return json({ error: 'Forbidden' }, 403)
+    }
 
     if (!to || (Array.isArray(to) && !to.length) || !subject || !html || !template) {
       return json({ error: 'Missing required fields: to, subject, html, template' }, 400)
@@ -54,7 +73,7 @@ Deno.serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: FROM, to, subject, html, reply_to: REPLY_TO,
+        from: sender.from, to, subject, html, ...(sender.replyTo ? { reply_to: sender.replyTo } : {}),
         ...(bcc?.length ? { bcc } : {}),
         ...(cc?.length ? { cc } : {}),
       }),
