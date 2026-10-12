@@ -92,7 +92,7 @@ Deno.serve(async (req) => {
       // update_subscription_details()), while a renewal is always billed at
       // full price. Mirrors renewalPriceLabel() in src/lib/email.js.
       const priceLabel = sub.license?.price != null ? `$${Number(sub.license.price).toFixed(2)}/yr` : null
-      const suiteKeyLabel = sub.billing_type === 'gtis' ? 'GTIS' : sub.billing_type === 'ministry' ? `Ministry ID ${sub.ministry_id}` : sub.suite_key
+      const suiteKeyLabel = sub.billing_type === 'gtis' ? 'GTIS' : sub.billing_type === 'ministry' ? `Ministry ID ${sub.ministry_id}` : sub.billing_type === 'free' ? 'Free' : sub.suite_key
 
       byOwner.get(owner)!.push(renewalCardHtml({
         licenseName: sub.license?.name || 'License',

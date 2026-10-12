@@ -42,7 +42,7 @@ export const INACTIVE_STATUSES = ['cancelled', 'declined', 'revoked']
 // True when cancelling this subscription leaves a recurring charge behind —
 // an annual, non-free subscription billed to a SuiteKey or Ministry ID keeps
 // charging that key until someone else requests the license. GTIS-funded and
-// department-approved billing have no committed key on the hook, so they're
+// free billing have no committed key on the hook, so they're
 // excluded even though shouldShowRenewal() above only excludes GTIS.
 export function suiteKeyKeepsBillingAfterCancel(sub) {
   return sub.billing_cycle === 'annual'
@@ -62,7 +62,7 @@ export const PRICE_UNIT_LABEL = { annual: 'per year', monthly: 'per month', one_
 export function billingLabel(sub) {
   if (sub.billing_type === 'gtis') return 'GTIS'
   if (sub.billing_type === 'ministry') return `Ministry ID ${sub.ministry_id}`
-  if (sub.billing_type === 'department') return 'Free (department-approved)'
+  if (sub.billing_type === 'free') return 'Free'
   return sub.suite_key
 }
 

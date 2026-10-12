@@ -75,10 +75,11 @@ do $$ begin
   create type subscription_billing_type as enum ('suite_key', 'gtis', 'ministry');
 exception when duplicate_object then null; end $$;
 
--- 'department' backs department-gated licensing (an otherwise-free license
--- that still needs a named approver for specific departments' seats) — see
--- department_approvals and request_subscription()'s department_gated branch.
-alter type subscription_billing_type add value if not exists 'department';
+-- 'free' means nobody pays ($0 licenses, e.g. department-gated Gemini).
+-- It was added as 'department' (40) and renamed in 80 — department approval
+-- is a gate on the license (licenses.department_gated + department_approvals),
+-- not a way of paying.
+alter type subscription_billing_type add value if not exists 'free';
 
 -- ─── PROFILE EXTENSIONS ──────────────────────────────────────────────────────
 -- Needed so RPCs below can join subscriptions/licenses (keyed by email) back
@@ -594,6 +595,8 @@ create policy "department_approvals: admin only" on department_approvals for all
 drop function if exists request_subscription(uuid, text, text, text, int);
 -- Adds a 7th parameter (p_acknowledged) — same reason, drop the 6-arg overload.
 drop function if exists request_subscription(uuid, text, text, text, int, text);
+-- Adds an 8th parameter (p_extra_field_value) — same reason, drop the 7-arg overload.
+drop function if exists request_subscription(uuid, text, text, text, int, text, boolean);
 -- Adds a 9th parameter (p_suggested_approver_is_group) — same reason, drop the 8-arg overload.
 drop function if exists request_subscription(uuid, text, text, text, int, text, boolean, text);
 
@@ -668,7 +671,7 @@ begin
     -- seat, regardless of who happened to submit the request on their
     -- behalf. No profile, or no sco on file, or no opt-in row for that sco:
     -- auto-approve, same as gtis_sponsored.
-    v_billing_type := 'department';
+    v_billing_type := 'free';
     select sco into v_sco from profiles where lower(primary_email) = v_recipient_email;
     if v_sco is not null then
       select approver_email into v_pending_approver
@@ -1586,6 +1589,7 @@ begin
     case
       when o.billing_type = 'gtis' then 'GTIS'
       when o.billing_type = 'ministry' then 'Ministry ID ' || o.ministry_id
+      when o.billing_type = 'free' then 'Free'
       else o.suite_key
     end,
     l.price, o.renewal_month, l.reminder_message
@@ -2005,6 +2009,7 @@ returns table(
     case
       when s.billing_type = 'gtis' then 'GTIS'
       when s.billing_type = 'ministry' then 'Ministry ID ' || s.ministry_id
+      when s.billing_type = 'free' then 'Free'
       else s.suite_key
     end,
     calc_prorated_cost(l.price, l.billing_cycle, l.renewal_month, l.pro_rated, s.start_date),

@@ -8,12 +8,13 @@ import { getMySubscriptions, cancelSubscription, optInRenewal, optOutRenewal } f
 import { fiscalYearOf } from '../lib/fiscalYear'
 import { fyLabel, STATUS_LABEL, STATUS_BADGE, INACTIVE_STATUSES, PRICE_UNIT_LABEL, suiteKeyKeepsBillingAfterCancel } from '../lib/subscriptionDisplay'
 
-// "SuiteKey: X" / "Ministry ID: X" / "GTIS-funded" — same underlying data as
+// "SuiteKey: X" / "Ministry ID: X" / "GTIS-funded" / "No charge" — same underlying data as
 // subscriptionDisplay.js's billingLabel(), phrased as prose for this page's
 // card subtitle rather than a bare table-cell value.
 function billingDescription(sub) {
   if (sub.billing_type === 'gtis') return 'GTIS-funded'
   if (sub.billing_type === 'ministry') return `Ministry ID: ${sub.ministry_id}`
+  if (sub.billing_type === 'free') return 'No charge'
   return `SuiteKey: ${sub.suite_key}`
 }
 

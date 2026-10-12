@@ -118,7 +118,7 @@ export async function requestSubscription({ licenseId, suiteKey, suggestedApprov
     const owner = data?.[0]
     const to = owner?.owner_group_email || owner?.owner_email
     if (to) notify = [{ type: 'approval_request', to }]
-  } else if (sub.status === 'pending' && sub.billing_type === 'department' && sub.pending_approver_email) {
+  } else if (sub.status === 'pending' && sub.billing_type === 'free' && sub.pending_approver_email) {
     notify = [{ type: 'department_approval_request', to: sub.pending_approver_email }]
   } else if (sub.status === 'approved') {
     notify = await buildProvisioningNotifications(sub)
