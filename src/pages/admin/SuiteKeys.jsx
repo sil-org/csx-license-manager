@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import AppLayout from '../../components/AppLayout'
 import AdminTabs from '../../components/AdminTabs'
 import { getLinks } from '../../navLinks'
-import { getSuiteKeys, updateSuiteKeyOwner, confirmSuiteKeyOwnership, mergeSuiteKey } from '../../lib/admin'
+import { adminSearchSuiteKeys, updateSuiteKeyOwner, confirmSuiteKeyOwnership, mergeSuiteKey } from '../../lib/admin'
 import {
   sendEmail,
   suiteKeyAssignedEmailSubject, suiteKeyAssignedEmailHtml,
@@ -24,12 +24,32 @@ export default function AdminSuiteKeys() {
   const [editing, setEditing] = useState(null) // suite_keys row, or BLANK for "new"
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
+  const [ownershipFilter, setOwnershipFilter] = useState('')
+  const [totalCount, setTotalCount] = useState(0)
+  const [loading, setLoading] = useState(false)
 
+  const hasFilter = !!(search.trim() || ownershipFilter)
+
+  // Searched rather than browsed, same as All Subscriptions — see
+  // adminSearchSuiteKeys() for why the whole table can't just be loaded and
+  // filtered client-side. No filter set means nothing to query: the page
+  // starts (and returns to) empty until the admin searches. Also re-run by
+  // every mutating action to refresh in place.
   function reload() {
-    getSuiteKeys().then(setKeys).catch(e => setError(e.message))
+    if (!hasFilter) { setKeys(null); setTotalCount(0); return }
+    setLoading(true)
+    adminSearchSuiteKeys({ search, ownership: ownershipFilter })
+      .then(({ rows, count }) => { setKeys(rows); setTotalCount(count) })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
   }
 
-  useEffect(reload, [])
+  // Debounced so typing doesn't fire a query per keystroke.
+  useEffect(() => {
+    const timer = setTimeout(reload, 300)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, ownershipFilter])
 
   // Shared by the edit modal and the quick-confirm button below — sets the
   // owner (individual or group) and, if it actually changed, notifies the
@@ -135,14 +155,6 @@ export default function AdminSuiteKeys() {
     })
   }
 
-  const q = search.trim().toLowerCase()
-  const visibleKeys = !q ? keys : keys?.filter(k =>
-    k.suite_key.toLowerCase().includes(q) ||
-    (k.description || '').toLowerCase().includes(q) ||
-    (k.owner_email || '').toLowerCase().includes(q) ||
-    (k.owner_group_email || '').toLowerCase().includes(q)
-  )
-
   return (
     <AppLayout appName="License Manager" links={getLinks()}>
       <div className="max-w-6xl mx-auto p-6">
@@ -155,22 +167,39 @@ export default function AdminSuiteKeys() {
         </div>
 
         {error && <p className="text-sil-red mb-4">{error}</p>}
-        {!keys && !error && <p className="text-gray-400">Loading…</p>}
-        {keys?.length === 0 && <p className="text-gray-400">No SuiteKeys on file yet — they're also created automatically the first time someone requests a license against a new one.</p>}
-
-        {keys?.length > 0 && (
+        <div className="flex flex-wrap gap-3 mb-4">
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Filter by SuiteKey, owner, or description…"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
+            placeholder="Search by SuiteKey, owner, or description…"
+            className="flex-1 min-w-48 border border-gray-300 rounded-lg px-3 py-2 text-sm"
           />
+          <select
+            value={ownershipFilter}
+            onChange={e => setOwnershipFilter(e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          >
+            <option value="">All ownership</option>
+            {Object.entries(STATUS_LABEL).map(([value, label]) => (
+              <option key={value} value={value}>{label}</option>
+            ))}
+          </select>
+        </div>
+
+        {!hasFilter && (
+          <p className="text-gray-400 mb-4">Search or choose an ownership filter above to see SuiteKeys.</p>
         )}
-        {keys?.length > 0 && visibleKeys.length === 0 && (
-          <p className="text-gray-400 mb-4">No SuiteKeys match "{search}".</p>
+        {hasFilter && loading && (
+          <p className="text-gray-400 mb-4">Searching…</p>
+        )}
+        {hasFilter && !loading && keys?.length === 0 && (
+          <p className="text-gray-400 mb-4">No SuiteKeys match the current filters.</p>
+        )}
+        {hasFilter && !loading && keys?.length > 0 && totalCount > keys.length && (
+          <p className="text-gray-400 mb-4 text-sm">Showing {keys.length} of {totalCount} matches — narrow your search to see the rest.</p>
         )}
 
-        {visibleKeys?.length > 0 && (
+        {keys?.length > 0 && (
           <div className="bg-white rounded-xl shadow-xs overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-left text-gray-400 border-b">
@@ -183,7 +212,7 @@ export default function AdminSuiteKeys() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {visibleKeys.map(k => (
+                {keys.map(k => (
                   <tr key={k.suite_key}>
                     <td
                       className={`p-3 font-medium whitespace-nowrap ${k.deprecated_at ? 'text-sil-red' : 'text-brand'}`}

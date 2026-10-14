@@ -846,6 +846,7 @@ declare
   -- caller a member of a suggested group" when no row names them directly.
   v_approver text;
   v_is_group boolean;
+  v_current_owner text;
 begin
   select pending_approver_email, false into v_approver, v_is_group
   from subscriptions
@@ -863,7 +864,9 @@ begin
     limit 1;
   end if;
 
-  if v_approver is null then raise exception 'suite key not found or owned by someone else'; end if;
+  if v_approver is null then
+    raise exception 'no request on suite key % is waiting for your confirmation — it may already have been confirmed or denied; reload the page', p_suite_key;
+  end if;
 
   -- Also succeeds if already owned by the resolved approver (idempotent) —
   -- an admin may have already assigned this key via
@@ -876,7 +879,17 @@ begin
     update suite_keys set owner_email = v_approver, owner_group_email = null
     where suite_key = p_suite_key and (owner_email is null or owner_email = v_approver);
   end if;
-  if not found then raise exception 'suite key not found or owned by someone else'; end if;
+
+  -- Distinct from the "nothing waiting on you" case above — see
+  -- 82_confirm_sk_ownership_distinct_errors.sql.
+  if not found then
+    select coalesce(owner_email, owner_group_email) into v_current_owner
+    from suite_keys where suite_key = p_suite_key;
+    if v_current_owner is null then
+      raise exception 'suite key % does not exist', p_suite_key;
+    end if;
+    raise exception 'suite key % is already owned by % — ask them or an admin to handle this request', p_suite_key, v_current_owner;
+  end if;
 
   insert into audit_log (action, suite_key, performed_by, notes, ip_address)
   values (

@@ -68,19 +68,59 @@ export async function getAuditLogForExport(filters = {}) {
 // behalf" action — for the real-world case where the actual owner replies
 // "yes, that's my key" outside the app (email, verbally) instead of
 // completing the self-service confirm flow.
-export async function getSuiteKeys() {
-  const [{ data: keys, error: keysError }, { data: pending, error: pendingError }] = await Promise.all([
-    supabase.from('suite_keys').select('*').order('suite_key'),
-    supabase.from('subscriptions').select('suite_key, pending_approver_email').eq('status', 'pending_sk_verification'),
-  ])
-  if (keysError) throw keysError
+//
+// Searched server-side rather than loaded whole, same as searchSubscriptions()
+// below: an unpaginated suite_keys select is capped at PostgREST's 1000 rows,
+// so with more keys than that on file, filtering the loaded list client-side
+// silently missed every key past the first 1000 alphabetically. Returns
+// nothing until search/ownership actually narrows the query; capped at
+// pageSize. ownership ('pending' | 'unassigned' | 'confirmed') is applied
+// server-side with the same precedence the status pill uses — pending wins
+// over confirmed when a key has both an owner and a request still awaiting
+// verification.
+export async function adminSearchSuiteKeys({ search = '', ownership = '', page = 0, pageSize = 200 } = {}) {
+  // pending_sk_verification requests are a small, short-lived set, so the
+  // whole set is fetched to drive both the ownership filter and the pending
+  // approver shown on each returned row.
+  const { data: pending, error: pendingError } = await supabase
+    .from('subscriptions').select('suite_key, pending_approver_email').eq('status', 'pending_sk_verification')
   if (pendingError) throw pendingError
-
   // If multiple pending requests on the same key ever end up with different
   // suggested approvers, this just picks one — the admin confirm button is a
   // convenience for the normal case, not a substitute for the edit modal.
   const pendingApproverByKey = new Map((pending || []).map(s => [s.suite_key, s.pending_approver_email]))
-  return (keys || []).map(k => {
+  // Quoted so a key containing a comma or paren can't break the in-list.
+  const pendingKeyList = `(${[...pendingApproverByKey.keys()].map(k => `"${k.replace(/["\\]/g, '\\$&')}"`).join(',')})`
+  const hasPendingKeys = pendingApproverByKey.size > 0
+
+  let query = supabase.from('suite_keys').select('*', { count: 'exact' }).order('suite_key')
+
+  const q = search.trim()
+  if (q) {
+    // Commas/parens are .or()'s own clause delimiters — escape them so a
+    // search containing one can't be misread as extra filter clauses.
+    const escaped = q.replace(/[,()]/g, '\\$&')
+    query = query.or([
+      `suite_key.ilike.%${escaped}%`, `description.ilike.%${escaped}%`,
+      `owner_email.ilike.%${escaped}%`, `owner_group_email.ilike.%${escaped}%`,
+    ].join(','))
+  }
+
+  if (ownership === 'pending') {
+    query = query.or(hasPendingKeys ? `suite_key.in.${pendingKeyList},pending_owner_email.not.is.null` : 'pending_owner_email.not.is.null')
+  } else if (ownership === 'unassigned' || ownership === 'confirmed') {
+    query = query.is('pending_owner_email', null)
+    if (hasPendingKeys) query = query.not('suite_key', 'in', pendingKeyList)
+    query = ownership === 'unassigned'
+      ? query.is('owner_email', null).is('owner_group_email', null)
+      : query.or('owner_email.not.is.null,owner_group_email.not.is.null')
+  }
+
+  const from = page * pageSize
+  const { data: keys, error, count } = await query.range(from, from + pageSize - 1)
+  if (error) throw error
+
+  const rows = (keys || []).map(k => {
     const pendingApproverEmail = pendingApproverByKey.get(k.suite_key) || k.pending_owner_email || null
     return {
       ...k,
@@ -88,6 +128,7 @@ export async function getSuiteKeys() {
       pendingApproverEmail,
     }
   })
+  return { rows, count }
 }
 
 // Returns the subscriptions re-pointed/advanced by the new owner (id, user_email,
