@@ -2,13 +2,13 @@ import { useState } from 'react'
 import { MessageSquarePlus, Bug, Lightbulb, MessageCircle, X, Check } from 'lucide-react'
 
 const TYPES = [
-  { id: 'bug', label: 'Bug', Icon: Bug, placeholder: "What happened, and what did you expect instead?", githubLabel: 'bug' },
-  { id: 'feature', label: 'Feature', Icon: Lightbulb, placeholder: 'What would you like to be able to do?', githubLabel: 'enhancement' },
-  { id: 'comment', label: 'Comment', Icon: MessageCircle, placeholder: "What's on your mind?", githubLabel: 'comment' },
+  { id: 'bug', label: 'Bug', Icon: Bug, placeholder: "What happened, and what did you expect instead?" },
+  { id: 'feature', label: 'Feature', Icon: Lightbulb, placeholder: 'What would you like to be able to do?' },
+  { id: 'comment', label: 'Comment', Icon: MessageCircle, placeholder: "What's on your mind?" },
 ]
 
 // Floating feedback trigger — bottom-right blue button. `onSubmit` does the
-// actual delivery (files a GitHub issue); this component only owns the
+// actual delivery (emails the help desk); this component only owns the
 // type/title/description UI and the open/submitting/done/error states.
 export default function FeedbackWidget({ onSubmit }) {
   const [open, setOpen] = useState(false)
@@ -38,7 +38,6 @@ export default function FeedbackWidget({ onSubmit }) {
     try {
       await onSubmit({
         type,
-        githubLabel: activeType.githubLabel,
         title: title.trim(),
         description: description.trim(),
       })
@@ -67,7 +66,7 @@ export default function FeedbackWidget({ onSubmit }) {
                   <Check size={24} className="text-sil-green" />
                 </div>
                 <p className="text-base font-medium text-gray-800">Thanks — we got it.</p>
-                <p className="text-sm text-gray-500">Your {activeType.label.toLowerCase()} has been logged with the team.</p>
+                <p className="text-sm text-gray-500">Your {activeType.label.toLowerCase()} has been sent to the help desk. They'll reply by email if they need more information.</p>
                 <button
                   onClick={close}
                   className="mt-2 rounded-md bg-brand px-4 py-2 text-sm font-medium text-white hover:opacity-90"

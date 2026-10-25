@@ -1,13 +1,11 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
-const GITHUB_API = 'https://api.github.com'
+const HELPDESK_EMAIL = 'helpdesk+licenses@sil.org'
 
-// Label per type, decided here rather than taken from the request, so a
-// caller can't attach arbitrary labels to issues in the repo.
-const LABELS: Record<FeedbackRequest['type'], string> = {
-  bug: 'bug',
-  feature: 'enhancement',
-  comment: 'comment',
+const TYPE_LABELS: Record<FeedbackRequest['type'], string> = {
+  bug: 'Bug',
+  feature: 'Feature request',
+  comment: 'Comment',
 }
 
 interface FeedbackRequest {
@@ -17,11 +15,11 @@ interface FeedbackRequest {
   context?: { userId?: string; page?: string }
 }
 
-// Receives a submission from FeedbackWidget.jsx and files it as a GitHub
-// issue in the (private) repo, tagged with a label matching the type plus
-// "user-submitted". The repo is private and submitters never see the
-// resulting issue, so this is a one-way "thanks, we got it" flow, not a
-// tracker — the response never includes the issue URL or number.
+// Receives a submission from FeedbackWidget.jsx and emails it to the help
+// desk, with reply-to set to the submitter so the help desk can answer them
+// directly. Every submission — bug, feature or comment — goes here; nothing is
+// filed as a GitHub issue. Sent through send-email so it is logged in
+// email_log like every other message from this app.
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders() })
@@ -46,38 +44,41 @@ Deno.serve(async (req) => {
     if (!title?.trim() || !description?.trim()) {
       return json({ error: 'Title and description are required.' }, 400)
     }
-    const allowedTypes = ['bug', 'feature', 'comment']
-    if (!allowedTypes.includes(type)) {
+    if (!(type in TYPE_LABELS)) {
       return json({ error: 'Invalid feedback type.' }, 400)
     }
 
     // User comes from the verified session, not the client-supplied context.
-    const contextBlock = ['', '---', '**Context**', `- User: ${user.email ?? user.id}`, context?.page ? `- Page: ${context.page}` : null]
-      .filter(Boolean)
-      .join('\n')
+    const submitter = user.email ?? user.id
+    const page = context?.page?.trim()
 
-    const ghResponse = await fetch(
-      `${GITHUB_API}/repos/${Deno.env.get('GITHUB_OWNER')}/${Deno.env.get('GITHUB_REPO')}/issues`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${Deno.env.get('GITHUB_TOKEN')}`,
-          Accept: 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: title.trim(),
-          body: `${description.trim()}\n${contextBlock}`,
-          labels: [LABELS[type], 'user-submitted'],
-        }),
-      }
-    )
+    // send-email trusts the service-role key as a server caller, which is
+    // what lets us set reply_to to the submitter.
+    const emailRes = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/send-email`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to: HELPDESK_EMAIL,
+        ...(user.email ? { reply_to: user.email } : {}),
+        subject: `[License Manager] ${TYPE_LABELS[type]}: ${title.trim()}`,
+        template: 'feedback',
+        html: `
+          <p><strong>${TYPE_LABELS[type]}</strong> from ${escapeHtml(submitter)}</p>
+          <p style="white-space:pre-wrap">${escapeHtml(description.trim())}</p>
+          <hr>
+          <p style="color:#666;font-size:12px">
+            User: ${escapeHtml(submitter)}${page ? `<br>Page: ${escapeHtml(page)}` : ''}<br>
+            Reply to this email to respond to the user.
+          </p>`,
+      }),
+    })
 
-    if (!ghResponse.ok) {
-      const errText = await ghResponse.text()
-      console.error('GitHub API error:', ghResponse.status, errText)
-      return json({ error: 'Could not create the issue upstream.' }, 502)
+    if (!emailRes.ok) {
+      console.error('send-email error:', emailRes.status, await emailRes.text())
+      return json({ error: 'Could not send the feedback email.' }, 502)
     }
 
     return json({ ok: true })
@@ -86,6 +87,10 @@ Deno.serve(async (req) => {
     return json({ error: err.message }, 500)
   }
 })
+
+function escapeHtml(str: string) {
+  return str.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
+}
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {

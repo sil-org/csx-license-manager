@@ -14,6 +14,8 @@ interface EmailRequest {
   subscription_id?: string
   bcc?: string[]
   cc?: string[]
+  /** Overrides the sender's default reply-to. Honored for server callers only (e.g. feedback → help desk, replying to the submitter). */
+  reply_to?: string
 }
 
 Deno.serve(async (req) => {
@@ -45,7 +47,7 @@ Deno.serve(async (req) => {
     const sentBy = caller === 'server' ? 'system' : userIdentity
 
     const body: EmailRequest = await req.json()
-    const { to, subject, html, template, app, subscription_id, bcc, cc } = body
+    const { to, subject, html, template, app, subscription_id, bcc, cc, reply_to } = body
 
     const sender = resolveSender(app, { contractsReplyTo: Deno.env.get('CONTRACTS_REPLY_TO') })
     if (!sender) {
@@ -68,6 +70,12 @@ Deno.serve(async (req) => {
     // original requester, CC'd alongside the subscription owner).
     const toEmailLog = cc?.length ? `${toEmail} (cc: ${cc.join(', ')})` : toEmail
 
+    // A browser caller must not be able to point replies at an arbitrary
+    // address on mail from our domain, so only server callers may override.
+    const replyTo = caller === 'server' && reply_to && /^[^\s@<>,]+@[^\s@<>,]+$/.test(reply_to)
+      ? reply_to
+      : sender.replyTo
+
     // Send via Resend
     const resendRes = await fetch(RESEND_API_URL, {
       method: 'POST',
@@ -76,7 +84,7 @@ Deno.serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: sender.from, to, subject, html, ...(sender.replyTo ? { reply_to: sender.replyTo } : {}),
+        from: sender.from, to, subject, html, ...(replyTo ? { reply_to: replyTo } : {}),
         ...(bcc?.length ? { bcc } : {}),
         ...(cc?.length ? { cc } : {}),
       }),

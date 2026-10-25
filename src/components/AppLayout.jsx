@@ -192,11 +192,10 @@ export default function AppLayout({ appName, links, children }) {
         {children}
       </main>
 
-      <FeedbackWidget onSubmit={async ({ type, githubLabel, title, description }) => {
+      <FeedbackWidget onSubmit={async ({ type, title, description }) => {
         const { error } = await supabase.functions.invoke('feedback', {
           body: {
             type,
-            githubLabel,
             title,
             description,
             context: { userId: profile?.primary_email, page: window.location.href },
