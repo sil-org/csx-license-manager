@@ -41,6 +41,12 @@ callers — there is no platform gate behind it:
   app (verified with `auth.getUser()` + `linked_accounts`), the service-role
   key, or `CRON_SECRET`.
 - `feedback`, `classify-approver-email`: a signed-in user.
+
+`feedback` emails every submission (bug, feature or comment) to
+`helpdesk+licenses@sil.org` via `send-email`, with reply-to set to the
+submitter. It no longer creates GitHub issues, so the `GITHUB_TOKEN`,
+`GITHUB_OWNER` and `GITHUB_REPO` secrets are unused and can be removed.
+`send-email` honors a `reply_to` override from server callers only.
 - `send-*-reminders`, `sync-group-memberships`: `CRON_SECRET` (or the
   service-role key, for `sync-group-memberships`).
 
