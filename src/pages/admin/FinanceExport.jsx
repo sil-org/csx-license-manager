@@ -13,11 +13,11 @@ function firstOfMonthStr() {
   return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0]
 }
 
-const CSV_HEADER = ['User', 'License', 'Billed to', 'Cost', 'Price paid', 'Product key', 'Invoice #', 'Started', 'Renewed', 'Status', 'Notes']
+const CSV_HEADER = ['User', 'License', 'Billed to', 'Receiving suite key', 'Cost', 'Price paid', 'Product key', 'Invoice #', 'Started', 'Renewed', 'Status', 'Notes']
 
 function toCsvRow(r) {
   return [
-    r.user_email, r.license_name, r.billing_label, r.cost, r.price_paid, r.product_key, r.invoice_number,
+    r.user_email, r.license_name, r.billing_label, r.receiving_suite_key, r.cost, r.price_paid, r.product_key, r.invoice_number,
     r.start_date, r.renewed_date, r.status, r.notes,
   ]
 }
@@ -97,6 +97,7 @@ export default function AdminFinanceExport() {
                     <th className="p-3">User</th>
                     <th className="p-3">License</th>
                     <th className="p-3">Billed to</th>
+                    <th className="p-3">Receiving suite key</th>
                     <th className="p-3">Cost</th>
                     <th className="p-3">Price paid</th>
                     <th className="p-3">Product key</th>
@@ -113,6 +114,7 @@ export default function AdminFinanceExport() {
                       <td className="p-3">{r.user_email}</td>
                       <td className="p-3 font-medium text-brand">{r.license_name}</td>
                       <td className="p-3 text-gray-500">{r.billing_label}</td>
+                      <td className="p-3 text-gray-500">{r.receiving_suite_key}</td>
                       <td className="p-3 text-gray-700">${Number(r.cost).toFixed(2)}</td>
                       <td className="p-3 text-gray-700">{r.price_paid != null ? `$${Number(r.price_paid).toFixed(2)}` : '—'}</td>
                       <td className="p-3 text-gray-500">{r.product_key || '—'}</td>
