@@ -243,10 +243,13 @@ $$;
 -- ─── get_finance_export ─────────────────────────────────────────────────────
 -- Latest body from 58_finance_export_extra_field.sql; only change is the
 -- 'free' label (department-gated rows used to export a blank billing label).
+-- Also carries receiving_suite_key (79_finance_export_receiving_suite_key.sql):
+-- that column changes the return type, so the function is dropped first.
 
-create or replace function get_finance_export(p_start_date date, p_end_date date)
+drop function if exists get_finance_export(date, date);
+create function get_finance_export(p_start_date date, p_end_date date)
 returns table(
-  user_email text, license_name text, billing_label text, cost numeric, price_paid numeric,
+  user_email text, license_name text, billing_label text, receiving_suite_key text, cost numeric, price_paid numeric,
   product_key text, invoice_number text, start_date date, renewed_date date, status text, notes text
 ) language sql stable as $$
   select
@@ -258,6 +261,7 @@ returns table(
       when s.billing_type = 'free' then 'Free'
       else s.suite_key
     end,
+    l.receiving_suite_key,
     calc_prorated_cost(l.price, l.billing_cycle, l.renewal_month, l.pro_rated, s.start_date),
     s.price_at_signup,
     s.product_key,
