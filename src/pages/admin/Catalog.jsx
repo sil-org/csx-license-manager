@@ -17,6 +17,10 @@ import { startRenewalPeriod, getRenewalPeriodBlockers } from '../../lib/subscrip
 import { nextRenewalLabel, PRICE_UNIT_LABEL } from '../../lib/subscriptionDisplay'
 import { currentFiscalYear } from '../../lib/fiscalYear'
 
+// Mirrors licenses.receiving_suite_key's column default in
+// supabase/pending/78_license_receiving_suite_key.sql.
+const DEFAULT_RECEIVING_SUITE_KEY = 'WaxhawIT-U_SIL'
+
 const BLANK = {
   id: null, name: '', vendor: '', category: '', price: '', notes: '',
   gtis_sponsored: false, billing_cycle: 'annual', renewal_month: 10, renewal_reminder: true,
@@ -28,6 +32,7 @@ const BLANK = {
   requires_acknowledgement: false, acknowledgement_text: '',
   extra_field_label: '', extra_field_required: false,
   allow_multiple_per_person: false,
+  receiving_suite_key: DEFAULT_RECEIVING_SUITE_KEY,
 }
 
 // Sample data for the Preview buttons in the email-overrides section — no
@@ -488,7 +493,11 @@ export default function AdminCatalog() {
                       <input type="checkbox" checked={editing.allow_multiple_per_person} onChange={e => setEditing({ ...editing, allow_multiple_per_person: e.target.checked })} />
                       Allow multiple per person (e.g. a person can hold more than one Shared Drive)
                     </label>
-  
+
+                    <Field label="Receiving suite key" value={editing.receiving_suite_key} onChange={v => setEditing({ ...editing, receiving_suite_key: v })}
+                      placeholder={DEFAULT_RECEIVING_SUITE_KEY}
+                      hint={`The suite key that receives this license's charges. Leave blank to reset to the default (${DEFAULT_RECEIVING_SUITE_KEY}).`} />
+
                     <div className="space-y-1.5">
                       <Field label="Extra field label" value={editing.extra_field_label} onChange={v => setEditing({ ...editing, extra_field_label: v })}
                         placeholder='e.g. "Shared Drive name"'
