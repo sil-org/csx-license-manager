@@ -189,6 +189,7 @@ create table if not exists licenses (
   extra_field_label    text,   -- null = no extra field; set = RequestModal asks for one more piece of text at request time (e.g. "Shared Drive name")
   extra_field_required boolean not null default false,   -- only meaningful when extra_field_label is set
   allow_multiple_per_person boolean not null default false,   -- lets one person hold more than one subscription to this license in the same FY (e.g. multiple Shared Drives) — bypasses request_subscription()'s one-per-person-per-FY guard
+  receiving_suite_key  text not null default 'WaxhawIT-U_SIL',   -- the suite key credited for this catalog item; exported in the Finance Export (Admin -> Catalog's "More settings")
   legacy_id            text,   -- GAS Licenses sheet's ID (e.g. "LIC-XXXXXXXX"), set only by admin_import_licenses()
   created_at           timestamptz not null default now()
 );

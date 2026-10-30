@@ -28,6 +28,7 @@ const BLANK = {
   requires_acknowledgement: false, acknowledgement_text: '',
   extra_field_label: '', extra_field_required: false,
   allow_multiple_per_person: false,
+  receiving_suite_key: 'WaxhawIT-U_SIL',
 }
 
 // Sample data for the Preview buttons in the email-overrides section — no
@@ -489,6 +490,10 @@ export default function AdminCatalog() {
                       Allow multiple per person (e.g. a person can hold more than one Shared Drive)
                     </label>
   
+                    <Field label="Receiving suite key" value={editing.receiving_suite_key} onChange={v => setEditing({ ...editing, receiving_suite_key: v })}
+                      placeholder="WaxhawIT-U_SIL"
+                      hint="The suite key credited for this item — shown as a column in the Finance Export. Leave blank to use the default, WaxhawIT-U_SIL." />
+
                     <div className="space-y-1.5">
                       <Field label="Extra field label" value={editing.extra_field_label} onChange={v => setEditing({ ...editing, extra_field_label: v })}
                         placeholder='e.g. "Shared Drive name"'
