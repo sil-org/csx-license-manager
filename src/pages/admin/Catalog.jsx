@@ -33,6 +33,7 @@ const BLANK = {
   extra_field_label: '', extra_field_required: false,
   allow_multiple_per_person: false,
   receiving_suite_key: DEFAULT_RECEIVING_SUITE_KEY,
+  exclusive_group: '',
 }
 
 // Sample data for the Preview buttons in the email-overrides section — no
@@ -497,6 +498,10 @@ export default function AdminCatalog() {
                     <Field label="Receiving suite key" value={editing.receiving_suite_key} onChange={v => setEditing({ ...editing, receiving_suite_key: v })}
                       placeholder={DEFAULT_RECEIVING_SUITE_KEY}
                       hint={`The suite key that receives this license's charges. Leave blank to reset to the default (${DEFAULT_RECEIVING_SUITE_KEY}).`} />
+
+                    <Field label="Exclusive group" value={editing.exclusive_group || ''} onChange={v => setEditing({ ...editing, exclusive_group: v })}
+                      placeholder='e.g. "claude"'
+                      hint="Licenses sharing a group name are tiers of one product (e.g. Claude Standard and Claude Premium). When one is activated, the person's other seat in the group is cancelled automatically as an upgrade/downgrade. Leave blank for none." />
 
                     <div className="space-y-1.5">
                       <Field label="Extra field label" value={editing.extra_field_label} onChange={v => setEditing({ ...editing, extra_field_label: v })}
