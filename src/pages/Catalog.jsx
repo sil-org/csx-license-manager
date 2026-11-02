@@ -227,7 +227,11 @@ function RequestModal({ license, onClose }) {
   const [error, setError] = useState(null)
   const [done, setDone] = useState(false)
 
-  const fy = currentFiscalYear()
+  // Requesters may charge the current fiscal year or the next one (e.g. in
+  // September, for a charge that should land in the coming FY). The server
+  // accepts any p_fy.
+  const currentFy = currentFiscalYear()
+  const [fy, setFy] = useState(currentFy)
   const forSomeoneElse = recipientEmail.trim().toLowerCase() !== myEmail.toLowerCase()
 
   // Debounced typeahead — mirrors GAS's searchSuiteKeys(), which searched
@@ -334,7 +338,22 @@ function RequestModal({ license, onClose }) {
                   <p className="text-lg font-semibold text-gray-900">{formatPrice(license.price)}</p>
                 </div>
               )}
-              <p className="text-sm text-gray-500 -mt-2">Billing: {billingSummary(license)} &middot; Fiscal year {fy}</p>
+              <p className="text-sm text-gray-500 -mt-2">Billing: {billingSummary(license)}</p>
+
+              <div>
+                <label htmlFor="request-fy" className="block text-sm font-medium text-gray-700 mb-1">
+                  Fiscal year to be charged
+                </label>
+                <select
+                  id="request-fy"
+                  value={fy}
+                  onChange={e => setFy(Number(e.target.value))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value={currentFy}>FY{currentFy} (current: Oct 1, {currentFy - 1} – Sep 30, {currentFy})</option>
+                  <option value={currentFy + 1}>FY{currentFy + 1} (next: Oct 1, {currentFy} – Sep 30, {currentFy + 1})</option>
+                </select>
+              </div>
   
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
