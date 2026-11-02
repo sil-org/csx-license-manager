@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext'
 import { getActiveLicenses, sizeAwareSort } from '../lib/licenses'
 import { requestSubscription } from '../lib/subscriptions'
 import { searchSuiteKeys } from '../lib/suiteKeys'
-import { currentFiscalYear } from '../lib/fiscalYear'
+import { currentFiscalYear, nextFiscalYearSelectable } from '../lib/fiscalYear'
 import {
   sendEmail,
   skVerificationEmailSubject, skVerificationEmailHtml,
@@ -227,11 +227,11 @@ function RequestModal({ license, onClose }) {
   const [error, setError] = useState(null)
   const [done, setDone] = useState(false)
 
-  // Requesters may charge the current fiscal year or the next one (e.g. in
-  // September, for a charge that should land in the coming FY). The server
-  // accepts any p_fy.
+  // Requesters may charge the next fiscal year too, but only in the two months
+  // before it starts (Aug 1 - Sep 30). The server accepts any p_fy.
   const currentFy = currentFiscalYear()
   const [fy, setFy] = useState(currentFy)
+  const canPickNextFy = nextFiscalYearSelectable()
   const forSomeoneElse = recipientEmail.trim().toLowerCase() !== myEmail.toLowerCase()
 
   // Debounced typeahead — mirrors GAS's searchSuiteKeys(), which searched
@@ -340,20 +340,24 @@ function RequestModal({ license, onClose }) {
               )}
               <p className="text-sm text-gray-500 -mt-2">Billing: {billingSummary(license)}</p>
 
-              <div>
-                <label htmlFor="request-fy" className="block text-sm font-medium text-gray-700 mb-1">
-                  Fiscal year to be charged
-                </label>
-                <select
-                  id="request-fy"
-                  value={fy}
-                  onChange={e => setFy(Number(e.target.value))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                >
-                  <option value={currentFy}>FY{currentFy} (current: Oct 1, {currentFy - 1} – Sep 30, {currentFy})</option>
-                  <option value={currentFy + 1}>FY{currentFy + 1} (next: Oct 1, {currentFy} – Sep 30, {currentFy + 1})</option>
-                </select>
-              </div>
+              {canPickNextFy ? (
+                <div>
+                  <label htmlFor="request-fy" className="block text-sm font-medium text-gray-700 mb-1">
+                    Fiscal year to be charged
+                  </label>
+                  <select
+                    id="request-fy"
+                    value={fy}
+                    onChange={e => setFy(Number(e.target.value))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value={currentFy}>FY{currentFy} (current: Oct 1, {currentFy - 1} – Sep 30, {currentFy})</option>
+                    <option value={currentFy + 1}>FY{currentFy + 1} (next: Oct 1, {currentFy} – Sep 30, {currentFy + 1})</option>
+                  </select>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 -mt-2">Fiscal year {currentFy}</p>
+              )}
   
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
