@@ -26,7 +26,8 @@ npm run build            # production build (what Amplify runs)
 - Edge Function tests need Deno: `deno test supabase/functions/send-email/auth_test.ts`
   and `deno run -A --no-check supabase/functions/send-email/e2e_check.ts`.
 - Real sign-in requires Google OAuth (SIL accounts) against the shared Supabase
-  project — ask Kate for access/`.env` values; never commit `.env`.
+  project. The `.env` values (Supabase URL/anon key, SSO provider ID) are in the
+  **1Password "license manager" vault**; never commit `.env`.
 - Make yourself admin after first sign-in: see `SETUP.md` §8.
 
 ## 2. Architecture in one screen
@@ -60,7 +61,8 @@ npm run build            # production build (what Amplify runs)
   absent — pick the next free number above the highest (84+).
 - Whenever you change an RPC signature, drop the old overload (an overload
   ambiguity caused issue #23).
-- Don't assume a pending file has been applied to production; ask.
+- All of `supabase/pending/` (through 83) has been applied to production
+  (confirmed by Kate 2026-11-02). Anything above 83 is unapplied until told otherwise.
 
 ## 4. Conventions
 
@@ -73,8 +75,8 @@ npm run build            # production build (what Amplify runs)
 ## 5. Outstanding to-dos (as of 2026-11-02)
 
 **Open PRs**
-- #27 Dependabot: fast-uri 3.1.8 → 3.1.9 (security release) — review/merge.
-- #28 Dependabot: serialize-javascript 7.0.7 → 7.1.4 — review/merge.
+- #27 Dependabot: fast-uri 3.1.8 → 3.1.9 (security fixes; dev-only transitive dep) — recommend merge.
+- #28 Dependabot: serialize-javascript 7.0.7 → 7.1.4 (security fixes; dev-only transitive dep, build tooling) — recommend merge.
 
 **Open GitHub issues** (all user-submitted; none assigned)
 - Bugs: #23 "Could not choose the best candidate function" when requesting
