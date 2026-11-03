@@ -5,6 +5,7 @@ import { getLinks } from '../navLinks'
 import { useAuth } from '../context/AuthContext'
 import {
   getPendingSkVerifications, getPendingApprovals, getPendingProvisioning,
+  getPendingRenewalApprovals, approveRenewal, declineRenewal,
   confirmSkOwnership, denySkOwnership, approveSubscription, declineSubscription,
 } from '../lib/approvals'
 import {
@@ -28,12 +29,14 @@ export default function ActionCenter() {
   const [verifications, setVerifications] = useState(null)
   const [approvals, setApprovals] = useState(null)
   const [provisioning, setProvisioning] = useState(null)
+  const [renewals, setRenewals] = useState(null)
   const [error, setError] = useState(null)
 
   function reload() {
     getPendingSkVerifications().then(setVerifications).catch(e => setError(e.message))
     getPendingApprovals().then(setApprovals).catch(e => setError(e.message))
     getPendingProvisioning().then(setProvisioning).catch(e => setError(e.message))
+    getPendingRenewalApprovals().then(setRenewals).catch(e => setError(e.message))
   }
 
   useEffect(reload, [])
@@ -160,7 +163,18 @@ export default function ActionCenter() {
     }
   }
 
-  const nothingToDo = verifications?.length === 0 && approvals?.length === 0 && provisioning?.length === 0
+  // No dedicated email template yet — the requester sees the result on My Subscriptions.
+  async function handleApproveRenewal(sub) {
+    try { await approveRenewal(sub.id); reload() } catch (err) { setError(err.message) }
+  }
+
+  async function handleDeclineRenewal(sub) {
+    const reason = window.prompt(`Decline the FY${sub.fiscal_year} renewal of ${sub.license_name} for ${sub.user_email}? Optionally add a reason:`)
+    if (reason === null) return
+    try { await declineRenewal(sub.id, reason); reload() } catch (err) { setError(err.message) }
+  }
+
+  const nothingToDo = verifications?.length === 0 && approvals?.length === 0 && provisioning?.length === 0 && renewals?.length === 0
 
   return (
     <AppLayout appName="License Manager" links={getLinks()}>
@@ -189,6 +203,17 @@ export default function ActionCenter() {
               <Row key={sub.id} title={sub.license_name} sub={`${sub.user_email} · ${sub.suite_key}`}>
                 <button onClick={() => handleApprove(sub)} className="text-xs font-medium text-sil-green">Approve</button>
                 <button onClick={() => handleDecline(sub)} className="text-xs font-medium text-sil-red">Decline</button>
+              </Row>
+            ))}
+          </Section>
+        )}
+
+        {renewals?.length > 0 && (
+          <Section title="Renewal approvals (SuiteKey changed)">
+            {renewals.map(sub => (
+              <Row key={sub.id} title={`${sub.license_name} — FY${sub.fiscal_year} renewal`} sub={`${sub.user_email} · ${sub.suite_key}`}>
+                <button onClick={() => handleApproveRenewal(sub)} className="text-xs font-medium text-sil-green">Approve</button>
+                <button onClick={() => handleDeclineRenewal(sub)} className="text-xs font-medium text-sil-red">Decline</button>
               </Row>
             ))}
           </Section>

@@ -144,7 +144,13 @@ export default function MySubscriptions() {
                     {sub.license?.extra_field_label || 'Extra field'}: {sub.extra_field_value}
                   </p>
                 )}
-                {sub.status === 'active' && sub.open_renewal_fy != null && sub.billing_cycle === 'annual' && (
+                {sub.status === 'active' && sub.open_renewal_fy != null && sub.billing_cycle === 'annual' && sub.renewals?.some(r => r.fiscal_year === sub.open_renewal_fy && r.awaiting_owner_approval) && (
+                  <p className="text-xs text-amber-700 mt-2">
+                    Renewal requested — waiting for the owner of SuiteKey {sub.suite_key} to approve it (the SuiteKey changed since this was last approved).
+                    <button onClick={() => handle(optOutRenewal, sub.id)} className="ml-2 underline">Withdraw</button>
+                  </p>
+                )}
+                {sub.status === 'active' && sub.open_renewal_fy != null && sub.billing_cycle === 'annual' && !sub.renewals?.some(r => r.fiscal_year === sub.open_renewal_fy && r.awaiting_owner_approval) && (
                   <div className="flex gap-2 mt-2">
                     <button onClick={() => handle(optInRenewal, sub.id)} className="text-xs font-medium text-white bg-sil-green rounded-lg px-2.5 py-1 hover:opacity-90 transition">Yes, renew</button>
                     <button onClick={() => handle(optOutRenewal, sub.id)} className="text-xs font-medium text-white bg-gray-400 rounded-lg px-2.5 py-1 hover:opacity-90 transition">No, don't renew</button>
