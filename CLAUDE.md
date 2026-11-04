@@ -55,14 +55,15 @@ npm run build            # production build (what Amplify runs)
 
 ## 3. Database migration workflow
 
-- New migrations are numbered files in `supabase/pending/` (latest: `83_*`).
+- New migrations are numbered files in `supabase/pending/` (latest: `84_*`).
   They're run by hand, in order, in the Supabase SQL Editor, then folded into
   `schema_licenses.sql`. Numbers 72, 78 and 79 each have two files, and 76 is
-  absent — pick the next free number above the highest (84+).
+  absent — pick the next free number above the highest (85+).
 - Whenever you change an RPC signature, drop the old overload (an overload
   ambiguity caused issue #23).
-- All of `supabase/pending/` (through 83) has been applied to production
-  (confirmed by Kate 2026-11-02). Anything above 83 is unapplied until told otherwise.
+- All of `supabase/pending/` (through 84) has been applied to production
+  (83 confirmed by Kate 2026-11-02; 84 confirmed 2026-11-04). Anything above 84 is
+  unapplied until told otherwise.
 
 ## 4. Conventions
 
