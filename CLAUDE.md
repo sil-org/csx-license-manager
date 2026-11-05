@@ -55,7 +55,7 @@ npm run build            # production build (what Amplify runs)
 
 ## 3. Database migration workflow
 
-- New migrations are numbered files in `supabase/pending/` (latest on main: `83_*`; open branches also use 84 — mine is `85_*`, unapplied).
+- New migrations are numbered files in `supabase/pending/` (latest on main: `83_*`; open branches also use 84 — `85_block_duplicate_requests_and_cancel_on_opt_out` is unapplied).
   They're run by hand, in order, in the Supabase SQL Editor, then folded into
   `schema_licenses.sql`. Numbers 72, 78 and 79 each have two files, and 76 is
   absent — pick the next free number above the highest (84+).

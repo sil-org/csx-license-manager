@@ -1,14 +1,21 @@
 -- Run this in the Supabase SQL Editor.
 --
--- Duplicate-request check was keyed on (user, license, fy) for every license,
--- so a one-time license (e.g. Google Backup, imported under an earlier FY)
--- could be requested again in a later fiscal year. For billing_cycle =
--- 'one_time', any live subscription (pending/approved/active, any FY) now
--- blocks a new request; annual/monthly licenses stay per fiscal year.
--- Still bypassed by licenses.allow_multiple_per_person.
+-- 1. request_subscription(): the duplicate check was keyed on
+--    (user, license, fy), so someone who already held a license (e.g. Google
+--    Backup, imported under an earlier FY) could request it again in a later
+--    fiscal year. Subscriptions renew in place, so any live subscription
+--    (pending_sk_verification/pending/approved/active, any FY) now blocks a new
+--    request. Still bypassed by licenses.allow_multiple_per_person.
+--    Same 9-arg signature as 80_free_billing_type.sql, so no overload is left
+--    behind; only the duplicate check changed.
 --
--- Body is 80_free_billing_type.sql's request_subscription() with only the
--- duplicate check changed. Same 9-arg signature, so no overload is left behind.
+-- 2. opt_out_renewal(): declining a renewal now cancels the subscription
+--    (status 'cancelled' + audit row) instead of only flagging it, so the
+--    person can request the license again later. Cancelling takes effect
+--    immediately, not at the end of the paid term.
+--
+-- Existing subscriptions already marked opted_out but still 'active' are NOT
+-- touched; cancel those by hand if they should end.
 -- Safe to re-run.
 
 create or replace function request_subscription(
@@ -57,25 +64,18 @@ begin
     raise exception '% is required for this license', coalesce(v_license.extra_field_label, 'this field');
   end if;
 
-  -- One-time licenses are bought once, so any live subscription (any FY)
-  -- blocks a new request. Recurring licenses are per fiscal year: a live
-  -- subscription only blocks a request for the same FY.
-  if not v_license.allow_multiple_per_person then
-    if v_license.billing_cycle = 'one_time' and exists (
-      select 1 from subscriptions
-      where user_email = v_recipient_email and license_id = p_license_id
-        and status not in ('declined', 'revoked', 'cancelled')
-    ) then
-      raise exception 'you already have this license; it is a one-time purchase and cannot be requested again';
-    end if;
-
-    if exists (
-      select 1 from subscriptions
-      where user_email = v_recipient_email and license_id = p_license_id and fy = p_fy
-        and status not in ('declined', 'revoked', 'cancelled')
-    ) then
-      raise exception 'a subscription for this license already exists for this fiscal year';
-    end if;
+  -- A subscription is renewed in place (start_renewal_period / opt_in_renewal
+  -- advance subscriptions.fy), so any live subscription for this person and
+  -- license, from any fiscal year, means they already have it. A second
+  -- request would create a duplicate that gets billed again. Declined,
+  -- revoked and cancelled rows (including renewals the person opted out of,
+  -- see opt_out_renewal below) don't count.
+  if not v_license.allow_multiple_per_person and exists (
+    select 1 from subscriptions
+    where user_email = v_recipient_email and license_id = p_license_id
+      and status not in ('declined', 'revoked', 'cancelled')
+  ) then
+    raise exception 'you already have this license; if it renews annually you will be asked at renewal time, so it does not need to be requested again';
   end if;
 
   if v_license.gtis_sponsored then
@@ -187,5 +187,36 @@ begin
   end if;
 
   return v_sub_id;
+end;
+$$;
+
+-- ─── opt_out_renewal ────────────────────────────────────────────────────────
+-- Latest body from 78_critical_auth_hardening.sql; adds cancelling the
+-- subscription and writing the audit row.
+
+create or replace function opt_out_renewal(p_subscription_id uuid)
+returns void language plpgsql security definer as $$
+declare
+  v_email text := require_profile_email();
+  v_sub subscriptions%rowtype;
+  v_license_name text;
+begin
+  select * into v_sub from subscriptions where id = p_subscription_id;
+  if v_sub.id is null then raise exception 'subscription not found'; end if;
+  if not coalesce((is_admin() or v_sub.user_email = v_email), false) then raise exception 'not authorized'; end if;
+  if v_sub.open_renewal_fy is null then raise exception 'no open renewal period'; end if;
+
+  update subscriptions
+    set renewal_status = 'opted_out', open_renewal_fy = null, status = 'cancelled'
+    where id = p_subscription_id;
+
+  update renewals
+    set decision = 'opted_out', decided_at = now(), decided_by = v_email
+    where subscription_id = p_subscription_id and fiscal_year = v_sub.open_renewal_fy;
+
+  select name into v_license_name from licenses where id = v_sub.license_id;
+  insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, notes, ip_address)
+  values ('cancelled', p_subscription_id, v_license_name, v_sub.user_email, v_sub.suite_key, v_email,
+          'opted out of renewal for FY' || v_sub.open_renewal_fy, current_client_ip());
 end;
 $$;
