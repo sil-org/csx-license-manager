@@ -74,6 +74,13 @@ export default function MySubscriptions() {
     }
   }
 
+  // Declining a renewal cancels the subscription right away (opt_out_renewal()),
+  // so confirm first — same as the Cancel button below.
+  async function handleOptOut(sub) {
+    if (!window.confirm(`Cancel ${sub.license?.name || 'this license'}? It will end now, and you'll need to request it again if you change your mind.`)) return
+    await handle(optOutRenewal, sub.id)
+  }
+
   async function handleCancel(sub) {
     const billingWarning = suiteKeyKeepsBillingAfterCancel(sub)
       ? ` This license will continue to be charged to the committed SuiteKey or Ministry ID until a new requestor purchases this license.`
@@ -147,7 +154,7 @@ export default function MySubscriptions() {
                 {sub.status === 'active' && sub.open_renewal_fy != null && sub.billing_cycle === 'annual' && (
                   <div className="flex gap-2 mt-2">
                     <button onClick={() => handle(optInRenewal, sub.id)} className="text-xs font-medium text-white bg-sil-green rounded-lg px-2.5 py-1 hover:opacity-90 transition">Yes, renew</button>
-                    <button onClick={() => handle(optOutRenewal, sub.id)} className="text-xs font-medium text-white bg-gray-400 rounded-lg px-2.5 py-1 hover:opacity-90 transition">No, don't renew</button>
+                    <button onClick={() => handleOptOut(sub)} className="text-xs font-medium text-white bg-gray-400 rounded-lg px-2.5 py-1 hover:opacity-90 transition">No, cancel it</button>
                   </div>
                 )}
               </div>
