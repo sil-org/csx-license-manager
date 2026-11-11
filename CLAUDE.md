@@ -57,16 +57,18 @@ npm run build            # production build (what Amplify runs)
 
 - New migrations are numbered files in `supabase/pending/` (latest: `89_*`).
   They're run by hand, in order, in the Supabase SQL Editor, then folded into
-  `schema_licenses.sql`. Numbers 72, 78 and 79 each have two files, and 76 is
+  `schema_licenses.sql`. Numbers 72, 78, 79 and 85 each have two files, and 76 is
   absent — pick the next free number above the highest (90+).
 - Whenever you change an RPC signature, drop the old overload (an overload
   ambiguity caused issue #23).
-- All of `supabase/pending/` (through 89) has been applied to production
-  (83 confirmed by Kate 2026-11-02; 84 on 2026-11-04; 85–89 on 2026-11-11). Anything
-  above 89 is unapplied until told otherwise. (87/88: `get_suite_key_spend()` /
-  `get_team_spend()` return `estimated_count`, which drives the "Est." chip on SuiteKey
-  Charges / My Team. 89: `subscriptions` BEFORE INSERT trigger raises `fy` to the FY of
-  `start_date` if lower, non-legacy rows only.)
+- All of `supabase/pending/` through 89 has been applied to production: 83 (Kate,
+  2026-11-02); `84_monthly_subscription_spend` (2026-11-04); `85_block_duplicate_requests_and_cancel_on_opt_out`
+  (2026-11-05); `85_annual_null_price_fallback` and 86–89 (2026-11-11). Other branches may
+  also use 84 — check them before assuming a number is free. Anything above 89 is
+  unapplied until told otherwise. (87/88: `get_suite_key_spend()` / `get_team_spend()`
+  return `estimated_count`, which drives the "Est." chip on SuiteKey Charges / My Team.
+  89: `subscriptions` BEFORE INSERT trigger raises `fy` to the FY of `start_date` if
+  lower, non-legacy rows only.)
 - Spend tiles (SuiteKey Charges, My Team) = `subscription_actual_fy_amount()` (annual:
   signup fragment + decided renewals; monthly: whole months billed; gtis: license
   price/12) + a projected undecided-renewal estimate (price + 10%, only once the
