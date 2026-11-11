@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react'
 import { getTeamSpend } from '../lib/team'
 import { currentFiscalYear } from '../lib/fiscalYear'
+import EstimatedChip, { EstimatedNote } from './EstimatedChip'
 
 
 function fyPeriod(fy) {
@@ -33,6 +34,8 @@ export default function TeamSpendCard() {
 
   const data = cache[fy]
   const projected = !!data && [data.suiteKey, data.ministry, data.gtis].some(c => c.projected > 0)
+  // estimated_count comes from get_team_spend() as of migration 88 (gtis is never flagged).
+  const estimated = !!data && [data.suiteKey, data.ministry].some(c => c.estimated_count > 0)
   const total = key => Math.round(data[key].actual + data[key].projected)
 
   return (
@@ -76,11 +79,13 @@ export default function TeamSpendCard() {
           <div className="bg-brand/10 rounded-lg pt-4 pb-4 px-2 flex flex-col items-center gap-1 text-center">
             <div className="text-xs font-bold tracking-wide text-brand-dark">SUITEKEY</div>
             <div className="text-[28px] leading-none font-display font-bold text-brand-dark tabular-nums">{money(total('suiteKey'))}</div>
+            <EstimatedChip count={data.suiteKey.estimated_count} />
           </div>
 
           <div className="py-3.5 px-2 flex flex-col items-center gap-1 text-center">
             <div className="text-xs font-bold tracking-wide text-gray-500">MINISTRY ACCOUNTS</div>
             <div className="text-lg font-semibold text-gray-500 tabular-nums">{money(total('ministry'))}</div>
+            <EstimatedChip count={data.ministry.estimated_count} />
             <div className="text-[11px] text-gray-400 max-w-[15ch]">Summed across all Ministry IDs</div>
           </div>
 
@@ -107,6 +112,8 @@ export default function TeamSpendCard() {
           pro-rated to the fiscal year, alongside the exact pro-rated tail of renewals already decided.
         </p>
       )}
+
+      {estimated && <EstimatedNote />}
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { getSuiteKeySpend } from '../lib/suiteKeyCharges'
 import { currentFiscalYear } from '../lib/fiscalYear'
+import EstimatedChip, { EstimatedNote } from './EstimatedChip'
 
 
 function fyPeriod(fy) {
@@ -32,6 +33,8 @@ export default function SuiteKeySpendCard() {
 
   const rows = cache[fy]
   const projected = !!rows && rows.some(r => r.projected > 0)
+  // estimated_count comes from get_suite_key_spend() as of migration 87.
+  const estimated = !!rows && rows.some(r => r.estimated_count > 0)
 
   // No SuiteKeys owned at all — the page itself already explains that below.
   if (rows && rows.length === 0) return null
@@ -78,10 +81,13 @@ export default function SuiteKeySpendCard() {
             <div key={r.suite_key} className="bg-gray-50 border border-gray-100 rounded-lg py-3.5 px-2 flex flex-col items-center gap-1 text-center">
               <div className="text-xs font-bold tracking-wide text-brand truncate max-w-full" title={r.suite_key}>{r.suite_key}</div>
               <div className="text-lg font-semibold text-gray-700 tabular-nums">{money(r.actual + r.projected)}</div>
+              <EstimatedChip count={r.estimated_count} />
             </div>
           ))}
         </div>
       )}
+
+      {estimated && <EstimatedNote />}
 
       {projected && (
         <p className="text-xs text-gray-400 border border-dashed border-gray-200 rounded-lg px-3.5 py-2.5 mt-4">

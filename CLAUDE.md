@@ -55,15 +55,26 @@ npm run build            # production build (what Amplify runs)
 
 ## 3. Database migration workflow
 
-- New migrations are numbered files in `supabase/pending/` (latest on main: `83_*`; open branches also use 84; `85_block_duplicate_requests_and_cancel_on_opt_out` is applied, on branch `ccr-362f19e6-c2lrj5`).
+- New migrations are numbered files in `supabase/pending/` (latest: `89_*`).
   They're run by hand, in order, in the Supabase SQL Editor, then folded into
-  `schema_licenses.sql`. Numbers 72, 78 and 79 each have two files, and 76 is
-  absent — pick the next free number above the highest (84+).
+  `schema_licenses.sql`. Numbers 72, 78, 79 and 85 each have two files, and 76 is
+  absent — pick the next free number above the highest (90+).
 - Whenever you change an RPC signature, drop the old overload (an overload
   ambiguity caused issue #23).
-- All of `supabase/pending/` (through 83) has been applied to production
-  (confirmed by Kate 2026-11-02), plus 85 (confirmed 2026-11-05). Other 84s: see their branches.
-  Anything else above 83 is unapplied until told otherwise.
+- All of `supabase/pending/` through 89 has been applied to production: 83 (Kate,
+  2026-11-02); `84_monthly_subscription_spend` (2026-11-04); `85_block_duplicate_requests_and_cancel_on_opt_out`
+  (2026-11-05); `85_annual_null_price_fallback` and 86–89 (2026-11-11). Other branches may
+  also use 84 — check them before assuming a number is free. Anything above 89 is
+  unapplied until told otherwise. (87/88: `get_suite_key_spend()` / `get_team_spend()`
+  return `estimated_count`, which drives the "Est." chip on SuiteKey Charges / My Team.
+  89: `subscriptions` BEFORE INSERT trigger raises `fy` to the FY of `start_date` if
+  lower, non-legacy rows only.)
+- Spend tiles (SuiteKey Charges, My Team) = `subscription_actual_fy_amount()` (annual:
+  signup fragment + decided renewals; monthly: whole months billed; gtis: license
+  price/12) + a projected undecided-renewal estimate (price + 10%, only once the
+  signup term has ended). Null `price_at_signup` (legacy imports) is estimated at
+  the license's current price. Test as a user by impersonating in a transaction
+  (`set local role authenticated` + `request.jwt.claim.sub`), then `rollback`.
 
 ## 4. Conventions
 
@@ -83,7 +94,10 @@ npm run build            # production build (what Amplify runs)
 - Bugs: #23 "Could not choose the best candidate function" when requesting
   Claude Premium (likely the duplicate `request_subscription` overload —
   migration 81 dropped one; verify it's applied in prod, then close);
-  #8 Storage quota form shows FY2026 instead of FY2027; #6 SuiteKey change on
+  #8 Storage quota form shows FY2026 instead of FY2027 (the form bug itself was
+  fixed 2026-10-01 in `834325a`; subscriptions requested before that may have
+  `fy` = calendar year, i.e. `fy` < the FY of `start_date`; `fy` > that is normal —
+  `opt_in_renewal()` bumps it); #6 SuiteKey change on
   renewable subscriptions.
 - Requests: #5, #7 change SuiteKey on existing subscriptions (same need as #6 —
   a user-facing "change SuiteKey" flow doesn't exist); #17 charge missing from
