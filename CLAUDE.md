@@ -61,12 +61,12 @@ npm run build            # production build (what Amplify runs)
   absent — pick the next free number above the highest (90+).
 - Whenever you change an RPC signature, drop the old overload (an overload
   ambiguity caused issue #23).
-- All of `supabase/pending/` (through 87) has been applied to production
-  (83 confirmed by Kate 2026-11-02; 84 on 2026-11-04; 85, 86 and 87 on 2026-11-11).
-  Anything above 87 is unapplied until told otherwise — **88** (`get_team_spend()` gains
-  `estimated_count`, same "Est." chip on My Team) and **89** (`subscriptions` BEFORE INSERT
-  trigger that raises `fy` to the FY of `start_date` if lower, plus backfill) are unapplied. (87: `get_suite_key_spend()`
-  returns `estimated_count`, which drives the chip on SuiteKey Charges.)
+- All of `supabase/pending/` (through 89) has been applied to production
+  (83 confirmed by Kate 2026-11-02; 84 on 2026-11-04; 85–89 on 2026-11-11). Anything
+  above 89 is unapplied until told otherwise. (87/88: `get_suite_key_spend()` /
+  `get_team_spend()` return `estimated_count`, which drives the "Est." chip on SuiteKey
+  Charges / My Team. 89: `subscriptions` BEFORE INSERT trigger raises `fy` to the FY of
+  `start_date` if lower, non-legacy rows only.)
 - Spend tiles (SuiteKey Charges, My Team) = `subscription_actual_fy_amount()` (annual:
   signup fragment + decided renewals; monthly: whole months billed; gtis: license
   price/12) + a projected undecided-renewal estimate (price + 10%, only once the
