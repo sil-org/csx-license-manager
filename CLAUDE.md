@@ -55,16 +55,17 @@ npm run build            # production build (what Amplify runs)
 
 ## 3. Database migration workflow
 
-- New migrations are numbered files in `supabase/pending/` (latest: `88_*`).
+- New migrations are numbered files in `supabase/pending/` (latest: `89_*`).
   They're run by hand, in order, in the Supabase SQL Editor, then folded into
   `schema_licenses.sql`. Numbers 72, 78 and 79 each have two files, and 76 is
-  absent — pick the next free number above the highest (89+).
+  absent — pick the next free number above the highest (90+).
 - Whenever you change an RPC signature, drop the old overload (an overload
   ambiguity caused issue #23).
 - All of `supabase/pending/` (through 87) has been applied to production
   (83 confirmed by Kate 2026-11-02; 84 on 2026-11-04; 85, 86 and 87 on 2026-11-11).
   Anything above 87 is unapplied until told otherwise — **88** (`get_team_spend()` gains
-  `estimated_count`, same "Est." chip on My Team) is unapplied. (87: `get_suite_key_spend()`
+  `estimated_count`, same "Est." chip on My Team) and **89** (`subscriptions` BEFORE INSERT
+  trigger that raises `fy` to the FY of `start_date` if lower, plus backfill) are unapplied. (87: `get_suite_key_spend()`
   returns `estimated_count`, which drives the chip on SuiteKey Charges.)
 - Spend tiles (SuiteKey Charges, My Team) = `subscription_actual_fy_amount()` (annual:
   signup fragment + decided renewals; monthly: whole months billed; gtis: license
