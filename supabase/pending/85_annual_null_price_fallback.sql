@@ -87,6 +87,11 @@ begin
 
   v_renewal_month := coalesce(nullif(s.renewal_month, 0), 10);
 
+  -- Unknown (null) signup price: estimate from the license's current price;
+  -- if that is unknown too, contribute 0 rather than NULLing the whole total.
+  select * into l from licenses where id = s.license_id;
+  v_signup_price := coalesce(s.price_at_signup, l.price, 0);
+
   -- Signup fragment: only relevant if it lands in (or spills into) the
   -- requested FY.
   v_signup_months := calendar_month_span(extract(month from s.start_date)::int, v_renewal_month);
