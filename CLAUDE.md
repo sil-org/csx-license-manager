@@ -55,15 +55,22 @@ npm run build            # production build (what Amplify runs)
 
 ## 3. Database migration workflow
 
-- New migrations are numbered files in `supabase/pending/` (latest: `85_*`).
+- New migrations are numbered files in `supabase/pending/` (latest: `87_*`).
   They're run by hand, in order, in the Supabase SQL Editor, then folded into
   `schema_licenses.sql`. Numbers 72, 78 and 79 each have two files, and 76 is
-  absent — pick the next free number above the highest (86+).
+  absent — pick the next free number above the highest (88+).
 - Whenever you change an RPC signature, drop the old overload (an overload
   ambiguity caused issue #23).
-- All of `supabase/pending/` (through 85) has been applied to production
-  (83 confirmed by Kate 2026-11-02; 84 on 2026-11-04; 85 on 2026-11-11). Anything above 85
-  is unapplied until told otherwise.
+- All of `supabase/pending/` (through 86) has been applied to production
+  (83 confirmed by Kate 2026-11-02; 84 on 2026-11-04; 85 and 86 on 2026-11-11). Anything
+  above 86 is unapplied until told otherwise — **87** (`get_suite_key_spend()` gains
+  `estimated_count`, drives the "Est." chip) is unapplied.
+- Spend tiles (SuiteKey Charges, My Team) = `subscription_actual_fy_amount()` (annual:
+  signup fragment + decided renewals; monthly: whole months billed; gtis: license
+  price/12) + a projected undecided-renewal estimate (price + 10%, only once the
+  signup term has ended). Null `price_at_signup` (legacy imports) is estimated at
+  the license's current price. Test as a user by impersonating in a transaction
+  (`set local role authenticated` + `request.jwt.claim.sub`), then `rollback`.
 
 ## 4. Conventions
 
@@ -83,7 +90,9 @@ npm run build            # production build (what Amplify runs)
 - Bugs: #23 "Could not choose the best candidate function" when requesting
   Claude Premium (likely the duplicate `request_subscription` overload —
   migration 81 dropped one; verify it's applied in prod, then close);
-  #8 Storage quota form shows FY2026 instead of FY2027; #6 SuiteKey change on
+  #8 Storage quota form shows FY2026 instead of FY2027 (the form bug itself was
+  fixed 2026-10-01 in `834325a`; subscriptions requested before that may have
+  `fy` = calendar year — find them with `fy` vs the FY of `start_date`); #6 SuiteKey change on
   renewable subscriptions.
 - Requests: #5, #7 change SuiteKey on existing subscriptions (same need as #6 —
   a user-facing "change SuiteKey" flow doesn't exist); #17 charge missing from

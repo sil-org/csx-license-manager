@@ -32,6 +32,9 @@ export default function SuiteKeySpendCard() {
 
   const rows = cache[fy]
   const projected = !!rows && rows.some(r => r.projected > 0)
+  // estimated_count comes from get_suite_key_spend() as of migration 87; an
+  // older function simply omits it, so this stays false until 87 is applied.
+  const estimated = !!rows && rows.some(r => r.estimated_count > 0)
 
   // No SuiteKeys owned at all — the page itself already explains that below.
   if (rows && rows.length === 0) return null
@@ -78,9 +81,25 @@ export default function SuiteKeySpendCard() {
             <div key={r.suite_key} className="bg-gray-50 border border-gray-100 rounded-lg py-3.5 px-2 flex flex-col items-center gap-1 text-center">
               <div className="text-xs font-bold tracking-wide text-brand truncate max-w-full" title={r.suite_key}>{r.suite_key}</div>
               <div className="text-lg font-semibold text-gray-700 tabular-nums">{money(r.actual + r.projected)}</div>
+              {r.estimated_count > 0 && (
+                <span
+                  title={`Includes ${r.estimated_count} subscription${r.estimated_count === 1 ? '' : 's'} with no recorded price, estimated at the license's current price`}
+                  className="text-[10px] font-bold uppercase tracking-wide text-sil-yellow bg-sil-yellow/10 rounded-sm px-1.5 py-0.5"
+                >
+                  Est.
+                </span>
+              )}
             </div>
           ))}
         </div>
+      )}
+
+      {estimated && (
+        <p className="text-xs text-gray-400 border border-dashed border-gray-200 rounded-lg px-3.5 py-2.5 mt-4">
+          <span className="font-semibold text-gray-500">Est.</span> — some subscriptions here (mostly imported from
+          the old system) have no recorded price. Their share of the total is estimated at the license's current
+          price, so it may differ from what was actually charged.
+        </p>
       )}
 
       {projected && (
