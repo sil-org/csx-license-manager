@@ -34,7 +34,7 @@ Follow `SETUP.md`, then run both schema files in the Supabase SQL Editor, in ord
   SuiteKey you own, individually or via a Google Group, with revocation of
   active subscriptions (optional reason emailed to the subscriber)
 - **FAQ** (`/faq`)
-- **Admin → Catalog** — create/edit/deactivate licenses, with search
+- **Admin → Catalog** — create/edit/deactivate licenses, with search; licenses can share an "Exclusive group" (e.g. Claude Standard/Premium) so activating one auto-cancels the person's other tier as an upgrade/downgrade
 - **Admin → All Subscriptions** — for admins, every subscription, every user,
   every status, unfiltered; also open to license service managers, for whom
   RLS narrows it to their own/managed rows. Mark approved subscriptions
