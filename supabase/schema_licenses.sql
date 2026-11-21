@@ -88,11 +88,14 @@ alter type subscription_billing_type add value if not exists 'free';
 
 alter table profiles add column if not exists department text;
 alter table profiles add column if not exists manager_email text;
--- sco/job_title come from the same Workday-derived org-hierarchy CSV import
--- as manager_email (see admin_import_team_hierarchy() below) — sco is a
--- 3-letter org code, job_title is free text.
+-- sco/job_title/employee_type/staff_id come from the same Workday-derived
+-- org-hierarchy CSV import as manager_email (see
+-- admin_import_team_hierarchy() below) — sco is a 3-letter org code, the
+-- rest are free text.
 alter table profiles add column if not exists sco text;
 alter table profiles add column if not exists job_title text;
+alter table profiles add column if not exists employee_type text;
+alter table profiles add column if not exists staff_id text;
 create unique index if not exists profiles_primary_email_idx on profiles (lower(primary_email));
 
 -- ─── TABLES ──────────────────────────────────────────────────────────────────
@@ -1752,6 +1755,8 @@ declare
   v_manager_email text;
   v_sco text;
   v_job_title text;
+  v_employee_type text;
+  v_staff_id text;
   v_ok_count int := 0;
 begin
   if not is_admin() then raise exception 'admin only'; end if;
@@ -1763,6 +1768,8 @@ begin
       v_manager_email := nullif(trim(lower(v_row->>'manager_email')), '');
       v_sco := nullif(trim(upper(v_row->>'sco')), '');
       v_job_title := nullif(trim(v_row->>'job_title'), '');
+      v_employee_type := nullif(trim(v_row->>'employee_type'), '');
+      v_staff_id := nullif(trim(v_row->>'staff_id'), '');
 
       if v_email = '' or v_email is null then
         v_results := v_results || jsonb_build_object('ok', false, 'error', 'Missing primary_email', 'row', v_row);
@@ -1782,7 +1789,9 @@ begin
         insert into profiles (display_name, primary_email) values (v_email, v_email);
       end if;
 
-      update profiles set manager_email = v_manager_email, sco = v_sco, job_title = v_job_title where lower(primary_email) = v_email;
+      update profiles set manager_email = v_manager_email, sco = v_sco, job_title = v_job_title,
+        employee_type = v_employee_type, staff_id = v_staff_id
+        where lower(primary_email) = v_email;
 
       v_ok_count := v_ok_count + 1;
       v_results := v_results || jsonb_build_object('ok', true, 'row', v_row);

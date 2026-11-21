@@ -38,13 +38,14 @@ function parseCsv(text) {
 }
 
 const EXPECTED_COLUMNS = ['user_email', 'license_name', 'suite_key', 'start_date', 'fy', 'requester_email']
-const TEAM_HIERARCHY_COLUMNS = ['primary_email', 'manager_email', 'sco', 'job_title']
+const TEAM_HIERARCHY_COLUMNS = ['primary_email', 'manager_email', 'sco', 'job_title', 'employee_type', 'staff_id']
 const SCO_CODE_COLUMNS = ['zone', 'area', 'ou', 'code']
 
 // Header-name-based. manager_email is allowed to be blank — no manager on
 // file is a real, known state in the source data (e.g. the org's top exec,
-// or a row Workday itself has incomplete), not an error. job_title is also
-// allowed to be blank until the source sheet has that column populated.
+// or a row Workday itself has incomplete), not an error. job_title,
+// employee_type, and staff_id are also allowed to be blank until the source
+// sheet has those columns populated.
 function parseTeamHierarchy(text) {
   const parsed = parseCsv(text)
   if (parsed.length < 2) throw new Error('CSV has no data rows')
@@ -289,7 +290,7 @@ export default function AdminImport() {
         <ImportSection
           title="Team hierarchy"
           sourceUrl="https://docs.google.com/spreadsheets/d/1bSv4fta7p-TkFUnKZUKMSLkjp2wquMzyHp2N6OBGKbA/edit?gid=0#gid=0"
-          description={'Upload a weekly export of the org-hierarchy Sheet to update who reports to whom (drives the My Team page). Required column: primary_email — creates a placeholder profile if that person hasn’t signed in yet (skipped if the email isn’t an eligible SIL staff domain). Optional: manager_email — leave blank for anyone with no manager on file, which is a known reality of the source data, not an error. Optional: sco (a 3-letter org code) — drives department-gated licensing and, via the SCO codes import below, the department name shown in provisioning emails.'}
+          description={'Upload a weekly export of the org-hierarchy Sheet to update who reports to whom (drives the My Team page). Required column: primary_email — creates a placeholder profile if that person hasn’t signed in yet (skipped if the email isn’t an eligible SIL staff domain). Optional: manager_email — leave blank for anyone with no manager on file, which is a known reality of the source data, not an error. Optional: sco (a 3-letter org code) — drives department-gated licensing and, via the SCO codes import below, the department name shown in provisioning emails. Optional: job_title, employee_type, staff_id — free text, stored as-is.'}
           previewColumns={TEAM_HIERARCHY_COLUMNS}
           rowLabel={row => `${row.primary_email} → ${row.manager_email || '(no manager)'}`}
           parse={parseTeamHierarchy}
