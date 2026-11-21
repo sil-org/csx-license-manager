@@ -23,6 +23,26 @@ export async function getPendingApprovals() {
   return data
 }
 
+// Annual renewals parked for the owner of a subscription's *current* SuiteKey
+// — see supabase/pending/84_renewal_owner_approval_on_suite_key_change.sql.
+export async function getPendingRenewalApprovals() {
+  const { data, error } = await supabase.rpc('get_my_pending_renewal_approvals')
+  if (error) throw error
+  return data
+}
+
+export async function approveRenewal(subscriptionId) {
+  const { data, error } = await supabase.rpc('approve_renewal', { p_subscription_id: subscriptionId })
+  if (error) throw error
+  return data?.[0] || null
+}
+
+export async function declineRenewal(subscriptionId, notes) {
+  const { data, error } = await supabase.rpc('decline_renewal', { p_subscription_id: subscriptionId, p_notes: notes || null })
+  if (error) throw error
+  return data?.[0] || null
+}
+
 export async function getPendingProvisioning() {
   const { data, error } = await supabase.rpc('get_my_pending_provisioning')
   if (error) throw error
@@ -32,10 +52,10 @@ export async function getPendingProvisioning() {
 // Total across all three categories — powers the sidebar's Action Center
 // badge (AppLayout.jsx), which has no reason to know the categories exist.
 export async function getActionCenterCount() {
-  const [verifications, approvals, provisioning] = await Promise.all([
-    getPendingSkVerifications(), getPendingApprovals(), getPendingProvisioning(),
+  const [verifications, approvals, provisioning, renewals] = await Promise.all([
+    getPendingSkVerifications(), getPendingApprovals(), getPendingProvisioning(), getPendingRenewalApprovals(),
   ])
-  return verifications.length + approvals.length + provisioning.length
+  return verifications.length + approvals.length + provisioning.length + renewals.length
 }
 
 // Both return the subscriptions they just advanced ({id, user_email, license_name}[])
