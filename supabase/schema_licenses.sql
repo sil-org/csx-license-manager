@@ -1751,7 +1751,7 @@ returns jsonb language plpgsql security definer as $$
 declare
   v_admin text := current_profile_email();
   v_row jsonb;
-  v_results jsonb := '[]'::jsonb;
+  v_results jsonb[] := '{}';
   v_email text;
   v_manager_email text;
   v_sco text;
@@ -1803,7 +1803,7 @@ begin
 
   insert into team_hierarchy_imports (performed_by, row_count) values (v_admin, v_ok_count);
 
-  return v_results;
+  return to_jsonb(v_results);
 end;
 $$;
 
