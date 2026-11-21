@@ -15,3 +15,10 @@ export function fiscalYearOf(date) {
 export function currentFiscalYear() {
   return fiscalYearOf(new Date())
 }
+
+// Next fiscal year can be charged only in the two months before it starts
+// (Aug 1 - Sep 30), i.e. while the current FY is in its last two months.
+export function nextFiscalYearSelectable(date = new Date()) {
+  const m = new Date(date).getMonth()
+  return m === 7 || m === 8
+}

@@ -192,6 +192,7 @@ create table if not exists licenses (
   extra_field_label    text,   -- null = no extra field; set = RequestModal asks for one more piece of text at request time (e.g. "Shared Drive name")
   extra_field_required boolean not null default false,   -- only meaningful when extra_field_label is set
   allow_multiple_per_person boolean not null default false,   -- lets one person hold more than one subscription to this license in the same FY (e.g. multiple Shared Drives) — bypasses request_subscription()'s one-per-person-per-FY guard
+  receiving_suite_key  text not null default 'WaxhawIT-U_SIL',   -- the suite key that receives this license's charges; editable in Admin -> Catalog's "More settings". Plain text, not an FK to suite_keys — it's a destination, not a billed-to key with an owner
   legacy_id            text,   -- GAS Licenses sheet's ID (e.g. "LIC-XXXXXXXX"), set only by admin_import_licenses()
   created_at           timestamptz not null default now()
 );
@@ -1816,7 +1817,8 @@ $$;
 
 -- Full reconciled param list (service_manager_emails array, provisioning
 -- adapter/config + email-field flags, department_gated, requires_
--- acknowledgement/acknowledgement_text) — this function's body is always
+-- acknowledgement/acknowledgement_text, extra field, allow_multiple_per_person,
+-- receiving_suite_key) — this function's body is always
 -- rewritten from scratch, never diffed, so each new admin-editable column
 -- lands here alongside every earlier one instead of drifting out of sync.
 create or replace function save_license(p_license jsonb)
@@ -1840,7 +1842,7 @@ begin
       onboarding_message, reminder_message, provisioning_adapter, provisioning_config,
       provisioning_email_show_name, provisioning_email_show_job_title, provisioning_email_show_department,
       department_gated, requires_acknowledgement, acknowledgement_text,
-      extra_field_label, extra_field_required, allow_multiple_per_person, created_by
+      extra_field_label, extra_field_required, allow_multiple_per_person, receiving_suite_key, created_by
     ) values (
       p_license->>'name', p_license->>'vendor', p_license->>'category',
       (p_license->>'price')::numeric, p_license->>'price_unit', p_license->>'notes',
@@ -1862,6 +1864,7 @@ begin
       nullif(p_license->>'extra_field_label', ''),
       coalesce((p_license->>'extra_field_required')::boolean, false),
       coalesce((p_license->>'allow_multiple_per_person')::boolean, false),
+      coalesce(nullif(trim(p_license->>'receiving_suite_key'), ''), 'WaxhawIT-U_SIL'),
       current_profile_id()
     ) returning id into v_id;
   else
@@ -1888,7 +1891,8 @@ begin
       acknowledgement_text = nullif(p_license->>'acknowledgement_text', ''),
       extra_field_label = nullif(p_license->>'extra_field_label', ''),
       extra_field_required = coalesce((p_license->>'extra_field_required')::boolean, false),
-      allow_multiple_per_person = coalesce((p_license->>'allow_multiple_per_person')::boolean, false)
+      allow_multiple_per_person = coalesce((p_license->>'allow_multiple_per_person')::boolean, false),
+      receiving_suite_key = coalesce(nullif(trim(p_license->>'receiving_suite_key'), ''), 'WaxhawIT-U_SIL')
     where id = v_id;
   end if;
 
@@ -2016,13 +2020,14 @@ $$;
 -- so finance can see this context without cross-referencing Admin -> All
 -- Subscriptions — distinct from licenses.notes, which is about the catalog
 -- item, not any one subscription.
--- Adds new OUT columns, so Postgres won't let create-or-replace alter the
+-- receiving_suite_key (the license's receiving suite key) sits right after
+-- billing_label. Adds new OUT columns, so Postgres won't let create-or-replace alter the
 -- existing return type in place — drop it first.
 drop function if exists get_finance_export(date, date);
 
 create function get_finance_export(p_start_date date, p_end_date date)
 returns table(
-  user_email text, license_name text, billing_label text, cost numeric, price_paid numeric,
+  user_email text, license_name text, billing_label text, receiving_suite_key text, cost numeric, price_paid numeric,
   product_key text, invoice_number text, start_date date, renewed_date date, status text, notes text
 ) language sql stable as $$
   select
@@ -2034,6 +2039,7 @@ returns table(
       when s.billing_type = 'free' then 'Free'
       else s.suite_key
     end,
+    l.receiving_suite_key,
     calc_prorated_cost(l.price, l.billing_cycle, l.renewal_month, l.pro_rated, s.start_date),
     s.price_at_signup,
     s.product_key,

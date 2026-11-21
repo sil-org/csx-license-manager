@@ -43,9 +43,9 @@ export async function getTeamSpend(fiscalYear) {
   if (error) throw error
   const byType = Object.fromEntries((data || []).map(r => [r.billing_type, r]))
   return {
-    suiteKey: byType.suite_key || { actual: 0, projected: 0 },
-    ministry: byType.ministry || { actual: 0, projected: 0 },
-    gtis: byType.gtis || { actual: 0, projected: 0 },
+    suiteKey: byType.suite_key || { actual: 0, projected: 0, estimated_count: 0 },
+    ministry: byType.ministry || { actual: 0, projected: 0, estimated_count: 0 },
+    gtis: byType.gtis || { actual: 0, projected: 0, estimated_count: 0 },
   }
 }
 
