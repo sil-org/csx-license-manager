@@ -1,15 +1,20 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { KeyRound } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { signInWithGoogle, signInWithSSO } from '../lib/auth'
 
 const REDIRECT_HINT = "If your browser blocked a redirect, allow redirects for sil.org (and accounts.google.com, if signing in with Google), then try again."
 
-// Hidden for now (Kate, 2026-09-21) while the shared-project auth trigger
-// gap (handle_new_auth_user() bypassing is_eligible_staff_email()) is
-// unresolved — signInWithSSO() and its wiring are untouched, so re-enabling
-// is just flipping this back to true.
-const SSO_SIGNIN_ENABLED = false
+// SSO re-enabled 2026-11-23: the shared-project auth trigger gap that made
+// Kate hide this button on 2026-09-21 (handle_new_auth_user() bypassing
+// is_eligible_staff_email()) is fixed — see supabase/migration_sso_auth.sql
+// in the helpdesk repo (same shared project) part 1, which drops that
+// trigger entirely. Both sign-in methods stay live side by side for now —
+// Kate's doing a gradual, per-app/per-person cutover rather than flipping
+// every app and every user to SSO-only at once (unlike helpdesk, which
+// moved to SSO-only immediately since it's a new app with no existing users
+// to migrate).
 
 export default function Home() {
   const { session, profile, loading, authError, refreshProfile } = useAuth()
@@ -58,14 +63,13 @@ export default function Home() {
           Sign in with Google
         </button>
 
-        {SSO_SIGNIN_ENABLED && (
-          <button
-            onClick={() => handleSignIn(signInWithSSO)}
-            className="mt-3 w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-xs transition"
-          >
-            Sign in with SSO
-          </button>
-        )}
+        <button
+          onClick={() => handleSignIn(signInWithSSO)}
+          className="mt-3 w-full flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-xs transition"
+        >
+          <KeyRound size={18} />
+          Sign in with SSO
+        </button>
 
         {signInError && (
           <p className="mt-4 text-xs text-red-600">{REDIRECT_HINT}</p>

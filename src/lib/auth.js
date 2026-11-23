@@ -10,11 +10,10 @@ export async function signInWithGoogle() {
   if (error) throw error
 }
 
-// Same shared Supabase project's SAML provider Finance already signs in
-// through (auth.sso_providers/auth.saml_providers — one provider serves
-// every app in this project, not one per app), so this needs its own
-// button/function but no new provider setup. VITE_SSO_PROVIDER_ID must be
-// set in the deployed environment (Amplify), not just .env locally.
+// This project's own SAML provider registration (auth.sso_providers /
+// auth.saml_providers) — not Finance's (global-finance-payreq is on its own,
+// separate Supabase project). VITE_SSO_PROVIDER_ID must be set in the
+// deployed environment (Amplify), not just .env locally.
 export async function signInWithSSO() {
   const { error } = await supabase.auth.signInWithSSO({
     providerId: import.meta.env.VITE_SSO_PROVIDER_ID,
@@ -30,8 +29,9 @@ export async function signOut() {
   if (error) throw error
 }
 
-// Called after OAuth callback — finds or creates a profile for this Google account.
-// If a pendingLinkToken is in localStorage, links this account to the existing profile first.
+// Called after the SSO callback — finds or creates a profile for this SAML
+// identity. If a pendingLinkToken is in localStorage, links this identity to
+// the existing profile first.
 export async function resolveProfile(authUser) {
   const pendingToken = localStorage.getItem('pendingLinkToken') || null
   if (pendingToken) localStorage.removeItem('pendingLinkToken')
