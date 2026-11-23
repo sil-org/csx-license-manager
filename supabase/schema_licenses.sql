@@ -239,6 +239,11 @@ create table if not exists subscriptions (
   product_key           text,
   invoice_number        text,   -- notes/product_key/invoice_number/price_at_signup are all set together via update_subscription_details()
   extra_field_value     text,   -- requester's answer to licenses.extra_field_label, captured at request time; editable after via update_subscription_details()
+  -- Set by flag_renewal_on_suite_key_change() when suite_key changes on an
+  -- owned key — routes the next renewal opt-in to the new key's owner for
+  -- approval (approve_renewal()/decline_renewal()) instead of applying it
+  -- straight away. Cleared once that owner acts.
+  renewal_needs_owner_approval boolean not null default false,
   created_at            timestamptz not null default now()
 );
 
@@ -263,6 +268,13 @@ create table if not exists renewals (
   decided_by     text,
   opt_in_date    date,
   opted_in_by    text,
+  -- A renewal opt-in parked because the subscription's SuiteKey changed
+  -- since the owner last signed off — see
+  -- flag_renewal_on_suite_key_change()/opt_in_renewal() below. requested_by
+  -- is who actually clicked opt-in; decided_by/opt_in_date still record
+  -- whoever (the owner) completes it via approve_renewal().
+  awaiting_owner_approval boolean not null default false,
+  requested_by   text,
   unique (subscription_id, fiscal_year)
 );
 
@@ -1615,6 +1627,59 @@ begin
 end;
 $$;
 
+-- ─── Trigger: flag_renewal_on_suite_key_change ─────────────────────────────────
+-- When a subscription's SuiteKey changes (admin repoint via
+-- admin_update_subscription_suite_key(), or any future user-facing flow), the
+-- new key's owner never agreed to pay for it. Flags the subscription so its
+-- next renewal opt-in is routed to the new key's owner for approval instead
+-- of applying straight away. Not set when the old key had no owner (the
+-- admin_merge_suite_key() typo-fix case, which only ever merges away unowned
+-- keys).
+create or replace function flag_renewal_on_suite_key_change()
+returns trigger language plpgsql security definer as $$
+begin
+  if new.suite_key is distinct from old.suite_key
+     and new.billing_type = 'suite_key'
+     and old.suite_key is not null
+     and exists (
+       select 1 from suite_keys sk
+       where sk.suite_key = old.suite_key
+         and (sk.owner_email is not null or sk.owner_group_email is not null)
+     ) then
+    new.renewal_needs_owner_approval := true;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists subscriptions_flag_renewal_on_suite_key_change on subscriptions;
+create trigger subscriptions_flag_renewal_on_suite_key_change
+  before update of suite_key on subscriptions
+  for each row execute function flag_renewal_on_suite_key_change();
+
+-- ─── Helper: may the caller approve renewals against this key? ─────────────────
+-- Owner (individual or group member) or the still-unclaimed key's pending
+-- suggested approver. Admins are handled by the callers.
+create or replace function can_approve_renewal_for_key(p_suite_key text)
+returns boolean language sql stable security definer as $$
+  select p_suite_key is not null and (
+    is_suite_key_owner(p_suite_key)
+    or exists (
+      select 1 from suite_keys sk
+      where sk.suite_key = p_suite_key
+        and sk.owner_email is null and sk.owner_group_email is null
+        and (
+          lower(sk.pending_owner_email) = lower(current_profile_email())
+          or (sk.pending_owner_is_group and exists (
+            select 1 from group_memberships gm
+            where gm.group_email = sk.pending_owner_email
+              and lower(gm.member_email) = lower(current_profile_email())
+          ))
+        )
+    )
+  )
+$$;
+
 -- ─── RPC: opt_in_renewal / opt_out_renewal ─────────────────────────────────────
 -- Both resolve against open_renewal_fy: a decision can only be made while a
 -- period is actually open (started via start_renewal_period), never ad-hoc.
@@ -1630,13 +1695,24 @@ begin
   if not coalesce((is_admin() or v_sub.user_email = v_email), false) then raise exception 'not authorized'; end if;
   if v_sub.open_renewal_fy is null then raise exception 'no open renewal period'; end if;
 
+  -- SuiteKey changed since the owner last signed off: park the renewal for
+  -- the current key's owner instead of applying it. (If the caller IS that
+  -- owner, there's nobody else to ask.)
+  if v_sub.renewal_needs_owner_approval and not can_approve_renewal_for_key(v_sub.suite_key) then
+    update renewals
+      set awaiting_owner_approval = true, requested_by = v_email
+      where subscription_id = p_subscription_id and fiscal_year = v_sub.open_renewal_fy;
+    return;
+  end if;
+
   update subscriptions
-    set fy = v_sub.open_renewal_fy, renewal_status = 'opted_in', open_renewal_fy = null
+    set fy = v_sub.open_renewal_fy, renewal_status = 'opted_in', open_renewal_fy = null,
+        renewal_needs_owner_approval = false
     where id = p_subscription_id;
 
   update renewals
     set decision = 'opted_in', decided_at = now(), decided_by = v_email,
-        opt_in_date = current_date, opted_in_by = v_email
+        opt_in_date = current_date, opted_in_by = v_email, awaiting_owner_approval = false
     where subscription_id = p_subscription_id and fiscal_year = v_sub.open_renewal_fy;
 end;
 $$;
@@ -1657,9 +1733,99 @@ begin
     where id = p_subscription_id;
 
   update renewals
-    set decision = 'opted_out', decided_at = now(), decided_by = v_email
+    set decision = 'opted_out', decided_at = now(), decided_by = v_email, awaiting_owner_approval = false
     where subscription_id = p_subscription_id and fiscal_year = v_sub.open_renewal_fy;
 end;
+$$;
+
+-- ─── RPC: approve_renewal / decline_renewal ────────────────────────────────────
+-- Completes or rejects a renewal parked by opt_in_renewal() because the
+-- SuiteKey changed. Decline behaves like an opt-out.
+create or replace function approve_renewal(p_subscription_id uuid)
+returns table(user_email text, license_name text, suite_key text, fiscal_year int)
+language plpgsql security definer as $$
+declare
+  v_email text := require_profile_email();
+  v_sub subscriptions%rowtype;
+  v_ren renewals%rowtype;
+  v_license_name text;
+begin
+  select * into v_sub from subscriptions where id = p_subscription_id;
+  if v_sub.id is null then raise exception 'subscription not found'; end if;
+  select * into v_ren from renewals r
+    where r.subscription_id = p_subscription_id and r.fiscal_year = v_sub.open_renewal_fy and r.awaiting_owner_approval;
+  if v_ren.id is null then raise exception 'no renewal is awaiting approval on this subscription'; end if;
+  if not coalesce((is_admin() or can_approve_renewal_for_key(v_sub.suite_key)), false) then
+    raise exception 'not authorized to approve this renewal';
+  end if;
+
+  update subscriptions
+    set fy = v_ren.fiscal_year, renewal_status = 'opted_in', open_renewal_fy = null,
+        renewal_needs_owner_approval = false
+    where id = p_subscription_id;
+
+  update renewals
+    set decision = 'opted_in', decided_at = now(), decided_by = v_email,
+        opt_in_date = current_date, opted_in_by = coalesce(v_ren.requested_by, v_sub.user_email),
+        awaiting_owner_approval = false
+    where id = v_ren.id;
+
+  select l.name into v_license_name from licenses l where l.id = v_sub.license_id;
+  insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, notes, ip_address)
+  values ('approved', p_subscription_id, v_license_name, v_sub.user_email, v_sub.suite_key, v_email,
+          'renewal for FY' || v_ren.fiscal_year || ' approved by SuiteKey owner', current_client_ip());
+
+  return query select v_sub.user_email, v_license_name, v_sub.suite_key, v_ren.fiscal_year;
+end;
+$$;
+
+create or replace function decline_renewal(p_subscription_id uuid, p_notes text default null)
+returns table(user_email text, license_name text, suite_key text, fiscal_year int)
+language plpgsql security definer as $$
+declare
+  v_email text := require_profile_email();
+  v_sub subscriptions%rowtype;
+  v_ren renewals%rowtype;
+  v_license_name text;
+begin
+  select * into v_sub from subscriptions where id = p_subscription_id;
+  if v_sub.id is null then raise exception 'subscription not found'; end if;
+  select * into v_ren from renewals r
+    where r.subscription_id = p_subscription_id and r.fiscal_year = v_sub.open_renewal_fy and r.awaiting_owner_approval;
+  if v_ren.id is null then raise exception 'no renewal is awaiting approval on this subscription'; end if;
+  if not coalesce((is_admin() or can_approve_renewal_for_key(v_sub.suite_key)), false) then
+    raise exception 'not authorized to decline this renewal';
+  end if;
+
+  -- Same end state as the requester opting out.
+  update subscriptions set renewal_status = 'opted_out', open_renewal_fy = null where id = p_subscription_id;
+  update renewals
+    set decision = 'opted_out', decided_at = now(), decided_by = v_email, awaiting_owner_approval = false
+    where id = v_ren.id;
+
+  select l.name into v_license_name from licenses l where l.id = v_sub.license_id;
+  insert into audit_log (action, subscription_id, license_name, user_email, suite_key, performed_by, notes, ip_address)
+  values ('declined', p_subscription_id, v_license_name, v_sub.user_email, v_sub.suite_key, v_email,
+          'renewal for FY' || v_ren.fiscal_year || ' declined by SuiteKey owner' || coalesce(': ' || nullif(trim(p_notes), ''), ''),
+          current_client_ip());
+
+  return query select v_sub.user_email, v_license_name, v_sub.suite_key, v_ren.fiscal_year;
+end;
+$$;
+
+-- ─── RPC: get_my_pending_renewal_approvals ─────────────────────────────────────
+-- Same scoping rule as get_my_pending_approvals(): not admin-inclusive, only
+-- what the caller can personally act on. Feeds the Action Center.
+create or replace function get_my_pending_renewal_approvals()
+returns table(id uuid, user_email text, suite_key text, license_name text, fiscal_year int)
+language sql stable security definer as $$
+  select s.id, s.user_email, s.suite_key, l.name, r.fiscal_year
+  from renewals r
+  join subscriptions s on s.id = r.subscription_id and s.open_renewal_fy = r.fiscal_year
+  join licenses l on l.id = s.license_id
+  where r.awaiting_owner_approval
+    and can_approve_renewal_for_key(s.suite_key)
+  order by r.reminder_sent_at nulls last
 $$;
 
 -- ─── RPC: update_subscription_details ──────────────────────────────────────────
@@ -2564,11 +2730,13 @@ declare
     'admin_list_department_approvals', 'admin_merge_suite_key', 'admin_remove_area_discount',
     'admin_remove_department_approval', 'admin_save_announcement', 'admin_set_role',
     'admin_update_ministry_id', 'admin_update_subscription_suite_key', 'admin_update_suite_key_owner',
-    'approve_subscription', 'calc_prorated_cost', 'calendar_month_span', 'calendar_month_span_exact',
-    'cancel_subscription', 'confirm_sk_ownership', 'create_link_token', 'current_client_ip',
-    'deactivate_license', 'decline_subscription', 'deny_sk_ownership', 'fy_boundary_months',
+    'approve_renewal', 'approve_subscription', 'calc_prorated_cost', 'calendar_month_span',
+    'calendar_month_span_exact', 'can_approve_renewal_for_key', 'cancel_subscription', 'confirm_sk_ownership',
+    'create_link_token', 'current_client_ip', 'deactivate_license', 'decline_renewal', 'decline_subscription',
+    'deny_sk_ownership', 'fy_boundary_months',
     'get_admin_emails', 'get_area_discounted_price', 'get_finance_export', 'get_last_team_import',
-    'get_my_pending_approvals', 'get_my_pending_provisioning', 'get_my_pending_sk_verifications',
+    'get_my_pending_approvals', 'get_my_pending_provisioning', 'get_my_pending_renewal_approvals',
+    'get_my_pending_sk_verifications',
     'get_my_suite_keys', 'get_seat_provisioning_fields', 'get_suite_key_owner', 'get_suite_key_spend',
     'get_team_spend', 'is_eligible_staff_email', 'is_manager_of', 'is_org_manager',
     'is_service_manager_any', 'is_suite_key_owner_any', 'opt_in_renewal', 'opt_out_renewal',
